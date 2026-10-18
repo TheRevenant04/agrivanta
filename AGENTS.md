@@ -75,6 +75,6 @@ uv run main.py         # run the sample script
 Test, lint, and build commands do not exist yet; add them to this file when
 the toolchain from `_docs/tasks.md` Phase 0 is in place.
 
-Documents
+## Process
 
-- `_docs/process.md` - how work is organized
+- [_docs/process.md](_docs/process.md) - how work is organized
