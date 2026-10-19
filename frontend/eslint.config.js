@@ -20,5 +20,45 @@ export default tseslint.config(
       globals: globals.browser,
     },
   },
+  {
+    // Only the services layer may talk to the backend. Everything else must
+    // go through `useServices()` so both implementations stay interchangeable.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/services/**'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'fetch',
+          message: 'Call the typed services layer instead of fetch directly.',
+        },
+        {
+          name: 'XMLHttpRequest',
+          message:
+            'Call the typed services layer instead of XMLHttpRequest directly.',
+        },
+      ],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'axios',
+              message:
+                'Call the typed services layer instead of axios directly.',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "NewExpression[callee.name='XMLHttpRequest']",
+          message:
+            'Call the typed services layer instead of XMLHttpRequest directly.',
+        },
+      ],
+    },
+  },
   prettier,
 );
