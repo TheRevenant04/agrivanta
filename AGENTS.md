@@ -23,10 +23,15 @@ unless the user directs otherwise.
 ## Repository layout
 
 ``` text
-_docs/          Product plan, backlog, and agent workflow rules
-main.py         Sample script (PyCharm scaffold)
-pyproject.toml  Project metadata and dependencies
-README.md       Setup instructions (currently empty)
+_docs/               Product plan, backlog, and agent workflow rules
+.agents/             Portable agent and skill definitions
+.opencode/           OpenCode agents and the guardrails plugin
+custom-agent/        Headless PM/engineer/QA orchestrator
+mcp-server/          Read-only backlog + issues MCP server
+main.py              Sample script (PyCharm scaffold)
+opencode.json        OpenCode config: permissions, MCP, instructions
+pyproject.toml       Project metadata and dependencies
+README.md            Setup instructions (currently empty)
 ```
 
 ## Required reading
@@ -37,6 +42,9 @@ Follow these documents in full; they define repository policy:
   — Conventional Commits format, allowed types, staging rules.
 - [`_docs/branching-strategy.md`](_docs/branching-strategy.md) — feature
   branching, branch naming, PR workflow, and safety rules.
+- [`_docs/permissions.md`](_docs/permissions.md) — what agents may and
+  may not do; enforced rules and policy (machine-enforced parts live in
+  `opencode.json` and `.opencode/plugins/guardrails.js`).
 
 Summary of the non-negotiables:
 
@@ -68,8 +76,10 @@ Summary of the non-negotiables:
 ## Commands
 
 ``` bash
-uv sync                # install dependencies
-uv run main.py         # run the sample script
+uv sync                          # install dependencies
+uv run main.py                   # run the sample script
+uv run mcp-server/server.py      # backlog MCP server (normally auto-started by opencode)
+uv run custom-agent/agent.py     # headless issue lifecycle (--issue N, --dry-run)
 ```
 
 Test, lint, and build commands do not exist yet; add them to this file when
@@ -78,3 +88,6 @@ the toolchain from `_docs/tasks.md` Phase 0 is in place.
 ## Process
 
 - [_docs/process.md](_docs/process.md) - how work is organized
+- [_docs/agent-extension-pack.md](_docs/agent-extension-pack.md) -
+  skills, subagents, MCP server, guardrails, and custom agent index
+- [_docs/demo.md](_docs/demo.md) - extension pack walkthrough
