@@ -1,6 +1,7 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupHttp } from './farmSetupHttp';
+import { createActivityPlanningHttp } from './activityPlanningHttp';
 import {
   ApiError,
   InvalidCredentialsError,
@@ -160,5 +161,8 @@ export function createHttpServices(
 
     // Farm setup domains (issue #44) share the same auth/error plumbing.
     ...createFarmSetupHttp(request),
+
+    // Activity planning domains (issue #46) share the same plumbing.
+    ...createActivityPlanningHttp(request),
   };
 }

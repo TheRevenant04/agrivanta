@@ -20,3 +20,14 @@ export { createFarmSetupMock, DEFAULT_FARM } from './farmSetupMock';
 export type { FarmSetupMockOptions, FarmSetupSeed } from './farmSetupMock';
 export { createFarmSetupHttp } from './farmSetupHttp';
 export type { ServiceRequest } from './farmSetupHttp';
+// Activity planning domain (issue #46).
+export * from './activityPlanningRules';
+export {
+  createActivityPlanningMock,
+  DEFAULT_PLANNING_CYCLES,
+} from './activityPlanningMock';
+export type {
+  ActivityPlanningMockOptions,
+  ActivityPlanningSeed,
+} from './activityPlanningMock';
+export { createActivityPlanningHttp } from './activityPlanningHttp';

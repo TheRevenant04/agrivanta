@@ -6,6 +6,10 @@
  * interfaces and never on a concrete transport.
  */
 
+// Activity planning domain (issue #46) — types live in their own file.
+import type { ActivityPlanningServices } from './activityPlanningTypes';
+export * from './activityPlanningTypes';
+
 export interface User {
   id: string;
   email: string;
@@ -175,7 +179,8 @@ export interface FarmSetupServices {
   conversions: ConversionService;
 }
 
-export interface AgrivantaServices extends FarmSetupServices {
+export interface AgrivantaServices
+  extends FarmSetupServices, ActivityPlanningServices {
   auth: AuthService;
 }
 
