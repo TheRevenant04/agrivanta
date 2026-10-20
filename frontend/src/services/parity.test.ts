@@ -1,9 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServices, resolveApiClient } from './createServices';
+import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
 import { createHttpServices } from './httpServices';
 import { createMockServices } from './mockServices';
 import { createMemorySessionStore, type SessionStore } from './sessionStore';
-import type { AgrivantaServices, AuthSession, User } from './types';
+import {
+  isApiError,
+  type AgrivantaServices,
+  type AuthSession,
+  type ConversionInput,
+  type ConversionQuery,
+  type CropInput,
+  type FarmInput,
+  type FieldInput,
+  type UnitInput,
+  type User,
+  type VarietyInput,
+} from './types';
 
 const BASE_URL = 'https://api.agrivanta.test/v1';
 const VALID = { email: 'owner@agrivanta.test', password: 'password123' };
@@ -33,9 +46,11 @@ function readTokenHeader(init: RequestInit | undefined): string | null {
 
 /**
  * Minimal in-memory stand-in for the backend so the HTTP implementation can
- * be exercised with the same expectations as the mock.
+ * be exercised with the same expectations as the mock. The farm setup
+ * endpoints delegate to the shared mock engine (with auth enforced here at
+ * the HTTP boundary) so both implementations are held to one rule set.
  */
-function createFakeBackend(): FakeBackend {
+function createFakeBackend(seed?: FarmSetupSeed): FakeBackend {
   const users = new Map<string, { password: string; user: User }>();
   users.set(VALID.email, {
     password: VALID.password,
@@ -43,6 +58,10 @@ function createFakeBackend(): FakeBackend {
   });
   const sessions = new Map<string, User>();
   const requests: RecordedRequest[] = [];
+  const setup = createFarmSetupMock({
+    seed,
+    requireAuth: () => undefined,
+  });
   let sequence = 1;
 
   async function fetchFn(
@@ -112,6 +131,123 @@ function createFakeBackend(): FakeBackend {
       return new Response(null, { status: 204 });
     }
 
+    // Farm setup endpoints: same routes the HTTP implementation calls.
+    const setupMatch =
+      /\/(farm|fields|crops|varieties|units|conversions)(\/[^/]+)?$/.exec(path);
+
+    if (setupMatch) {
+      const resource = setupMatch[1];
+      const rest = setupMatch[2] ?? '';
+      const token = readTokenHeader(init);
+
+      if (!token || !sessions.has(token)) {
+        return json({ detail: 'Unauthorized' }, 401);
+      }
+
+      const payload: unknown = init.body ? JSON.parse(String(init.body)) : {};
+
+      try {
+        switch (resource) {
+          case 'farm':
+            if (method === 'GET') {
+              return json(await setup.farm.get());
+            }
+            if (method === 'PUT') {
+              return json(await setup.farm.update(payload as FarmInput));
+            }
+            break;
+          case 'fields':
+            if (method === 'GET') {
+              return json(await setup.fields.list());
+            }
+            if (method === 'POST') {
+              return json(
+                await setup.fields.create(payload as FieldInput),
+                201,
+              );
+            }
+            if (method === 'PUT') {
+              return json(
+                await setup.fields.update(rest.slice(1), payload as FieldInput),
+              );
+            }
+            break;
+          case 'crops':
+            if (method === 'GET') {
+              return json(await setup.crops.list());
+            }
+            if (method === 'POST') {
+              return json(await setup.crops.create(payload as CropInput), 201);
+            }
+            if (method === 'PUT') {
+              return json(
+                await setup.crops.update(rest.slice(1), payload as CropInput),
+              );
+            }
+            break;
+          case 'varieties':
+            if (method === 'GET') {
+              const crop = new URL(input).searchParams.get('crop');
+              return json(await setup.varieties.list(crop ?? undefined));
+            }
+            if (method === 'POST') {
+              return json(
+                await setup.varieties.create(payload as VarietyInput),
+                201,
+              );
+            }
+            if (method === 'PUT') {
+              return json(
+                await setup.varieties.update(
+                  rest.slice(1),
+                  payload as VarietyInput,
+                ),
+              );
+            }
+            break;
+          case 'units':
+            if (method === 'GET') {
+              return json(await setup.units.list());
+            }
+            if (method === 'POST') {
+              return json(await setup.units.create(payload as UnitInput), 201);
+            }
+            if (method === 'PUT') {
+              return json(
+                await setup.units.update(rest.slice(1), payload as UnitInput),
+              );
+            }
+            break;
+          case 'conversions':
+            if (rest === '/convert' && method === 'POST') {
+              return json(
+                await setup.conversions.convert(payload as ConversionQuery),
+              );
+            }
+            if (method === 'GET') {
+              return json(await setup.conversions.list());
+            }
+            if (method === 'POST') {
+              return json(
+                await setup.conversions.create(payload as ConversionInput),
+                201,
+              );
+            }
+            break;
+        }
+
+        return json({ detail: 'Not found' }, 404);
+      } catch (error) {
+        if (isApiError(error)) {
+          return json(
+            { detail: error.message, field: error.field },
+            error.status,
+          );
+        }
+        throw error;
+      }
+    }
+
     return json({ detail: 'Not found' }, 404);
   }
 
@@ -124,21 +260,25 @@ interface Harness {
   requests: RecordedRequest[];
 }
 
-type MakeHarness = () => Harness;
+type MakeHarness = (seed?: FarmSetupSeed) => Harness;
 
 const implementations: Array<[string, MakeHarness]> = [
   [
     'mock',
-    () => {
+    (seed) => {
       const store = createMemorySessionStore();
-      return { services: createMockServices({ store }), store, requests: [] };
+      return {
+        services: createMockServices({ store, farmSetup: seed }),
+        store,
+        requests: [],
+      };
     },
   ],
   [
     'http',
-    () => {
+    (seed) => {
       const store = createMemorySessionStore();
-      const backend = createFakeBackend();
+      const backend = createFakeBackend(seed);
       return {
         services: createHttpServices({
           baseUrl: BASE_URL,
@@ -234,6 +374,264 @@ describe.each(implementations)(
           password: 'again',
         }),
       ).rejects.toMatchObject({ status: 409 });
+    });
+  },
+);
+
+const FARM_SETUP_SEED: FarmSetupSeed = {
+  farm: { id: 'farm-1', name: 'Willow Creek Farm', reportingCurrency: 'USD' },
+  fields: [],
+  crops: [{ id: 'crop-1', name: 'Wheat' }],
+  varieties: [{ id: 'variety-1', cropId: 'crop-1', name: 'Durum' }],
+  units: [
+    { id: 'unit-kg', name: 'Kilogram', baseMeasure: 'mass' },
+    { id: 'unit-lb', name: 'Pound', baseMeasure: 'mass' },
+    { id: 'unit-oz', name: 'Ounce', baseMeasure: 'mass' },
+    { id: 'unit-litre', name: 'Litre', baseMeasure: 'volume' },
+  ],
+  conversions: [
+    { id: 'conv-1', fromUnitId: 'unit-kg', toUnitId: 'unit-lb', factor: 2.2 },
+  ],
+};
+
+describe.each(implementations)(
+  '%s implementation farm setup conformance',
+  (_name, make) => {
+    let harness: Harness;
+
+    beforeEach(async () => {
+      harness = make(FARM_SETUP_SEED);
+      await harness.services.auth.login(VALID);
+    });
+
+    it('reads the farm and saves an update with the currency normalised', async () => {
+      await expect(harness.services.farm.get()).resolves.toEqual({
+        id: 'farm-1',
+        name: 'Willow Creek Farm',
+        reportingCurrency: 'USD',
+      });
+
+      const saved = await harness.services.farm.update({
+        name: 'Riverbend Farm',
+        reportingCurrency: 'eur',
+      });
+      expect(saved).toEqual({
+        id: 'farm-1',
+        name: 'Riverbend Farm',
+        reportingCurrency: 'EUR',
+      });
+    });
+
+    it('rejects a blank farm name and an invalid currency', async () => {
+      await expect(
+        harness.services.farm.update({
+          name: '   ',
+          reportingCurrency: 'USD',
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        field: 'name',
+        message: 'Farm name is required.',
+      });
+
+      await expect(
+        harness.services.farm.update({
+          name: 'Farm',
+          reportingCurrency: 'dollars',
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        field: 'reportingCurrency',
+        message: 'Reporting currency must be a three-letter code such as USD.',
+      });
+    });
+
+    it('rejects a blank field name and saves nothing', async () => {
+      await expect(
+        harness.services.fields.create({ name: '  ', area: '10' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        field: 'name',
+        message: 'Field name is required.',
+      });
+
+      await expect(harness.services.fields.list()).resolves.toEqual([]);
+    });
+
+    it.each([
+      ['-5', 'Area cannot be negative.'],
+      ['abc', 'Area must be a number.'],
+      ['', 'Area must be a number.'],
+    ])('rejects area %s with the backend rule', async (area, message) => {
+      await expect(
+        harness.services.fields.create({ name: 'South 12', area }),
+      ).rejects.toMatchObject({ status: 400, field: 'area', message });
+
+      await expect(harness.services.fields.list()).resolves.toEqual([]);
+    });
+
+    it('creates a field and returns it from the list', async () => {
+      const created = await harness.services.fields.create({
+        name: 'North 40',
+        area: '40',
+      });
+
+      expect(created).toMatchObject({
+        id: expect.any(String),
+        name: 'North 40',
+        area: 40,
+      });
+      await expect(harness.services.fields.list()).resolves.toEqual([created]);
+    });
+
+    it('requires a base measure category for a new unit', async () => {
+      await expect(
+        harness.services.units.create({ name: 'Gallon', baseMeasure: '' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        field: 'baseMeasure',
+        message:
+          'A base measure category (mass, volume, or count) is required.',
+      });
+
+      await expect(harness.services.units.list()).resolves.toHaveLength(4);
+    });
+
+    it('rejects an unknown base measure category and a duplicate unit', async () => {
+      await expect(
+        harness.services.units.create({ name: 'Ton', baseMeasure: 'weight' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        field: 'baseMeasure',
+        message: 'Base measure must be one of: mass, volume, count.',
+      });
+
+      await expect(
+        harness.services.units.create({
+          name: 'kilogram',
+          baseMeasure: 'mass',
+        }),
+      ).rejects.toMatchObject({ status: 409, field: 'name' });
+    });
+
+    it('creates a variety for a crop and lists varieties per crop', async () => {
+      const created = await harness.services.varieties.create({
+        cropId: 'crop-1',
+        name: 'Spelt',
+      });
+
+      expect(created).toMatchObject({ cropId: 'crop-1', name: 'Spelt' });
+      await expect(harness.services.varieties.list('crop-1')).resolves.toEqual([
+        expect.objectContaining({ name: 'Durum' }),
+        expect.objectContaining({ name: 'Spelt' }),
+      ]);
+      await expect(harness.services.varieties.list('crop-2')).resolves.toEqual(
+        [],
+      );
+
+      await expect(
+        harness.services.varieties.create({ cropId: 'missing', name: 'X' }),
+      ).rejects.toMatchObject({
+        status: 404,
+        field: 'cropId',
+        message: 'The selected crop does not exist.',
+      });
+    });
+
+    it('rejects a blank variety name', async () => {
+      await expect(
+        harness.services.varieties.create({ cropId: 'crop-1', name: ' ' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        field: 'name',
+        message: 'Variety name is required.',
+      });
+    });
+
+    it('adds a conversion rule and converts with it', async () => {
+      const rule = await harness.services.conversions.create({
+        fromUnitId: 'unit-kg',
+        toUnitId: 'unit-oz',
+        factor: '35.274',
+      });
+      expect(rule).toMatchObject({ factor: 35.274 });
+
+      const result = await harness.services.conversions.convert({
+        fromUnitId: 'unit-kg',
+        toUnitId: 'unit-oz',
+        quantity: '2',
+      });
+      expect(result.converted).toBeCloseTo(70.548);
+    });
+
+    it('rejects a non-positive factor and a duplicate rule', async () => {
+      await expect(
+        harness.services.conversions.create({
+          fromUnitId: 'unit-lb',
+          toUnitId: 'unit-oz',
+          factor: '-2',
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        field: 'factor',
+        message: 'Conversion factor must be a positive number.',
+      });
+
+      await expect(
+        harness.services.conversions.create({
+          fromUnitId: 'unit-kg',
+          toUnitId: 'unit-lb',
+          factor: '1',
+        }),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it("raises the backend's no rule exists error for an unmatched conversion", async () => {
+      await expect(
+        harness.services.conversions.convert({
+          fromUnitId: 'unit-kg',
+          toUnitId: 'unit-oz',
+          quantity: 5,
+        }),
+      ).rejects.toMatchObject({
+        status: 404,
+        message: 'No rule exists for converting from "Kilogram" to "Ounce".',
+      });
+    });
+
+    it('names the base measure mismatch across categories', async () => {
+      await expect(
+        harness.services.conversions.convert({
+          fromUnitId: 'unit-kg',
+          toUnitId: 'unit-litre',
+          quantity: 1,
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        message:
+          'Cannot convert "Kilogram" (mass) to "Litre" (volume): base measures do not match.',
+      });
+    });
+
+    it('converts a unit to itself unchanged', async () => {
+      await expect(
+        harness.services.conversions.convert({
+          fromUnitId: 'unit-kg',
+          toUnitId: 'unit-kg',
+          quantity: 7,
+        }),
+      ).resolves.toMatchObject({ factor: 1, converted: 7 });
+    });
+
+    it('rejects farm setup requests without a session with 401', async () => {
+      const anonymous = make(FARM_SETUP_SEED);
+
+      await expect(anonymous.services.fields.list()).rejects.toMatchObject({
+        status: 401,
+      });
+      await expect(anonymous.services.farm.get()).rejects.toMatchObject({
+        status: 401,
+      });
     });
   },
 );
