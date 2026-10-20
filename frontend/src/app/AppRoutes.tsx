@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthBootstrap } from '../auth/AuthBootstrap';
 import { AppShell } from '../components/AppShell';
 import { ProtectedRoute } from '../components/ProtectedRoute';
+import { ActivitiesPage } from '../pages/ActivitiesPage';
+import { ActivityTemplatesPage } from '../pages/ActivityTemplatesPage';
 import { CropsPage } from '../pages/CropsPage';
 import { ConversionsPage } from '../pages/ConversionsPage';
 import { DashboardPage } from '../pages/DashboardPage';
@@ -27,6 +29,12 @@ export function AppRoutes() {
             <Route path="/varieties" element={<VarietiesPage />} />
             <Route path="/units" element={<UnitsPage />} />
             <Route path="/conversions" element={<ConversionsPage />} />
+            {/* Activity planning screens (issue #46). */}
+            <Route path="/activities" element={<ActivitiesPage />} />
+            <Route
+              path="/activity-templates"
+              element={<ActivityTemplatesPage />}
+            />
           </Route>
         </Route>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
