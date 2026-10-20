@@ -35,7 +35,147 @@ export interface AuthService {
   me(): Promise<User>;
 }
 
-export interface AgrivantaServices {
+// ---------------------------------------------------------------------------
+// Farm setup domains (farm, fields, crops, varieties, units, conversions)
+// ---------------------------------------------------------------------------
+
+/** Allowed base-measure categories for a unit of measure. */
+export type BaseMeasureCategory = 'mass' | 'volume' | 'count';
+
+export interface Farm {
+  id: string;
+  name: string;
+  /** Three-letter reporting currency code, e.g. `USD`. */
+  reportingCurrency: string;
+}
+
+export interface FarmInput {
+  name: string;
+  reportingCurrency: string;
+}
+
+export interface Field {
+  id: string;
+  farmId: string;
+  name: string;
+  area: number;
+  notes?: string;
+}
+
+export interface FieldInput {
+  name: string;
+  /** Sent as typed so a non-numeric value reaches the backend's rule. */
+  area: string | number;
+  notes?: string;
+}
+
+export interface Crop {
+  id: string;
+  name: string;
+}
+
+export interface CropInput {
+  name: string;
+}
+
+export interface Variety {
+  id: string;
+  cropId: string;
+  name: string;
+}
+
+export interface VarietyInput {
+  cropId: string;
+  name: string;
+}
+
+export interface Unit {
+  id: string;
+  name: string;
+  baseMeasure: BaseMeasureCategory;
+}
+
+export interface UnitInput {
+  name: string;
+  /** Sent as typed so a missing/invalid category reaches the backend rule. */
+  baseMeasure: string;
+}
+
+export interface UnitConversion {
+  id: string;
+  fromUnitId: string;
+  toUnitId: string;
+  factor: number;
+}
+
+export interface ConversionInput {
+  fromUnitId: string;
+  toUnitId: string;
+  factor: string | number;
+}
+
+export interface ConversionQuery {
+  fromUnitId: string;
+  toUnitId: string;
+  quantity: string | number;
+}
+
+export interface ConversionResult {
+  fromUnitId: string;
+  toUnitId: string;
+  quantity: number;
+  factor: number;
+  converted: number;
+}
+
+export interface FarmService {
+  get(): Promise<Farm>;
+  update(input: FarmInput): Promise<Farm>;
+}
+
+export interface FieldService {
+  list(): Promise<Field[]>;
+  create(input: FieldInput): Promise<Field>;
+  update(id: string, input: FieldInput): Promise<Field>;
+}
+
+export interface CropService {
+  list(): Promise<Crop[]>;
+  create(input: CropInput): Promise<Crop>;
+  update(id: string, input: CropInput): Promise<Crop>;
+}
+
+export interface VarietyService {
+  /** When `cropId` is given, only varieties of that crop are returned. */
+  list(cropId?: string): Promise<Variety[]>;
+  create(input: VarietyInput): Promise<Variety>;
+  update(id: string, input: VarietyInput): Promise<Variety>;
+}
+
+export interface UnitService {
+  list(): Promise<Unit[]>;
+  create(input: UnitInput): Promise<Unit>;
+  update(id: string, input: UnitInput): Promise<Unit>;
+}
+
+export interface ConversionService {
+  list(): Promise<UnitConversion[]>;
+  create(input: ConversionInput): Promise<UnitConversion>;
+  /** Converts a quantity; raises the backend's "no rule exists" error. */
+  convert(query: ConversionQuery): Promise<ConversionResult>;
+}
+
+/** The farm-setup domains exposed by the services layer. */
+export interface FarmSetupServices {
+  farm: FarmService;
+  fields: FieldService;
+  crops: CropService;
+  varieties: VarietyService;
+  units: UnitService;
+  conversions: ConversionService;
+}
+
+export interface AgrivantaServices extends FarmSetupServices {
   auth: AuthService;
 }
 
@@ -46,11 +186,18 @@ export interface AgrivantaServices {
  */
 export class ApiError extends Error {
   readonly status: number;
+  /**
+   * Input field the error belongs to (e.g. `name`, `area`), so forms can
+   * render the backend message inline next to the offending control.
+   * Absent for form-level errors.
+   */
+  readonly field?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, field?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.field = field;
   }
 }
 

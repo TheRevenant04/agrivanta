@@ -1,5 +1,6 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
+import { createFarmSetupHttp } from './farmSetupHttp';
 import {
   ApiError,
   InvalidCredentialsError,
@@ -26,6 +27,41 @@ export interface HttpServicesOptions {
 
 function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+/**
+ * Extracts the backend's message (and offending field, when reported) from
+ * an error response so forms can render it inline. Supports both a
+ * `{ detail, field }` envelope and a field-keyed validation map such as
+ * `{ name: ["This field is required."] }`.
+ */
+async function readErrorBody(
+  response: Response,
+): Promise<{ message?: string; field?: string }> {
+  try {
+    const payload: unknown = await response.json();
+
+    if (typeof payload === 'object' && payload !== null) {
+      const record = payload as Record<string, unknown>;
+
+      if (typeof record.detail === 'string') {
+        return {
+          message: record.detail,
+          field: typeof record.field === 'string' ? record.field : undefined,
+        };
+      }
+
+      for (const [field, value] of Object.entries(record)) {
+        if (Array.isArray(value) && typeof value[0] === 'string') {
+          return { message: value[0], field };
+        }
+      }
+    }
+  } catch {
+    // Non-JSON error bodies fall back to the generic message below.
+  }
+
+  return {};
 }
 
 /**
@@ -70,9 +106,12 @@ export function createHttpServices(
     }
 
     if (!response.ok) {
+      const detail = await readErrorBody(response);
       throw new ApiError(
-        `Request to ${path} failed with status ${response.status}.`,
+        detail.message ??
+          `Request to ${path} failed with status ${response.status}.`,
         response.status,
+        detail.field,
       );
     }
 
@@ -118,5 +157,8 @@ export function createHttpServices(
         return request<User>('/auth/me', { method: 'GET' }, true);
       },
     },
+
+    // Farm setup domains (issue #44) share the same auth/error plumbing.
+    ...createFarmSetupHttp(request),
   };
 }
