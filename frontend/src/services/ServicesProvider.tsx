@@ -42,7 +42,28 @@ function withUnauthorizedHandling(
     me: guard(() => services.auth.me(), onUnauthorized),
   };
 
-  return { ...services, auth };
+  const guardDomain = <D,>(domain: D): D => {
+    const guarded = Object.fromEntries(
+      Object.entries(domain as Record<string, unknown>).map(([key, value]) => [
+        key,
+        typeof value === 'function'
+          ? guard(value as (...args: never[]) => Promise<never>, onUnauthorized)
+          : value,
+      ]),
+    );
+    return guarded as unknown as D;
+  };
+
+  return {
+    ...services,
+    auth,
+    farm: guardDomain(services.farm),
+    fields: guardDomain(services.fields),
+    crops: guardDomain(services.crops),
+    varieties: guardDomain(services.varieties),
+    units: guardDomain(services.units),
+    conversions: guardDomain(services.conversions),
+  };
 }
 
 export interface ServicesProviderProps {
