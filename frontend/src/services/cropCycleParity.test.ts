@@ -80,7 +80,10 @@ function createCropCycleBackend(seed?: CropCycle[]): {
         return json(await cycles.cropCycles.list(field ?? undefined));
       }
       if (!id && method === 'POST') {
-        return json(await cycles.cropCycles.create(payload as CropCycleInput), 201);
+        return json(
+          await cycles.cropCycles.create(payload as CropCycleInput),
+          201,
+        );
       }
       if (id && method === 'PUT') {
         return json(
@@ -94,7 +97,10 @@ function createCropCycleBackend(seed?: CropCycle[]): {
       return json({ detail: 'Not found' }, 404);
     } catch (error) {
       if (isApiError(error)) {
-        return json({ detail: error.message, field: error.field }, error.status);
+        return json(
+          { detail: error.message, field: error.field },
+          error.status,
+        );
       }
       throw error;
     }
@@ -173,9 +179,9 @@ describe.each(implementations)(
     it('rejects crop cycle requests without a session with 401', async () => {
       const anonymous = make(SEED);
 
-      await expect(anonymous.services.cropCycles.list()).rejects.toMatchObject(
-        { status: 401 },
-      );
+      await expect(anonymous.services.cropCycles.list()).rejects.toMatchObject({
+        status: 401,
+      });
       await expect(
         anonymous.services.cropCycles.create({
           fieldId: 'field-1',
@@ -207,9 +213,9 @@ describe.each(implementations)(
       await empty.services.auth.login(VALID);
 
       await expect(empty.services.cropCycles.list()).resolves.toEqual([]);
-      await expect(
-        empty.services.cropCycles.list('field-1'),
-      ).resolves.toEqual([]);
+      await expect(empty.services.cropCycles.list('field-1')).resolves.toEqual(
+        [],
+      );
     });
 
     it('keeps two overlapping cycles on the same field in the list', async () => {
@@ -277,31 +283,26 @@ describe.each(implementations)(
 
       await expect(
         harness.services.cropCycles.list('field-1'),
-      ).resolves.toEqual([
-        expect.objectContaining({ id: 'cycle-1' }),
-      ]);
+      ).resolves.toEqual([expect.objectContaining({ id: 'cycle-1' })]);
     });
 
     it.each([
       ['fieldId', 'Select a field for this crop cycle.'],
       ['cropId', 'Select a crop for this crop cycle.'],
       ['varietyId', 'Select a variety for this crop cycle.'],
-    ] as const)(
-      'rejects a blank %s on create',
-      async (field, message) => {
-        const input: CropCycleInput = {
-          fieldId: 'field-1',
-          cropId: 'crop-1',
-          varietyId: 'variety-1',
-          startDate: '2026-04-01',
-        };
-        input[field] = '   ';
+    ] as const)('rejects a blank %s on create', async (field, message) => {
+      const input: CropCycleInput = {
+        fieldId: 'field-1',
+        cropId: 'crop-1',
+        varietyId: 'variety-1',
+        startDate: '2026-04-01',
+      };
+      input[field] = '   ';
 
-        await expect(
-          harness.services.cropCycles.create(input),
-        ).rejects.toMatchObject({ status: 400, field, message });
-      },
-    );
+      await expect(
+        harness.services.cropCycles.create(input),
+      ).rejects.toMatchObject({ status: 400, field, message });
+    });
 
     it.each([
       ['2026-02-31', 'Start date must be a valid calendar date.'],

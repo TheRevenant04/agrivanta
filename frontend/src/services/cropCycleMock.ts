@@ -78,7 +78,9 @@ export function createCropCycleMock(
   }
 
   /** Validates a create payload down to the stored cycle shape. */
-  function parseCreate(input: CropCycleInput): Omit<CropCycle, 'id' | 'status'> {
+  function parseCreate(
+    input: CropCycleInput,
+  ): Omit<CropCycle, 'id' | 'status'> {
     const fieldId = requireReferenceId(
       input.fieldId,
       CYCLE_ERRORS.cycleFieldRequired,
