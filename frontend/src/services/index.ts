@@ -20,3 +20,8 @@ export { createFarmSetupMock, DEFAULT_FARM } from './farmSetupMock';
 export type { FarmSetupMockOptions, FarmSetupSeed } from './farmSetupMock';
 export { createFarmSetupHttp } from './farmSetupHttp';
 export type { ServiceRequest } from './farmSetupHttp';
+// Crop cycle domain (issue #45).
+export * from './cropCycleRules';
+export { createCropCycleMock } from './cropCycleMock';
+export type { CropCycleMockOptions } from './cropCycleMock';
+export { createCropCycleHttp } from './cropCycleHttp';
