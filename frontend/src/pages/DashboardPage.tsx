@@ -25,13 +25,13 @@ export function DashboardPage() {
   }
 
   return (
-    <main>
+    <section>
       <h1>Dashboard</h1>
       <p>Signed in as {user?.email}</p>
       {user ? <p>Role: {user.role}</p> : null}
       <button type="button" onClick={handleSignOut} disabled={signingOut}>
         {signingOut ? 'Signing out…' : 'Sign out'}
       </button>
-    </main>
+    </section>
   );
 }
