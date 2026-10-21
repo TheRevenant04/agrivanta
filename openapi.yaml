@@ -45,14 +45,23 @@ info:
     the frontend maps explicitly:
 
     - `400` with `field` for any failed form input (blank dates, non-numeric
-      amounts, unknown enum values, illegal activity status transitions,
-      sold-exceeds-harvested sales, movements that would drive stock below
-      zero, edits/deletes of posted expenses).
+      amounts, unknown enum values including unknown activity status values,
+      sold-exceeds-harvested sales, unknown customer/harvest references on
+      sales, movements that would drive stock below zero, edits/deletes of
+      posted expenses).
     - `404` for unknown referenced records (field, crop, variety, unit, crop
       cycle, activity type, inventory item, conversion rule).
     - `409` for conflicts: duplicate crop/unit names, duplicate conversion
-      pairs, and crop-cycle lifecycle violations (editing or re-closing a
-      closed cycle).
+      pairs, duplicate activity-type names, duplicate registration emails,
+      illegal activity status transitions, and crop-cycle lifecycle
+      violations (editing or re-closing a closed cycle).
+
+    ## Scope
+
+    Role-based authorization (`403`) is out of scope for this contract: the
+    frontend performs no role checks yet. Reversal-and-replacement flows and
+    audit-history endpoints (backlog tasks 21/22) are not yet called by the
+    frontend and are intentionally absent.
 servers:
   - url: http://localhost:8000/api
     description: Local development backend (configurable at runtime).
@@ -112,7 +121,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthSession'
         '400':
-          description: Registration input rejected (e.g. missing email or password).
+          description: Registration input rejected (e.g. missing email or password). The mock uses 422 for this case; the frontend treats 400 and 422 identically.
+        '409':
+          description: An account with that email already exists.
 
   /auth/logout:
     post:
@@ -122,6 +133,8 @@ paths:
       responses:
         '204':
           description: Logged out. The frontend clears the stored token regardless of this response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /auth/me:
     get:
@@ -175,6 +188,8 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No farm is configured for this account.
 
   /fields:
     get:
@@ -658,6 +673,8 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: "An activity type with this name already exists (`field: name`)."
 
   /activities/cycles:
     get:
@@ -758,10 +775,12 @@ paths:
       operationId: updateActivityStatus
       summary: Move an activity to a new status
       description: >
-        Allowed transitions are planned → in_progress → completed. The API
-        rejects illegal transitions (e.g. completed → in_progress) and unknown
-        status values with 400. `overdue` is produced by a server-side job and
-        is not settable by the client.
+        Allowed transitions are planned → in_progress, in_progress →
+        completed, and overdue → in_progress (an overdue activity can still
+        be started); completed is terminal. The API rejects an illegal
+        transition (e.g. completed → in_progress) with 409 on `status`, and
+        an unknown status value with 400 on `status`. `overdue` is produced
+        by a server-side job and is not settable by the client.
       requestBody:
         required: true
         content:
@@ -781,11 +800,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/Activity'
         '400':
-          $ref: '#/components/responses/ValidationError'
+          description: "Unknown status value (`field: status`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: "Illegal status transition, e.g. completed → in_progress (`field: status`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /activities/{activityId}/resource-needs:
     parameters:
@@ -1042,6 +1071,10 @@ paths:
       tags: [expenses]
       operationId: postExpense
       summary: Post a draft expense (draft → posted)
+      description: >
+        Re-posting an already-posted expense is a no-op (200, unchanged
+        expense); the frontend never sends this request for a posted
+        expense, so the contract treats it as undefined-but-harmless.
       responses:
         '200':
           description: The posted expense.
@@ -1063,7 +1096,8 @@ paths:
       summary: Upload a receipt/invoice attachment for an expense
       description: >
         Multipart upload; the file is sent under the form field name `file`.
-        No JSON content-type header is set.
+        No JSON content-type header is set. Attachments cannot be added to a
+        posted expense (posted transactions are immutable).
       requestBody:
         required: true
         content:
@@ -1236,7 +1270,9 @@ paths:
         The sale draws from one harvest. A quantity greater than
         harvested-minus-already-sold must be rejected with 400 on `quantity`
         ("Maximum sellable is N.") so the form can show it next to the
-        quantity field.
+        quantity field. An unknown customer or harvest is also rejected with
+        400 (on `customerId` / `harvestId` respectively), not 404, so the
+        form can attach the message to the offending control.
       requestBody:
         required: true
         content:
@@ -1251,22 +1287,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Sale'
         '400':
-          description: "Validation failure, including sold-exceeds-harvested (`field: quantity`)."
+          description: "Validation failure, including unknown customer/harvest (`field: customerId` or `field: harvestId`) and sold-exceeds-harvested (`field: quantity`)."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '404':
-          description: The referenced customer or harvest does not exist.
 
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
       description: >
         Opaque-or-JWT bearer token obtained from `/auth/login` or
         `/auth/register`, sent as `Authorization: Bearer <token>`.
@@ -1346,18 +1379,28 @@ components:
 
   schemas:
     Error:
-      type: object
       description: >
-        Error envelope. The frontend also accepts Django REST Framework-style
-        field-keyed maps such as `{"name": ["This field is required."]}` and
-        treats the first array-of-strings entry as `{field, message}`.
-      required: [detail]
-      properties:
-        detail:
-          type: string
-        field:
-          type: string
-          description: Offending input field name, when the error belongs to one.
+        Error envelope. Either `{detail, field?}` or a Django REST
+        Framework-style field-keyed map such as
+        `{"name": ["This field is required."]}`; the frontend treats the
+        first array-of-strings entry as `{field, message}`.
+      oneOf:
+        - type: object
+          required: [detail]
+          properties:
+            detail:
+              type: string
+            field:
+              type: string
+              description: Offending input field name, when the error belongs to one.
+        - type: object
+          description: Field-keyed validation map (DRF style); each value is a list of messages for that field.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          propertyNames:
+            pattern: '^(?!detail$).+'
 
     User:
       type: object
