@@ -43,7 +43,10 @@ function createFakeBackend() {
     password: VALID.password,
     user: { id: 'user-owner', email: VALID.email, role: 'owner' },
   });
-  const sessions = new Map<string, { id: string; email: string; role: string }>();
+  const sessions = new Map<
+    string,
+    { id: string; email: string; role: string }
+  >();
   const engine = createExpensePaymentMock({ requireAuth: () => undefined });
 
   /** Maps a services-layer error onto the backend's error envelope. */

@@ -175,18 +175,13 @@ export interface FarmSetupServices {
   conversions: ConversionService;
 }
 
-
 // ---------------------------------------------------------------------------
 // Expenses and payments (issues #49, #20, #23, #24)
 // ---------------------------------------------------------------------------
 
 /** The backend's expense categories (task #20). */
 export type ExpenseCategory =
-  | 'inputs'
-  | 'labour'
-  | 'equipment'
-  | 'overhead'
-  | 'other';
+  'inputs' | 'labour' | 'equipment' | 'overhead' | 'other';
 
 /** Posted records are immutable; drafts may still be edited or deleted. */
 export type ExpenseStatus = 'draft' | 'posted';
@@ -264,7 +259,8 @@ export interface ExpensePaymentServices {
   payments: PaymentService;
 }
 
-export interface AgrivantaServices extends FarmSetupServices, ExpensePaymentServices {
+export interface AgrivantaServices
+  extends FarmSetupServices, ExpensePaymentServices {
   auth: AuthService;
 }
 

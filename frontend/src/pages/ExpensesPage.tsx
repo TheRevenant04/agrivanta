@@ -182,7 +182,9 @@ export function ExpensesPage() {
                 {expense.supplier ? <span>{expense.supplier}</span> : null}
                 <span>{expense.status === 'draft' ? 'draft' : 'posted'}</span>
                 {expense.attachments?.length ? (
-                  <span>{expense.attachments[expense.attachments.length - 1].name}</span>
+                  <span>
+                    {expense.attachments[expense.attachments.length - 1].name}
+                  </span>
                 ) : null}
                 {expense.status === 'draft' ? (
                   <>

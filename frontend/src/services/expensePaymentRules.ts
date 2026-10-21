@@ -104,11 +104,7 @@ export function parseExpenseDate(value: string): string {
 /** Checks the category against the backend's seeded list. */
 export function requireCategory(value: string): ExpenseCategory {
   if (!value || !isExpenseCategory(value)) {
-    throw new ApiError(
-      EXPENSE_PAYMENT_ERRORS.categoryInvalid,
-      400,
-      'category',
-    );
+    throw new ApiError(EXPENSE_PAYMENT_ERRORS.categoryInvalid, 400, 'category');
   }
 
   return value;

@@ -1,7 +1,10 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
-import { createExpensePaymentMock, type ExpensePaymentSeed } from './expensePaymentMock';
+import {
+  createExpensePaymentMock,
+  type ExpensePaymentSeed,
+} from './expensePaymentMock';
 import {
   ApiError,
   InvalidCredentialsError,

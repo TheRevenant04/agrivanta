@@ -22,5 +22,8 @@ export { createFarmSetupHttp } from './farmSetupHttp';
 export type { ServiceRequest } from './farmSetupHttp';
 export * from './expensePaymentRules';
 export { createExpensePaymentMock } from './expensePaymentMock';
-export type { ExpensePaymentMockOptions, ExpensePaymentSeed } from './expensePaymentMock';
+export type {
+  ExpensePaymentMockOptions,
+  ExpensePaymentSeed,
+} from './expensePaymentMock';
 export { createExpensePaymentHttp } from './expensePaymentHttp';

@@ -58,7 +58,9 @@ export function createExpensePaymentMock(
       ...attachment,
     })),
   }));
-  const payments: Payment[] = (seed.payments ?? []).map((item) => ({ ...item }));
+  const payments: Payment[] = (seed.payments ?? []).map((item) => ({
+    ...item,
+  }));
 
   const sequence = {
     expense: expenses.length,

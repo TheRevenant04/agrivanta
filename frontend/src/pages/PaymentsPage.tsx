@@ -155,13 +155,9 @@ export function PaymentsPage() {
               id="payment-type"
               name="type"
               value={type}
-              onChange={(event) =>
-                setType(event.target.value as PaymentType)
-              }
+              onChange={(event) => setType(event.target.value as PaymentType)}
               aria-invalid={errors.type ? true : undefined}
-              aria-describedby={
-                errors.type ? 'payment-type-error' : undefined
-              }
+              aria-describedby={errors.type ? 'payment-type-error' : undefined}
             >
               <option value="received">received</option>
               <option value="paid">paid</option>

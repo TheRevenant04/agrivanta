@@ -2,7 +2,10 @@ import { render } from '@testing-library/react';
 import { App } from '../App';
 import type { ExpensePaymentSeed } from '../services/expensePaymentMock';
 import { MOCK_USERS, createMockServices } from '../services/mockServices';
-import { createSessionStore, type SessionStore } from '../services/sessionStore';
+import {
+  createSessionStore,
+  type SessionStore,
+} from '../services/sessionStore';
 import type { AgrivantaServices } from '../services/types';
 
 export interface RenderExpensesOptions {

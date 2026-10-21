@@ -33,9 +33,13 @@ describe('ExpensesPage', () => {
 
     const category = screen.getByLabelText('Category') as HTMLSelectElement;
 
-    expect(
-      Array.from(category.options).map((option) => option.value),
-    ).toEqual(['inputs', 'labour', 'equipment', 'overhead', 'other']);
+    expect(Array.from(category.options).map((option) => option.value)).toEqual([
+      'inputs',
+      'labour',
+      'equipment',
+      'overhead',
+      'other',
+    ]);
 
     expect(screen.getByLabelText('Supplier (optional)')).toBeInTheDocument();
   });

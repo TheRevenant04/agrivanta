@@ -15,9 +15,7 @@ describe('PaymentsPage', () => {
   it('saves a paid payment and lists it', async () => {
     const { services } = await renderExpensesScreen({ route: '/payments' });
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add payment' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Add payment' }));
     fireEvent.change(screen.getByLabelText('Type'), {
       target: { value: 'paid' },
     });
@@ -47,9 +45,7 @@ describe('PaymentsPage', () => {
   it('saves a received payment linked to an expense', async () => {
     const { services } = await renderExpensesScreen({ route: '/payments' });
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add payment' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Add payment' }));
     fireEvent.change(screen.getByLabelText('Type'), {
       target: { value: 'received' },
     });
@@ -82,9 +78,7 @@ describe('PaymentsPage', () => {
   it('shows an inline error for a missing amount and saves nothing', async () => {
     const { services } = await renderExpensesScreen({ route: '/payments' });
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add payment' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Add payment' }));
     fireEvent.change(screen.getByLabelText('Date'), {
       target: { value: '2026-02-12' },
     });
@@ -104,9 +98,7 @@ describe('PaymentsPage', () => {
   it('shows an inline error for a missing date and saves nothing', async () => {
     const { services } = await renderExpensesScreen({ route: '/payments' });
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add payment' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Add payment' }));
     fireEvent.change(screen.getByLabelText('Amount'), {
       target: { value: '30' },
     });
