@@ -31,3 +31,8 @@ export type {
   ActivityPlanningSeed,
 } from './activityPlanningMock';
 export { createActivityPlanningHttp } from './activityPlanningHttp';
+// Crop cycle domain (issue #45).
+export * from './cropCycleRules';
+export { createCropCycleMock } from './cropCycleMock';
+export type { CropCycleMockOptions } from './cropCycleMock';
+export { createCropCycleHttp } from './cropCycleHttp';

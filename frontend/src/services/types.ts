@@ -182,6 +182,8 @@ export interface FarmSetupServices {
 export interface AgrivantaServices
   extends FarmSetupServices, ActivityPlanningServices {
   auth: AuthService;
+  /** Crop cycle domain (issue #45). */
+  cropCycles: CropCycleService;
 }
 
 /**
@@ -234,4 +236,64 @@ export function isUnauthorizedError(
 
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
+}
+
+// ---------------------------------------------------------------------------
+// Crop cycle domain (issue #45)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle state of a crop cycle. Closed cycles are locked
+ * (`_docs/plan.md` §3.1); reopening them is out of scope for now.
+ */
+export type CropCycleStatus = 'open' | 'closed';
+
+export interface CropCycle {
+  id: string;
+  fieldId: string;
+  cropId: string;
+  varietyId: string;
+  /** ISO calendar date (`YYYY-MM-DD`) the cycle starts on. */
+  startDate: string;
+  /** Optional ISO calendar date the cycle ended on. */
+  endDate?: string;
+  status: CropCycleStatus;
+  expectedYield?: number;
+  expectedPrice?: number;
+}
+
+export interface CropCycleInput {
+  fieldId: string;
+  cropId: string;
+  varietyId: string;
+  /**
+   * Sent as a raw string so a blank value reaches the backend's
+   * "start date is required" rule.
+   */
+  startDate: string;
+  endDate?: string;
+  /** Sent as typed so a blank clears and invalid values reach the backend. */
+  expectedYield?: string | number;
+  expectedPrice?: string | number;
+}
+
+/** Only the forecast amounts can be edited after a cycle is created. */
+export interface CropCycleUpdateInput {
+  expectedYield?: string | number;
+  expectedPrice?: string | number;
+}
+
+export interface CropCycleService {
+  /** When `fieldId` is given, only that field's cycles are returned. */
+  list(fieldId?: string): Promise<CropCycle[]>;
+  create(input: CropCycleInput): Promise<CropCycle>;
+  /** Updates the expected yield/price of an open cycle. */
+  update(id: string, input: CropCycleUpdateInput): Promise<CropCycle>;
+  /** Formally closes the cycle; raises on an already-closed cycle. */
+  close(id: string): Promise<CropCycle>;
+}
+
+/** The crop cycle domain exposed by the services layer. */
+export interface CropCycleServices {
+  cropCycles: CropCycleService;
 }

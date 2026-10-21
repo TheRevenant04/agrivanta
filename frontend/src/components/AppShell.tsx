@@ -11,6 +11,8 @@ const NAV_LINKS = [
   // Activity planning screens (issue #46).
   { to: '/activities', label: 'Activities' },
   { to: '/activity-templates', label: 'Templates' },
+  // Crop cycle screens (issue #45).
+  { to: '/cycles', label: 'Crop cycles' },
 ];
 
 /**
