@@ -2,12 +2,19 @@ import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
 import { createInventoryMock, type InventorySeed } from './inventoryMock';
+// Crop cycle domain (issue #45).
+import { createCropCycleMock } from './cropCycleMock';
+import {
+  createActivityPlanningMock,
+  type ActivityPlanningSeed,
+} from './activityPlanningMock';
 import {
   ApiError,
   InvalidCredentialsError,
   UnauthorizedError,
   type AgrivantaServices,
   type AuthSession,
+  type CropCycle,
   type LoginCredentials,
   type RegisterInput,
   type User,
@@ -80,6 +87,10 @@ export interface MockServicesOptions {
   farmSetup?: FarmSetupSeed;
   /** Seed for the inventory domain (issue #47): items and movements. */
   inventory?: InventorySeed;
+  /** Seed for the activity type, cycle, and activity domains (issue #46). */
+  activities?: ActivityPlanningSeed;
+  /** Seed crop cycles for the crop cycle domain (issue #45). */
+  cropCycles?: CropCycle[];
 }
 
 /**
@@ -183,6 +194,18 @@ export function createMockServices(
       requireAuth: requireUser,
       findUnit: async (id) =>
         (await farmSetup.units.list()).find((unit) => unit.id === id) ?? null,
+    }),
+
+    // Activity planning domains (issue #46) share the session requirement.
+    ...createActivityPlanningMock({
+      seed: options.activities,
+      requireAuth: requireUser,
+    }),
+
+    // Crop cycle domain (issue #45) shares the same session requirement.
+    ...createCropCycleMock({
+      seed: options.cropCycles,
+      requireAuth: requireUser,
     }),
   };
 }

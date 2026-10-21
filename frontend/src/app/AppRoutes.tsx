@@ -2,6 +2,10 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthBootstrap } from '../auth/AuthBootstrap';
 import { AppShell } from '../components/AppShell';
 import { ProtectedRoute } from '../components/ProtectedRoute';
+import { ActivitiesPage } from '../pages/ActivitiesPage';
+import { ActivityTemplatesPage } from '../pages/ActivityTemplatesPage';
+// Crop cycle screens (issue #45).
+import { CropCyclesPage } from '../pages/CropCyclesPage';
 import { CropsPage } from '../pages/CropsPage';
 import { ConversionsPage } from '../pages/ConversionsPage';
 import { DashboardPage } from '../pages/DashboardPage';
@@ -29,6 +33,14 @@ export function AppRoutes() {
             <Route path="/units" element={<UnitsPage />} />
             <Route path="/conversions" element={<ConversionsPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
+            {/* Activity planning screens (issue #46). */}
+            <Route path="/activities" element={<ActivitiesPage />} />
+            <Route
+              path="/activity-templates"
+              element={<ActivityTemplatesPage />}
+            />
+            {/* Crop cycle screens (issue #45). */}
+            <Route path="/cycles" element={<CropCyclesPage />} />
           </Route>
         </Route>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
