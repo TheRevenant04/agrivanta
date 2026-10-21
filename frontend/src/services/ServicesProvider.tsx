@@ -63,6 +63,8 @@ function withUnauthorizedHandling(
     varieties: guardDomain(services.varieties),
     units: guardDomain(services.units),
     conversions: guardDomain(services.conversions),
+    // Crop cycle domain (issue #45).
+    cropCycles: guardDomain(services.cropCycles),
   };
 }
 

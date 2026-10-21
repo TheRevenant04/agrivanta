@@ -8,6 +8,8 @@ const NAV_LINKS = [
   { to: '/varieties', label: 'Varieties' },
   { to: '/units', label: 'Units' },
   { to: '/conversions', label: 'Conversions' },
+  // Crop cycle screens (issue #45).
+  { to: '/cycles', label: 'Crop cycles' },
 ];
 
 /**

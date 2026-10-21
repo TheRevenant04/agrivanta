@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthBootstrap } from '../auth/AuthBootstrap';
 import { AppShell } from '../components/AppShell';
 import { ProtectedRoute } from '../components/ProtectedRoute';
+// Crop cycle screens (issue #45).
+import { CropCyclesPage } from '../pages/CropCyclesPage';
 import { CropsPage } from '../pages/CropsPage';
 import { ConversionsPage } from '../pages/ConversionsPage';
 import { DashboardPage } from '../pages/DashboardPage';
@@ -27,6 +29,8 @@ export function AppRoutes() {
             <Route path="/varieties" element={<VarietiesPage />} />
             <Route path="/units" element={<UnitsPage />} />
             <Route path="/conversions" element={<ConversionsPage />} />
+            {/* Crop cycle screens (issue #45). */}
+            <Route path="/cycles" element={<CropCyclesPage />} />
           </Route>
         </Route>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />

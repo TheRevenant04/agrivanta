@@ -1,12 +1,15 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
+// Crop cycle domain (issue #45).
+import { createCropCycleMock } from './cropCycleMock';
 import {
   ApiError,
   InvalidCredentialsError,
   UnauthorizedError,
   type AgrivantaServices,
   type AuthSession,
+  type CropCycle,
   type LoginCredentials,
   type RegisterInput,
   type User,
@@ -77,6 +80,8 @@ export interface MockServicesOptions {
   users?: readonly SeedUser[];
   /** Seed for the farm, field, crop, variety, unit, and conversion domains. */
   farmSetup?: FarmSetupSeed;
+  /** Seed crop cycles for the crop cycle domain (issue #45). */
+  cropCycles?: CropCycle[];
 }
 
 /**
@@ -168,6 +173,12 @@ export function createMockServices(
     // Farm setup domains (issue #44) share the same session requirement.
     ...createFarmSetupMock({
       seed: options.farmSetup,
+      requireAuth: requireUser,
+    }),
+
+    // Crop cycle domain (issue #45) shares the same session requirement.
+    ...createCropCycleMock({
+      seed: options.cropCycles,
       requireAuth: requireUser,
     }),
   };
