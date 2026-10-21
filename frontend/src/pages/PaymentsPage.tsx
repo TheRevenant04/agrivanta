@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
+import { PAYMENT_TYPES } from '../services/expensePaymentRules';
 import { useServices } from '../services/servicesContext';
 import type { Payment, PaymentInput, PaymentType } from '../services/types';
 
@@ -159,8 +160,11 @@ export function PaymentsPage() {
               aria-invalid={errors.type ? true : undefined}
               aria-describedby={errors.type ? 'payment-type-error' : undefined}
             >
-              <option value="received">received</option>
-              <option value="paid">paid</option>
+              {PAYMENT_TYPES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
             </select>
             {errors.type ? (
               <p role="alert" id="payment-type-error">

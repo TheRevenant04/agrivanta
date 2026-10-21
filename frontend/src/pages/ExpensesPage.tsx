@@ -1,17 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
+import { EXPENSE_CATEGORIES } from '../services/expensePaymentRules';
 import { useServices } from '../services/servicesContext';
 import type { Expense, ExpenseCategory } from '../services/types';
-
-/** The backend's expense categories (task #20). */
-const CATEGORIES: ExpenseCategory[] = [
-  'inputs',
-  'labour',
-  'equipment',
-  'overhead',
-  'other',
-];
 
 /**
  * Expense entry screen: drafts can be created, edited, deleted, receipt
@@ -242,7 +234,7 @@ export function ExpensesPage() {
                 errors.category ? 'expense-category-error' : undefined
               }
             >
-              {CATEGORIES.map((option) => (
+              {EXPENSE_CATEGORIES.map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
