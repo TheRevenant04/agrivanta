@@ -8,6 +8,8 @@ const NAV_LINKS = [
   { to: '/varieties', label: 'Varieties' },
   { to: '/units', label: 'Units' },
   { to: '/conversions', label: 'Conversions' },
+  { to: '/harvests', label: 'Harvests' },
+  { to: '/sales', label: 'Sales' },
 ];
 
 /**
