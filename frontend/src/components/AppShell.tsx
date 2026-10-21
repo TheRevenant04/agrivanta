@@ -7,9 +7,17 @@ const NAV_LINKS = [
   { to: '/crops', label: 'Crops' },
   { to: '/varieties', label: 'Varieties' },
   { to: '/units', label: 'Units' },
+  { to: '/expenses', label: 'Expenses' },
+  { to: '/payments', label: 'Payments' },
   { to: '/conversions', label: 'Conversions' },
   { to: '/harvests', label: 'Harvests' },
   { to: '/sales', label: 'Sales' },
+  { to: '/inventory', label: 'Inventory' },
+  // Activity planning screens (issue #46).
+  { to: '/activities', label: 'Activities' },
+  { to: '/activity-templates', label: 'Templates' },
+  // Crop cycle screens (issue #45).
+  { to: '/cycles', label: 'Crop cycles' },
 ];
 
 /**

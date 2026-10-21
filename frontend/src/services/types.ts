@@ -6,6 +6,10 @@
  * interfaces and never on a concrete transport.
  */
 
+// Activity planning domain (issue #46) — types live in their own file.
+import type { ActivityPlanningServices } from './activityPlanningTypes';
+export * from './activityPlanningTypes';
+
 export interface User {
   id: string;
   email: string;
@@ -165,6 +169,57 @@ export interface ConversionService {
   convert(query: ConversionQuery): Promise<ConversionResult>;
 }
 
+// ---------------------------------------------------------------------------
+// Inventory domains (inventory items and stock movements)
+// ---------------------------------------------------------------------------
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  unitId: string;
+  reorderLevel: number;
+  /** Current quantity derived from stock movements (read-only). */
+  currentQuantity: number;
+}
+
+export interface InventoryItemInput {
+  name: string;
+  unitId: string;
+  /** Sent as typed so backend rules can be mirrored. */
+  reorderLevel: string | number;
+}
+
+export type StockMovementType = 'purchase' | 'usage' | 'adjustment';
+
+export interface StockMovement {
+  id: string;
+  itemId: string;
+  type: StockMovementType;
+  quantity: number;
+  date?: string;
+  note?: string;
+}
+
+export interface StockMovementInput {
+  itemId: string;
+  type: StockMovementType;
+  /** Sent as typed so backend rules can be mirrored. */
+  quantity: string | number;
+  date?: string;
+  note?: string;
+}
+
+export interface InventoryItemService {
+  list(): Promise<InventoryItem[]>;
+  create(input: InventoryItemInput): Promise<InventoryItem>;
+  update(id: string, input: InventoryItemInput): Promise<InventoryItem>;
+}
+
+export interface StockMovementService {
+  list(itemId?: string): Promise<StockMovement[]>;
+  create(input: StockMovementInput): Promise<StockMovement>;
+}
+
 /** The farm-setup domains exposed by the services layer. */
 export interface FarmSetupServices {
   farm: FarmService;
@@ -175,11 +230,109 @@ export interface FarmSetupServices {
   conversions: ConversionService;
 }
 
-// Harvest and sale domains (issue #49) extend the services contract here so
-// the rest of the app keeps depending only on `AgrivantaServices`.
+// ---------------------------------------------------------------------------
+// Expenses and payments (issues #49, #20, #23, #24)
+// ---------------------------------------------------------------------------
+
+/** The backend's expense categories (task #20). */
+export type ExpenseCategory =
+  'inputs' | 'labour' | 'equipment' | 'overhead' | 'other';
+
+/** Posted records are immutable; drafts may still be edited or deleted. */
+export type ExpenseStatus = 'draft' | 'posted';
+
+/** Direction of a payment (task #23). */
+export type PaymentType = 'received' | 'paid';
+
+/** A receipt or invoice file linked to an expense (task #24). */
+export interface Attachment {
+  id: string;
+  /** The uploaded file name, shown on the saved expense. */
+  name: string;
+  url?: string;
+}
+
+export interface Expense {
+  id: string;
+  category: ExpenseCategory;
+  amount: number;
+  date: string;
+  supplier?: string | null;
+  status: ExpenseStatus;
+  attachments?: Attachment[];
+  notes?: string | null;
+}
+
+export interface ExpenseInput {
+  category: ExpenseCategory;
+  /** Sent as typed so the backend rules can reject a missing amount. */
+  amount: string | number;
+  date: string;
+  /** Optional counterparty; the backend allows an expense without one. */
+  supplier?: string;
+}
+
+export interface Payment {
+  id: string;
+  type: PaymentType;
+  amount: number;
+  date: string;
+  linkedExpenseId?: string | null;
+  linkedSaleId?: string | null;
+  reference?: string | null;
+}
+
+export interface PaymentInput {
+  type: PaymentType;
+  /** Sent as typed so the backend rules can reject a missing amount. */
+  amount: string | number;
+  date: string;
+  /** A payment may link to an expense, a sale, or neither. */
+  linkedExpenseId?: string;
+  linkedSaleId?: string;
+  reference?: string;
+}
+
+export interface ExpenseService {
+  list(): Promise<Expense[]>;
+  create(input: ExpenseInput): Promise<Expense>;
+  update(id: string, input: ExpenseInput): Promise<Expense>;
+  remove(id: string): Promise<void>;
+  post(id: string): Promise<Expense>;
+  uploadAttachment(expenseId: string, file: File): Promise<Attachment>;
+}
+
+export interface PaymentService {
+  list(): Promise<Payment[]>;
+  create(input: PaymentInput): Promise<Payment>;
+  update?(id: string, input: PaymentInput): Promise<Payment>;
+  remove?(id: string): Promise<void>;
+}
+
+export interface ExpensePaymentServices {
+  expenses: ExpenseService;
+  payments: PaymentService;
+}
+
+// ---------------------------------------------------------------------------
+// Inventory services (issue #47)
+// ---------------------------------------------------------------------------
+
+export interface InventoryServices {
+  items: InventoryItemService;
+  movements: StockMovementService;
+}
+
 export interface AgrivantaServices
-  extends FarmSetupServices, HarvestSaleServices {
+  extends
+    FarmSetupServices,
+    ActivityPlanningServices,
+    InventoryServices,
+    ExpensePaymentServices,
+    HarvestSaleServices {
   auth: AuthService;
+  /** Crop cycle domain (issue #45). */
+  cropCycles: CropCycleService;
 }
 
 /**
@@ -312,4 +465,64 @@ export interface SaleService {
 export interface HarvestSaleServices {
   harvests: HarvestService;
   sales: SaleService;
+}
+
+// ---------------------------------------------------------------------------
+// Crop cycle domain (issue #45)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle state of a crop cycle. Closed cycles are locked
+ * (`_docs/plan.md` §3.1); reopening them is out of scope for now.
+ */
+export type CropCycleStatus = 'open' | 'closed';
+
+export interface CropCycle {
+  id: string;
+  fieldId: string;
+  cropId: string;
+  varietyId: string;
+  /** ISO calendar date (`YYYY-MM-DD`) the cycle starts on. */
+  startDate: string;
+  /** Optional ISO calendar date the cycle ended on. */
+  endDate?: string;
+  status: CropCycleStatus;
+  expectedYield?: number;
+  expectedPrice?: number;
+}
+
+export interface CropCycleInput {
+  fieldId: string;
+  cropId: string;
+  varietyId: string;
+  /**
+   * Sent as a raw string so a blank value reaches the backend's
+   * "start date is required" rule.
+   */
+  startDate: string;
+  endDate?: string;
+  /** Sent as typed so a blank clears and invalid values reach the backend. */
+  expectedYield?: string | number;
+  expectedPrice?: string | number;
+}
+
+/** Only the forecast amounts can be edited after a cycle is created. */
+export interface CropCycleUpdateInput {
+  expectedYield?: string | number;
+  expectedPrice?: string | number;
+}
+
+export interface CropCycleService {
+  /** When `fieldId` is given, only that field's cycles are returned. */
+  list(fieldId?: string): Promise<CropCycle[]>;
+  create(input: CropCycleInput): Promise<CropCycle>;
+  /** Updates the expected yield/price of an open cycle. */
+  update(id: string, input: CropCycleUpdateInput): Promise<CropCycle>;
+  /** Formally closes the cycle; raises on an already-closed cycle. */
+  close(id: string): Promise<CropCycle>;
+}
+
+/** The crop cycle domain exposed by the services layer. */
+export interface CropCycleServices {
+  cropCycles: CropCycleService;
 }
