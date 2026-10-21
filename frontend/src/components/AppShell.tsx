@@ -10,6 +10,12 @@ const NAV_LINKS = [
   { to: '/expenses', label: 'Expenses' },
   { to: '/payments', label: 'Payments' },
   { to: '/conversions', label: 'Conversions' },
+  { to: '/inventory', label: 'Inventory' },
+  // Activity planning screens (issue #46).
+  { to: '/activities', label: 'Activities' },
+  { to: '/activity-templates', label: 'Templates' },
+  // Crop cycle screens (issue #45).
+  { to: '/cycles', label: 'Crop cycles' },
 ];
 
 /**

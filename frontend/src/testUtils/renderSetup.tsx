@@ -1,6 +1,8 @@
 import { render } from '@testing-library/react';
 import { App } from '../App';
+import type { ActivityPlanningSeed } from '../services/activityPlanningMock';
 import type { FarmSetupSeed } from '../services/farmSetupMock';
+import type { InventorySeed } from '../services/inventoryMock';
 import { MOCK_USERS, createMockServices } from '../services/mockServices';
 import {
   createSessionStore,
@@ -13,6 +15,10 @@ export interface RenderSetupOptions {
   route: string;
   /** Seed for the mock farm setup domains; defaults are empty collections. */
   seed?: FarmSetupSeed;
+  /** Seed for the mock inventory domain (issue #47). */
+  inventory?: InventorySeed;
+  /** Seed for the mock activity planning domains (issue #46). */
+  activities?: ActivityPlanningSeed;
 }
 
 export interface RenderSetupResult {
@@ -30,7 +36,12 @@ export async function renderSetupScreen(
   window.localStorage.clear();
 
   const store = createSessionStore(window.localStorage);
-  const services = createMockServices({ store, farmSetup: options.seed });
+  const services = createMockServices({
+    store,
+    farmSetup: options.seed,
+    inventory: options.inventory,
+    activities: options.activities,
+  });
 
   await services.auth.login({
     email: MOCK_USERS[0].email,

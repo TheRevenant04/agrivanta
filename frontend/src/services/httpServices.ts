@@ -2,6 +2,10 @@ import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupHttp } from './farmSetupHttp';
 import { createExpensePaymentHttp } from './expensePaymentHttp';
+import { createInventoryHttp } from './inventoryHttp';
+import { createActivityPlanningHttp } from './activityPlanningHttp';
+// Crop cycle domain (issue #45).
+import { createCropCycleHttp } from './cropCycleHttp';
 import {
   ApiError,
   InvalidCredentialsError,
@@ -218,5 +222,11 @@ export function createHttpServices(
 
     // Expense and payment domains (issue #49)
     ...createExpensePaymentHttp(request, upload),
+    // Inventory domain (issue #47) shares the same plumbing too.
+    ...createInventoryHttp(request),
+    // Activity planning domains (issue #46) share the same plumbing.
+    ...createActivityPlanningHttp(request),
+    // Crop cycle domain (issue #45) shares the same auth/error plumbing.
+    ...createCropCycleHttp(request),
   };
 }

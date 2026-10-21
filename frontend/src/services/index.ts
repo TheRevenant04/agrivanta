@@ -27,3 +27,29 @@ export type {
   ExpensePaymentSeed,
 } from './expensePaymentMock';
 export { createExpensePaymentHttp } from './expensePaymentHttp';
+
+// Inventory domain (issue #47).
+export * from './inventoryRules';
+export { createInventoryMock } from './inventoryMock';
+export type {
+  InventoryMockOptions,
+  InventorySeed,
+  InventorySeedItem,
+} from './inventoryMock';
+export { createInventoryHttp } from './inventoryHttp';
+// Activity planning domain (issue #46).
+export * from './activityPlanningRules';
+export {
+  createActivityPlanningMock,
+  DEFAULT_PLANNING_CYCLES,
+} from './activityPlanningMock';
+export type {
+  ActivityPlanningMockOptions,
+  ActivityPlanningSeed,
+} from './activityPlanningMock';
+export { createActivityPlanningHttp } from './activityPlanningHttp';
+// Crop cycle domain (issue #45).
+export * from './cropCycleRules';
+export { createCropCycleMock } from './cropCycleMock';
+export type { CropCycleMockOptions } from './cropCycleMock';
+export { createCropCycleHttp } from './cropCycleHttp';
