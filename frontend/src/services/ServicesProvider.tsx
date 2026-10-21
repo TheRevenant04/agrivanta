@@ -63,6 +63,9 @@ function withUnauthorizedHandling(
     varieties: guardDomain(services.varieties),
     units: guardDomain(services.units),
     conversions: guardDomain(services.conversions),
+    // Harvest and sale domains (issue #49) get the same 401 handling.
+    harvests: guardDomain(services.harvests),
+    sales: guardDomain(services.sales),
   };
 }
 

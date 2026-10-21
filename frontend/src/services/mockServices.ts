@@ -1,6 +1,7 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
+import { createHarvestSaleMock, type HarvestSaleSeed } from './harvestSaleMock';
 import {
   ApiError,
   InvalidCredentialsError,
@@ -77,6 +78,8 @@ export interface MockServicesOptions {
   users?: readonly SeedUser[];
   /** Seed for the farm, field, crop, variety, unit, and conversion domains. */
   farmSetup?: FarmSetupSeed;
+  /** Seed for the harvest, sale, and sale-customer domains (issue #49). */
+  harvestSale?: HarvestSaleSeed;
 }
 
 /**
@@ -168,6 +171,12 @@ export function createMockServices(
     // Farm setup domains (issue #44) share the same session requirement.
     ...createFarmSetupMock({
       seed: options.farmSetup,
+      requireAuth: requireUser,
+    }),
+
+    // Harvest and sale domains (issue #49) are session-protected too.
+    ...createHarvestSaleMock({
+      seed: options.harvestSale,
       requireAuth: requireUser,
     }),
   };
