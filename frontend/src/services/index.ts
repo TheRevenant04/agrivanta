@@ -20,6 +20,19 @@ export { createFarmSetupMock, DEFAULT_FARM } from './farmSetupMock';
 export type { FarmSetupMockOptions, FarmSetupSeed } from './farmSetupMock';
 export { createFarmSetupHttp } from './farmSetupHttp';
 export type { ServiceRequest } from './farmSetupHttp';
+export * from './harvestSaleRules';
+export {
+  createHarvestSaleMock,
+  DEFAULT_HARVEST_CYCLES,
+  DEFAULT_SALE_CUSTOMERS,
+} from './harvestSaleMock';
+export type {
+  HarvestSaleCycleSeed,
+  HarvestSaleMockOptions,
+  HarvestSaleSeed,
+  SaleSeed,
+} from './harvestSaleMock';
+export { createHarvestSaleHttp } from './harvestSaleHttp';
 export * from './expensePaymentRules';
 export { createExpensePaymentMock } from './expensePaymentMock';
 export type {
@@ -53,3 +66,7 @@ export * from './cropCycleRules';
 export { createCropCycleMock } from './cropCycleMock';
 export type { CropCycleMockOptions } from './cropCycleMock';
 export { createCropCycleHttp } from './cropCycleHttp';
+
+// `harvestSaleRules` and `cropCycleRules` both star-export an identical
+// `isIsoCalendarDate`; pin one implementation so the barrel is unambiguous.
+export { isIsoCalendarDate } from './cropCycleRules';

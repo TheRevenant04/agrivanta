@@ -328,7 +328,8 @@ export interface AgrivantaServices
     FarmSetupServices,
     ActivityPlanningServices,
     InventoryServices,
-    ExpensePaymentServices {
+    ExpensePaymentServices,
+    HarvestSaleServices {
   auth: AuthService;
   /** Crop cycle domain (issue #45). */
   cropCycles: CropCycleService;
@@ -384,6 +385,86 @@ export function isUnauthorizedError(
 
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
+}
+
+// ---------------------------------------------------------------------------
+// Harvest and sale domains (issue #49)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal display reference for a crop cycle, used by the harvest and sale
+ * cycle pickers. The full crop cycle model belongs to the crop cycle screens
+ * (issue #45), so this domain only needs an id and a human-readable label.
+ */
+export interface HarvestCycleRef {
+  id: string;
+  label: string;
+}
+
+export interface Harvest {
+  id: string;
+  cycleId: string;
+  quantity: number;
+  unitId: string;
+  /** ISO calendar date (`YYYY-MM-DD`). */
+  date: string;
+}
+
+export interface HarvestInput {
+  cycleId: string;
+  /** Sent as typed so a blank/invalid quantity reaches the backend rule. */
+  quantity: string | number;
+  unitId: string;
+  /** Sent as typed so a blank/invalid date reaches the backend rule. */
+  date: string;
+}
+
+/** A customer profile the sale form can pick from (backend task #19). */
+export interface SaleCustomer {
+  id: string;
+  name: string;
+}
+
+export interface Sale {
+  id: string;
+  customerId: string;
+  /** The harvest this sale draws from; its cycle scopes the sale list. */
+  harvestId: string;
+  quantity: number;
+  unitPrice: number;
+  /** ISO calendar date (`YYYY-MM-DD`). */
+  date: string;
+  /** Quantity × unit price, computed by the backend (issue #29). */
+  revenue: number;
+}
+
+export interface SaleInput {
+  customerId: string;
+  harvestId: string;
+  quantity: string | number;
+  unitPrice: string | number;
+  date: string;
+}
+
+export interface HarvestService {
+  /** Crop cycles the farm can record harvests against, for the picker. */
+  listCycles(): Promise<HarvestCycleRef[]>;
+  /** When `cycleId` is given, only that cycle's harvests are returned. */
+  list(cycleId?: string): Promise<Harvest[]>;
+  create(input: HarvestInput): Promise<Harvest>;
+}
+
+export interface SaleService {
+  /** Customer profiles the sale form offers (backend task #19). */
+  listCustomers(): Promise<SaleCustomer[]>;
+  list(): Promise<Sale[]>;
+  create(input: SaleInput): Promise<Sale>;
+}
+
+/** The harvest and sale domains exposed by the services layer. */
+export interface HarvestSaleServices {
+  harvests: HarvestService;
+  sales: SaleService;
 }
 
 // ---------------------------------------------------------------------------

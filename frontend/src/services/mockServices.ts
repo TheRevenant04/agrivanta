@@ -1,6 +1,7 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
+import { createHarvestSaleMock, type HarvestSaleSeed } from './harvestSaleMock';
 import { createInventoryMock, type InventorySeed } from './inventoryMock';
 // Crop cycle domain (issue #45).
 import { createCropCycleMock } from './cropCycleMock';
@@ -89,6 +90,8 @@ export interface MockServicesOptions {
   users?: readonly SeedUser[];
   /** Seed for the farm, field, crop, variety, unit, and conversion domains. */
   farmSetup?: FarmSetupSeed;
+  /** Seed for the harvest, sale, and sale-customer domains (issue #49). */
+  harvestSale?: HarvestSaleSeed;
   /** Seed for expenses and payments. */
   expensePayments?: ExpensePaymentSeed;
   /** Seed for the inventory domain (issue #47): items and movements. */
@@ -217,6 +220,12 @@ export function createMockServices(
     // Expense and payment domains (issue #49)
     ...createExpensePaymentMock({
       seed: options.expensePayments,
+      requireAuth: requireUser,
+    }),
+
+    // Harvest and sale domains (issue #49) are session-protected too.
+    ...createHarvestSaleMock({
+      seed: options.harvestSale,
       requireAuth: requireUser,
     }),
   };

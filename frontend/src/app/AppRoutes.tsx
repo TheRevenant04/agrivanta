@@ -13,9 +13,11 @@ import { ConversionsPage } from '../pages/ConversionsPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { FarmPage } from '../pages/FarmPage';
 import { FieldsPage } from '../pages/FieldsPage';
+import { HarvestsPage } from '../pages/HarvestsPage';
 import { InventoryPage } from '../pages/InventoryPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
+import { SalesPage } from '../pages/SalesPage';
 import { UnitsPage } from '../pages/UnitsPage';
 import { VarietiesPage } from '../pages/VarietiesPage';
 
@@ -36,6 +38,8 @@ export function AppRoutes() {
             <Route path="/expenses" element={<ExpensesPage />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/conversions" element={<ConversionsPage />} />
+            <Route path="/harvests" element={<HarvestsPage />} />
+            <Route path="/sales" element={<SalesPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
             {/* Activity planning screens (issue #46). */}
             <Route path="/activities" element={<ActivitiesPage />} />
