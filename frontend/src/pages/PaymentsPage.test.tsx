@@ -75,6 +75,39 @@ describe('PaymentsPage', () => {
     ]);
   });
 
+  it('saves a received payment linked to a sale', async () => {
+    const { services } = await renderExpensesScreen({ route: '/payments' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add payment' }));
+    fireEvent.change(screen.getByLabelText('Type'), {
+      target: { value: 'received' },
+    });
+    fireEvent.change(screen.getByLabelText('Amount'), {
+      target: { value: '300' },
+    });
+    fireEvent.change(screen.getByLabelText('Date'), {
+      target: { value: '2026-02-13' },
+    });
+    fireEvent.change(screen.getByLabelText('Link to sale (optional)'), {
+      target: { value: 'sale-7' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save payment' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Payment saved.',
+    );
+    expect(screen.getByText('sale-7')).toBeInTheDocument();
+
+    await expect(services.payments.list()).resolves.toEqual([
+      expect.objectContaining({
+        type: 'received',
+        amount: 300,
+        date: '2026-02-13',
+        linkedSaleId: 'sale-7',
+      }),
+    ]);
+  });
+
   it('shows an inline error for a missing amount and saves nothing', async () => {
     const { services } = await renderExpensesScreen({ route: '/payments' });
 

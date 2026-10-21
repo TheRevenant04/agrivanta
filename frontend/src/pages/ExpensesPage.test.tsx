@@ -285,4 +285,73 @@ describe('ExpensesPage', () => {
       }),
     ]);
   });
+
+  it('shows an inline error for a non-numeric amount and saves nothing', async () => {
+    const { services } = await renderExpensesScreen({ route: '/expenses' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add expense' }));
+    fireEvent.change(screen.getByLabelText('Amount'), {
+      target: { value: 'abc' },
+    });
+    fireEvent.change(screen.getByLabelText('Date'), {
+      target: { value: '2026-01-18' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Amount must be a number.');
+    expect(alert).toHaveAttribute('id', 'expense-amount-error');
+
+    await expect(services.expenses.list()).resolves.toEqual([]);
+  });
+
+  it('shows the uploaded receipt file name on an edited expense', async () => {
+    const { services } = await renderExpensesScreen({
+      route: '/expenses',
+      seed: { expenses: [draftExpense()] },
+    });
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit expense expense-1' }),
+    );
+
+    const file = new File(['receipt'], 'receipt-february.pdf', {
+      type: 'application/pdf',
+    });
+    fireEvent.change(screen.getByLabelText('Receipt attachment'), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+
+    expect(await screen.findByText('receipt-february.pdf')).toBeInTheDocument();
+
+    await expect(services.expenses.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'expense-1',
+        amount: 120,
+        status: 'draft',
+        attachments: [
+          expect.objectContaining({ name: 'receipt-february.pdf' }),
+        ],
+      }),
+    ]);
+  });
+
+  it('surfaces the backend error when a posted expense delete is rejected', async () => {
+    // The list still shows a draft, but the record was posted elsewhere, so
+    // the backend rejects the delete and the error must reach the user.
+    const { services } = await renderExpensesScreen({
+      route: '/expenses',
+      seed: { expenses: [draftExpense()] },
+    });
+
+    await services.expenses.post('expense-1');
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Delete expense expense-1' }),
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Cannot delete a posted expense.');
+  });
 });
