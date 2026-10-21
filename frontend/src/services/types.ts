@@ -169,6 +169,57 @@ export interface ConversionService {
   convert(query: ConversionQuery): Promise<ConversionResult>;
 }
 
+// ---------------------------------------------------------------------------
+// Inventory domains (inventory items and stock movements)
+// ---------------------------------------------------------------------------
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  unitId: string;
+  reorderLevel: number;
+  /** Current quantity derived from stock movements (read-only). */
+  currentQuantity: number;
+}
+
+export interface InventoryItemInput {
+  name: string;
+  unitId: string;
+  /** Sent as typed so backend rules can be mirrored. */
+  reorderLevel: string | number;
+}
+
+export type StockMovementType = 'purchase' | 'usage' | 'adjustment';
+
+export interface StockMovement {
+  id: string;
+  itemId: string;
+  type: StockMovementType;
+  quantity: number;
+  date?: string;
+  note?: string;
+}
+
+export interface StockMovementInput {
+  itemId: string;
+  type: StockMovementType;
+  /** Sent as typed so backend rules can be mirrored. */
+  quantity: string | number;
+  date?: string;
+  note?: string;
+}
+
+export interface InventoryItemService {
+  list(): Promise<InventoryItem[]>;
+  create(input: InventoryItemInput): Promise<InventoryItem>;
+  update(id: string, input: InventoryItemInput): Promise<InventoryItem>;
+}
+
+export interface StockMovementService {
+  list(itemId?: string): Promise<StockMovement[]>;
+  create(input: StockMovementInput): Promise<StockMovement>;
+}
+
 /** The farm-setup domains exposed by the services layer. */
 export interface FarmSetupServices {
   farm: FarmService;
@@ -179,8 +230,17 @@ export interface FarmSetupServices {
   conversions: ConversionService;
 }
 
+// ---------------------------------------------------------------------------
+// Inventory services (issue #47)
+// ---------------------------------------------------------------------------
+
+export interface InventoryServices {
+  items: InventoryItemService;
+  movements: StockMovementService;
+}
+
 export interface AgrivantaServices
-  extends FarmSetupServices, ActivityPlanningServices {
+  extends FarmSetupServices, ActivityPlanningServices, InventoryServices {
   auth: AuthService;
   /** Crop cycle domain (issue #45). */
   cropCycles: CropCycleService;

@@ -20,6 +20,16 @@ export { createFarmSetupMock, DEFAULT_FARM } from './farmSetupMock';
 export type { FarmSetupMockOptions, FarmSetupSeed } from './farmSetupMock';
 export { createFarmSetupHttp } from './farmSetupHttp';
 export type { ServiceRequest } from './farmSetupHttp';
+
+// Inventory domain (issue #47).
+export * from './inventoryRules';
+export { createInventoryMock } from './inventoryMock';
+export type {
+  InventoryMockOptions,
+  InventorySeed,
+  InventorySeedItem,
+} from './inventoryMock';
+export { createInventoryHttp } from './inventoryHttp';
 // Activity planning domain (issue #46).
 export * from './activityPlanningRules';
 export {

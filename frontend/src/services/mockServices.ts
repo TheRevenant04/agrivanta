@@ -1,6 +1,7 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
+import { createInventoryMock, type InventorySeed } from './inventoryMock';
 // Crop cycle domain (issue #45).
 import { createCropCycleMock } from './cropCycleMock';
 import {
@@ -84,6 +85,8 @@ export interface MockServicesOptions {
   users?: readonly SeedUser[];
   /** Seed for the farm, field, crop, variety, unit, and conversion domains. */
   farmSetup?: FarmSetupSeed;
+  /** Seed for the inventory domain (issue #47): items and movements. */
+  inventory?: InventorySeed;
   /** Seed for the activity type, cycle, and activity domains (issue #46). */
   activities?: ActivityPlanningSeed;
   /** Seed crop cycles for the crop cycle domain (issue #45). */
@@ -128,6 +131,11 @@ export function createMockServices(
 
     return user;
   };
+
+  const farmSetup = createFarmSetupMock({
+    seed: options.farmSetup,
+    requireAuth: requireUser,
+  });
 
   return {
     auth: {
@@ -177,9 +185,15 @@ export function createMockServices(
     },
 
     // Farm setup domains (issue #44) share the same session requirement.
-    ...createFarmSetupMock({
-      seed: options.farmSetup,
+    ...farmSetup,
+
+    // Inventory domain (issue #47) mirrors backend issue #16, resolving
+    // units through the farm setup mock so both stay in sync.
+    ...createInventoryMock({
+      seed: options.inventory,
       requireAuth: requireUser,
+      findUnit: async (id) =>
+        (await farmSetup.units.list()).find((unit) => unit.id === id) ?? null,
     }),
 
     // Activity planning domains (issue #46) share the session requirement.

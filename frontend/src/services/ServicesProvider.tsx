@@ -63,6 +63,9 @@ function withUnauthorizedHandling(
     varieties: guardDomain(services.varieties),
     units: guardDomain(services.units),
     conversions: guardDomain(services.conversions),
+    // Inventory domain (issue #47).
+    items: guardDomain(services.items),
+    movements: guardDomain(services.movements),
     // Activity planning domains (issue #46).
     activities: guardDomain(services.activities),
     activityTypes: guardDomain(services.activityTypes),
