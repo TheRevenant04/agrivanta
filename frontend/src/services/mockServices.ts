@@ -9,6 +9,10 @@ import {
   type ActivityPlanningSeed,
 } from './activityPlanningMock';
 import {
+  createExpensePaymentMock,
+  type ExpensePaymentSeed,
+} from './expensePaymentMock';
+import {
   ApiError,
   InvalidCredentialsError,
   UnauthorizedError,
@@ -85,6 +89,8 @@ export interface MockServicesOptions {
   users?: readonly SeedUser[];
   /** Seed for the farm, field, crop, variety, unit, and conversion domains. */
   farmSetup?: FarmSetupSeed;
+  /** Seed for expenses and payments. */
+  expensePayments?: ExpensePaymentSeed;
   /** Seed for the inventory domain (issue #47): items and movements. */
   inventory?: InventorySeed;
   /** Seed for the activity type, cycle, and activity domains (issue #46). */
@@ -205,6 +211,12 @@ export function createMockServices(
     // Crop cycle domain (issue #45) shares the same session requirement.
     ...createCropCycleMock({
       seed: options.cropCycles,
+      requireAuth: requireUser,
+    }),
+
+    // Expense and payment domains (issue #49)
+    ...createExpensePaymentMock({
+      seed: options.expensePayments,
       requireAuth: requireUser,
     }),
   };

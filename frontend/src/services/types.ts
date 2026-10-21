@@ -231,6 +231,90 @@ export interface FarmSetupServices {
 }
 
 // ---------------------------------------------------------------------------
+// Expenses and payments (issues #49, #20, #23, #24)
+// ---------------------------------------------------------------------------
+
+/** The backend's expense categories (task #20). */
+export type ExpenseCategory =
+  'inputs' | 'labour' | 'equipment' | 'overhead' | 'other';
+
+/** Posted records are immutable; drafts may still be edited or deleted. */
+export type ExpenseStatus = 'draft' | 'posted';
+
+/** Direction of a payment (task #23). */
+export type PaymentType = 'received' | 'paid';
+
+/** A receipt or invoice file linked to an expense (task #24). */
+export interface Attachment {
+  id: string;
+  /** The uploaded file name, shown on the saved expense. */
+  name: string;
+  url?: string;
+}
+
+export interface Expense {
+  id: string;
+  category: ExpenseCategory;
+  amount: number;
+  date: string;
+  supplier?: string | null;
+  status: ExpenseStatus;
+  attachments?: Attachment[];
+  notes?: string | null;
+}
+
+export interface ExpenseInput {
+  category: ExpenseCategory;
+  /** Sent as typed so the backend rules can reject a missing amount. */
+  amount: string | number;
+  date: string;
+  /** Optional counterparty; the backend allows an expense without one. */
+  supplier?: string;
+}
+
+export interface Payment {
+  id: string;
+  type: PaymentType;
+  amount: number;
+  date: string;
+  linkedExpenseId?: string | null;
+  linkedSaleId?: string | null;
+  reference?: string | null;
+}
+
+export interface PaymentInput {
+  type: PaymentType;
+  /** Sent as typed so the backend rules can reject a missing amount. */
+  amount: string | number;
+  date: string;
+  /** A payment may link to an expense, a sale, or neither. */
+  linkedExpenseId?: string;
+  linkedSaleId?: string;
+  reference?: string;
+}
+
+export interface ExpenseService {
+  list(): Promise<Expense[]>;
+  create(input: ExpenseInput): Promise<Expense>;
+  update(id: string, input: ExpenseInput): Promise<Expense>;
+  remove(id: string): Promise<void>;
+  post(id: string): Promise<Expense>;
+  uploadAttachment(expenseId: string, file: File): Promise<Attachment>;
+}
+
+export interface PaymentService {
+  list(): Promise<Payment[]>;
+  create(input: PaymentInput): Promise<Payment>;
+  update?(id: string, input: PaymentInput): Promise<Payment>;
+  remove?(id: string): Promise<void>;
+}
+
+export interface ExpensePaymentServices {
+  expenses: ExpenseService;
+  payments: PaymentService;
+}
+
+// ---------------------------------------------------------------------------
 // Inventory services (issue #47)
 // ---------------------------------------------------------------------------
 
@@ -240,7 +324,11 @@ export interface InventoryServices {
 }
 
 export interface AgrivantaServices
-  extends FarmSetupServices, ActivityPlanningServices, InventoryServices {
+  extends
+    FarmSetupServices,
+    ActivityPlanningServices,
+    InventoryServices,
+    ExpensePaymentServices {
   auth: AuthService;
   /** Crop cycle domain (issue #45). */
   cropCycles: CropCycleService;
