@@ -3,6 +3,8 @@ import { AuthBootstrap } from '../auth/AuthBootstrap';
 import { AppShell } from '../components/AppShell';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { CropsPage } from '../pages/CropsPage';
+import { ExpensesPage } from '../pages/ExpensesPage';
+import { PaymentsPage } from '../pages/PaymentsPage';
 import { ConversionsPage } from '../pages/ConversionsPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { FarmPage } from '../pages/FarmPage';
@@ -26,6 +28,8 @@ export function AppRoutes() {
             <Route path="/crops" element={<CropsPage />} />
             <Route path="/varieties" element={<VarietiesPage />} />
             <Route path="/units" element={<UnitsPage />} />
+            <Route path="/expenses" element={<ExpensesPage />} />
+            <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/conversions" element={<ConversionsPage />} />
           </Route>
         </Route>

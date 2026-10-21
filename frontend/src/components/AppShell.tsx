@@ -7,6 +7,8 @@ const NAV_LINKS = [
   { to: '/crops', label: 'Crops' },
   { to: '/varieties', label: 'Varieties' },
   { to: '/units', label: 'Units' },
+  { to: '/expenses', label: 'Expenses' },
+  { to: '/payments', label: 'Payments' },
   { to: '/conversions', label: 'Conversions' },
 ];
 
