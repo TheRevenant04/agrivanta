@@ -1,6 +1,7 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupHttp } from './farmSetupHttp';
+import { createExpensePaymentHttp } from './expensePaymentHttp';
 import {
   ApiError,
   InvalidCredentialsError,
@@ -122,6 +123,60 @@ export function createHttpServices(
     return (await response.json()) as T;
   }
 
+  /**
+   * Multipart upload helper (issue #24): posts a `FormData` body so the
+   * browser sets the multipart content type, and reuses the same error
+   * mapping as the JSON requests.
+   */
+  async function upload<T>(
+    path: string,
+    file: File,
+    authenticated: boolean,
+  ): Promise<T> {
+    const headers: Record<string, string> = {};
+
+    if (authenticated) {
+      const token = store.getToken();
+
+      if (!token) {
+        throw new UnauthorizedError();
+      }
+
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const form = new FormData();
+    form.append('file', file);
+
+    const response = await fetchFn(joinUrl(options.baseUrl, path), {
+      method: 'POST',
+      body: form,
+      headers,
+    });
+
+    if (response.status === 401) {
+      throw authenticated
+        ? new UnauthorizedError()
+        : new InvalidCredentialsError();
+    }
+
+    if (!response.ok) {
+      const detail = await readErrorBody(response);
+      throw new ApiError(
+        detail.message ??
+          `Request to ${path} failed with status ${response.status}.`,
+        response.status,
+        detail.field,
+      );
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
+  }
+
   async function persistSession(session: AuthSession): Promise<AuthSession> {
     store.save(session);
     return session;
@@ -160,5 +215,8 @@ export function createHttpServices(
 
     // Farm setup domains (issue #44) share the same auth/error plumbing.
     ...createFarmSetupHttp(request),
+
+    // Expense and payment domains (issue #49)
+    ...createExpensePaymentHttp(request, upload),
   };
 }

@@ -63,6 +63,9 @@ function withUnauthorizedHandling(
     varieties: guardDomain(services.varieties),
     units: guardDomain(services.units),
     conversions: guardDomain(services.conversions),
+    // Expense and payment domains (issue #49) need the same 401 guard.
+    expenses: guardDomain(services.expenses),
+    payments: guardDomain(services.payments),
   };
 }
 

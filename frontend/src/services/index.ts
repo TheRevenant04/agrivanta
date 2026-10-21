@@ -20,3 +20,7 @@ export { createFarmSetupMock, DEFAULT_FARM } from './farmSetupMock';
 export type { FarmSetupMockOptions, FarmSetupSeed } from './farmSetupMock';
 export { createFarmSetupHttp } from './farmSetupHttp';
 export type { ServiceRequest } from './farmSetupHttp';
+export * from './expensePaymentRules';
+export { createExpensePaymentMock } from './expensePaymentMock';
+export type { ExpensePaymentMockOptions, ExpensePaymentSeed } from './expensePaymentMock';
+export { createExpensePaymentHttp } from './expensePaymentHttp';

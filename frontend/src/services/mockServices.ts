@@ -1,6 +1,7 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
+import { createExpensePaymentMock, type ExpensePaymentSeed } from './expensePaymentMock';
 import {
   ApiError,
   InvalidCredentialsError,
@@ -77,6 +78,8 @@ export interface MockServicesOptions {
   users?: readonly SeedUser[];
   /** Seed for the farm, field, crop, variety, unit, and conversion domains. */
   farmSetup?: FarmSetupSeed;
+  /** Seed for expenses and payments. */
+  expensePayments?: ExpensePaymentSeed;
 }
 
 /**
@@ -168,6 +171,12 @@ export function createMockServices(
     // Farm setup domains (issue #44) share the same session requirement.
     ...createFarmSetupMock({
       seed: options.farmSetup,
+      requireAuth: requireUser,
+    }),
+
+    // Expense and payment domains (issue #49)
+    ...createExpensePaymentMock({
+      seed: options.expensePayments,
       requireAuth: requireUser,
     }),
   };
