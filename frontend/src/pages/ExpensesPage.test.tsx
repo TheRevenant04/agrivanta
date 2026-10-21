@@ -217,4 +217,72 @@ describe('ExpensesPage', () => {
 
     await expect(services.expenses.list()).resolves.toEqual([]);
   });
+
+  it('shows an inline error and saves nothing when an edited amount is cleared', async () => {
+    const { services } = await renderExpensesScreen({
+      route: '/expenses',
+      seed: { expenses: [draftExpense()] },
+    });
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit expense expense-1' }),
+    );
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: 'labour' },
+    });
+    fireEvent.change(screen.getByLabelText('Amount'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Amount is required.');
+    expect(alert).toHaveAttribute('id', 'expense-amount-error');
+
+    // The rejected edit must not have applied the category it changed.
+    await expect(services.expenses.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'expense-1',
+        category: 'inputs',
+        amount: 120,
+        date: '2026-01-01',
+        supplier: 'Acme',
+        status: 'draft',
+      }),
+    ]);
+  });
+
+  it('shows an inline error and saves nothing when an edited date is cleared', async () => {
+    const { services } = await renderExpensesScreen({
+      route: '/expenses',
+      seed: { expenses: [draftExpense()] },
+    });
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit expense expense-1' }),
+    );
+    fireEvent.change(screen.getByLabelText('Amount'), {
+      target: { value: '999' },
+    });
+    fireEvent.change(screen.getByLabelText('Date'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Date is required.');
+    expect(alert).toHaveAttribute('id', 'expense-date-error');
+
+    // The rejected edit must not have applied the amount it changed.
+    await expect(services.expenses.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'expense-1',
+        category: 'inputs',
+        amount: 120,
+        date: '2026-01-01',
+        supplier: 'Acme',
+        status: 'draft',
+      }),
+    ]);
+  });
 });

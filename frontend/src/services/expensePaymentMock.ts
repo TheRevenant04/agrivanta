@@ -9,12 +9,14 @@ import { ApiError, UnauthorizedError } from './types';
 import type {
   Attachment,
   Expense,
+  ExpenseCategory,
   ExpenseInput,
   ExpensePaymentServices,
   ExpenseService,
   Payment,
   PaymentInput,
   PaymentService,
+  PaymentType,
 } from './types';
 
 /** Seed shape for the expense and payment domains. */
@@ -35,6 +37,19 @@ export interface ExpensePaymentMockOptions {
 
 function copy<T extends { id: string }>(item: T): T {
   return { ...item };
+}
+
+/**
+ * Copies an expense together with its attachments, so a caller can never
+ * reach the stored array by accident.
+ */
+function copyExpense(expense: Expense): Expense {
+  return {
+    ...expense,
+    attachments: (expense.attachments ?? []).map((attachment) => ({
+      ...attachment,
+    })),
+  };
 }
 
 /**
@@ -83,50 +98,89 @@ export function createExpensePaymentMock(
     return expense;
   }
 
-  function applyInput(expense: Expense, input: ExpenseInput): void {
-    expense.category = requireCategory(input.category);
-    expense.amount = parseAmount(input.amount);
-    expense.date = parseExpenseDate(input.date);
+  /**
+   * The validated, ready-to-store form of an expense input.
+   */
+  interface ValidatedExpenseInput {
+    category: ExpenseCategory;
+    amount: number;
+    date: string;
+    supplier: string | null;
+  }
 
+  /**
+   * Validates the whole input before any record is touched. Every field is
+   * parsed up front so a rejected input leaves the stored record exactly as
+   * it was, the way the backend behaves when it refuses a request.
+   */
+  function validateExpenseInput(input: ExpenseInput): ValidatedExpenseInput {
+    const category = requireCategory(input.category);
+    const amount = parseAmount(input.amount);
+    const date = parseExpenseDate(input.date);
     const supplier = input.supplier?.trim();
-    expense.supplier = supplier ? supplier : null;
+
+    return {
+      category,
+      amount,
+      date,
+      supplier: supplier ? supplier : null,
+    };
   }
 
   const expensesService: ExpenseService = {
     async list() {
       requireAuth();
-      return expenses.map((expense) => copy(expense));
+      return expenses.map((expense) => copyExpense(expense));
     },
 
     async create(input: ExpenseInput) {
       requireAuth();
 
+      // Validate everything before the record exists, so a rejected input
+      // leaves no trace at all.
+      const validated = validateExpenseInput(input);
+
       const expense: Expense = {
         id: nextId('expense'),
-        category: 'other',
-        amount: 0,
-        date: '',
-        supplier: null,
+        category: validated.category,
+        amount: validated.amount,
+        date: validated.date,
+        supplier: validated.supplier,
         status: 'draft',
         attachments: [],
       };
 
-      applyInput(expense, input);
       expenses.push(expense);
-      return copy(expense);
+      return copyExpense(expense);
     },
 
     async update(id: string, input: ExpenseInput) {
       requireAuth();
 
-      const expense = findExpense(id);
+      const index = expenses.findIndex((item) => item.id === id);
 
-      if (expense.status === 'posted') {
+      if (index === -1) {
+        throw new ApiError(EXPENSE_PAYMENT_ERRORS.expenseNotFound, 404);
+      }
+
+      if (expenses[index].status === 'posted') {
         throw new ApiError(EXPENSE_PAYMENT_ERRORS.postedEditRejected, 400);
       }
 
-      applyInput(expense, input);
-      return copy(expense);
+      // Validate before writing: a rejected edit must not apply the fields
+      // that happened to be parsed first.
+      const validated = validateExpenseInput(input);
+
+      const updated: Expense = {
+        ...expenses[index],
+        category: validated.category,
+        amount: validated.amount,
+        date: validated.date,
+        supplier: validated.supplier,
+      };
+
+      expenses[index] = updated;
+      return copyExpense(updated);
     },
 
     async remove(id: string) {
@@ -182,6 +236,37 @@ export function createExpensePaymentMock(
     },
   };
 
+  /**
+   * The validated, ready-to-store form of a payment input.
+   */
+  interface ValidatedPaymentInput {
+    type: PaymentType;
+    amount: number;
+    date: string;
+    linkedExpenseId: string | null;
+    linkedSaleId: string | null;
+    reference: string | null;
+  }
+
+  /**
+   * Validates the whole input before any record is touched, so a rejected
+   * input leaves the stored records exactly as they were.
+   */
+  function validatePaymentInput(input: PaymentInput): ValidatedPaymentInput {
+    const type = requirePaymentType(input.type);
+    const amount = parseAmount(input.amount);
+    const date = parseExpenseDate(input.date);
+
+    return {
+      type,
+      amount,
+      date,
+      linkedExpenseId: input.linkedExpenseId?.trim() || null,
+      linkedSaleId: input.linkedSaleId?.trim() || null,
+      reference: input.reference?.trim() || null,
+    };
+  }
+
   const paymentsService: PaymentService = {
     async list() {
       requireAuth();
@@ -191,18 +276,18 @@ export function createExpensePaymentMock(
     async create(input: PaymentInput) {
       requireAuth();
 
-      const date = parseExpenseDate(input.date);
-      const amount = parseAmount(input.amount);
-      const type = requirePaymentType(input.type);
+      // Validate everything before the record exists, so a rejected input
+      // leaves no trace at all.
+      const validated = validatePaymentInput(input);
 
       const payment: Payment = {
         id: nextId('payment'),
-        type,
-        amount,
-        date,
-        linkedExpenseId: input.linkedExpenseId?.trim() || null,
-        linkedSaleId: input.linkedSaleId?.trim() || null,
-        reference: input.reference?.trim() || null,
+        type: validated.type,
+        amount: validated.amount,
+        date: validated.date,
+        linkedExpenseId: validated.linkedExpenseId,
+        linkedSaleId: validated.linkedSaleId,
+        reference: validated.reference,
       };
 
       payments.push(payment);

@@ -110,4 +110,46 @@ describe('PaymentsPage', () => {
 
     await expect(services.payments.list()).resolves.toEqual([]);
   });
+
+  it('saves nothing and leaves existing payments untouched when a new one is invalid', async () => {
+    const { services } = await renderExpensesScreen({
+      route: '/payments',
+      seed: {
+        payments: [
+          {
+            id: 'payment-1',
+            type: 'paid',
+            amount: 25,
+            date: '2026-02-01',
+            reference: 'INV-1',
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add payment' }));
+    fireEvent.change(screen.getByLabelText('Type'), {
+      target: { value: 'received' },
+    });
+    fireEvent.change(screen.getByLabelText('Amount'), {
+      target: { value: '40' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save payment' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Date is required.');
+    expect(alert).toHaveAttribute('id', 'payment-date-error');
+
+    // The rejected payment must not have been stored, and the payment that
+    // was already there must be unchanged.
+    await expect(services.payments.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'payment-1',
+        type: 'paid',
+        amount: 25,
+        date: '2026-02-01',
+        reference: 'INV-1',
+      }),
+    ]);
+  });
 });

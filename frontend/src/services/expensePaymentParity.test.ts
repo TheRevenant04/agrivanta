@@ -377,5 +377,158 @@ describe('expense and payment parity between mock and http', () => {
       expect((failure as ApiError).field).toBe('amount');
       expect(await services.payments.list()).toHaveLength(0);
     });
+
+    it(`${kind}: keeps the stored expense unchanged when an edit is missing its amount`, async () => {
+      const services = factory();
+      await services.auth.login(VALID);
+
+      const created = await services.expenses.create({
+        category: 'inputs',
+        amount: 120,
+        date: '2026-01-07',
+        supplier: 'Acme',
+      });
+
+      const failure = await services.expenses
+        .update(created.id, {
+          category: 'labour',
+          amount: '',
+          date: '2026-01-08',
+        })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+      expect((failure as ApiError).field).toBe('amount');
+
+      // A rejected edit must not apply any of its fields.
+      const list = await services.expenses.list();
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({
+        id: created.id,
+        category: 'inputs',
+        amount: 120,
+        date: '2026-01-07',
+        supplier: 'Acme',
+        status: 'draft',
+      });
+    });
+
+    it(`${kind}: keeps the stored expense unchanged when an edit is missing its date`, async () => {
+      const services = factory();
+      await services.auth.login(VALID);
+
+      const created = await services.expenses.create({
+        category: 'inputs',
+        amount: 120,
+        date: '2026-01-07',
+        supplier: 'Acme',
+      });
+
+      const failure = await services.expenses
+        .update(created.id, {
+          category: 'labour',
+          amount: 999,
+          date: '',
+        })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+      expect((failure as ApiError).field).toBe('date');
+
+      // The category and amount that were parsed before the date must not
+      // have been written.
+      const list = await services.expenses.list();
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({
+        id: created.id,
+        category: 'inputs',
+        amount: 120,
+        date: '2026-01-07',
+        supplier: 'Acme',
+        status: 'draft',
+      });
+    });
+
+    it(`${kind}: keeps the stored expense unchanged when an edit has an unknown category`, async () => {
+      const services = factory();
+      await services.auth.login(VALID);
+
+      const created = await services.expenses.create({
+        category: 'inputs',
+        amount: 120,
+        date: '2026-01-07',
+      });
+
+      const failure = await services.expenses
+        .update(created.id, {
+          category: 'nonsense' as never,
+          amount: 999,
+          date: '2026-01-09',
+        })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+      expect((failure as ApiError).field).toBe('category');
+
+      const list = await services.expenses.list();
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({
+        category: 'inputs',
+        amount: 120,
+        date: '2026-01-07',
+      });
+    });
+
+    it(`${kind}: reports the offending field when a payment is missing its date`, async () => {
+      const services = factory();
+      await services.auth.login(VALID);
+
+      const failure = await services.payments
+        .create({ type: 'paid', amount: 30, date: '' })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+      expect((failure as ApiError).field).toBe('date');
+      expect(await services.payments.list()).toHaveLength(0);
+    });
+
+    it(`${kind}: leaves existing payments untouched when a new one is rejected`, async () => {
+      const services = factory();
+      await services.auth.login(VALID);
+
+      const existing = await services.payments.create({
+        type: 'paid',
+        amount: 25,
+        date: '2026-02-01',
+        reference: 'INV-1',
+      });
+
+      const failure = await services.payments
+        .create({ type: 'received', amount: 40, date: '' })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+      expect((failure as ApiError).field).toBe('date');
+
+      const list = await services.payments.list();
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({
+        id: existing.id,
+        type: 'paid',
+        amount: 25,
+        date: '2026-02-01',
+        reference: 'INV-1',
+      });
+    });
   }
 });
