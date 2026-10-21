@@ -4,6 +4,10 @@ import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
 // Crop cycle domain (issue #45).
 import { createCropCycleMock } from './cropCycleMock';
 import {
+  createActivityPlanningMock,
+  type ActivityPlanningSeed,
+} from './activityPlanningMock';
+import {
   ApiError,
   InvalidCredentialsError,
   UnauthorizedError,
@@ -80,6 +84,8 @@ export interface MockServicesOptions {
   users?: readonly SeedUser[];
   /** Seed for the farm, field, crop, variety, unit, and conversion domains. */
   farmSetup?: FarmSetupSeed;
+  /** Seed for the activity type, cycle, and activity domains (issue #46). */
+  activities?: ActivityPlanningSeed;
   /** Seed crop cycles for the crop cycle domain (issue #45). */
   cropCycles?: CropCycle[];
 }
@@ -173,6 +179,12 @@ export function createMockServices(
     // Farm setup domains (issue #44) share the same session requirement.
     ...createFarmSetupMock({
       seed: options.farmSetup,
+      requireAuth: requireUser,
+    }),
+
+    // Activity planning domains (issue #46) share the session requirement.
+    ...createActivityPlanningMock({
+      seed: options.activities,
       requireAuth: requireUser,
     }),
 

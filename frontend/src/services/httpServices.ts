@@ -1,6 +1,7 @@
 import type { SessionStore } from './sessionStore';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupHttp } from './farmSetupHttp';
+import { createActivityPlanningHttp } from './activityPlanningHttp';
 // Crop cycle domain (issue #45).
 import { createCropCycleHttp } from './cropCycleHttp';
 import {
@@ -163,6 +164,8 @@ export function createHttpServices(
     // Farm setup domains (issue #44) share the same auth/error plumbing.
     ...createFarmSetupHttp(request),
 
+    // Activity planning domains (issue #46) share the same plumbing.
+    ...createActivityPlanningHttp(request),
     // Crop cycle domain (issue #45) shares the same auth/error plumbing.
     ...createCropCycleHttp(request),
   };
