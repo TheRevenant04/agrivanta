@@ -75,4 +75,5 @@ urlpatterns = [
     path("harvests/<str:harvest_id>", views.HarvestDetailView.as_view()),
     path("customers", views.CustomerListView.as_view()),
     path("sales", views.SaleListView.as_view()),
+    path("sales/<str:sale_id>", views.SaleDetailView.as_view()),
 ]

@@ -1902,3 +1902,20 @@ class SaleListView(APIView):
         return Response(
             serialize_sale(sale), status=status.HTTP_201_CREATED
         )
+
+
+class SaleDetailView(APIView):
+    def get(self, request, sale_id):
+        farm = get_farm(request.user)
+        sale = scoped_get(
+            Sale, farm, sale_id, "That sale no longer exists."
+        )
+        return Response(serialize_sale(sale))
+
+    def delete(self, request, sale_id):
+        farm = get_farm(request.user)
+        sale = scoped_get(
+            Sale, farm, sale_id, "That sale no longer exists."
+        )
+        sale.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

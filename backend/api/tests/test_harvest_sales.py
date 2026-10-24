@@ -207,6 +207,64 @@ def test_seeded_customers_are_available(client):
     ]
 
 
+def test_sale_detail_get_and_delete_frees_quantity(client, cycle):
+    built = cycle()
+    harvest = client.post(
+        "/api/harvests",
+        {
+            "cycleId": built["cycle"]["id"],
+            "quantity": "100",
+            "unitId": built["unit"]["id"],
+            "date": "2026-08-01",
+        },
+        format="json",
+    ).data
+    customer = client.get("/api/customers").data[0]
+
+    created = client.post(
+        "/api/sales",
+        {
+            "customerId": customer["id"],
+            "harvestId": harvest["id"],
+            "quantity": "10",
+            "unitPrice": "3.5",
+            "date": "2026-08-05",
+        },
+        format="json",
+    )
+    assert created.status_code == 201
+    sale_id = created.data["id"]
+
+    detail = client.get(f"/api/sales/{sale_id}")
+    assert detail.status_code == 200
+    assert detail.data["id"] == sale_id
+    assert detail.data["customerId"] == customer["id"]
+    assert detail.data["harvestId"] == harvest["id"]
+    assert detail.data["quantity"] == 10
+    assert detail.data["unitPrice"] == 3.5
+    assert detail.data["date"] == "2026-08-05"
+    assert detail.data["revenue"] == 35
+
+    deleted = client.delete(f"/api/sales/{sale_id}")
+    assert deleted.status_code == 204
+
+    gone = client.get(f"/api/sales/{sale_id}")
+    assert gone.status_code == 404
+
+    resold = client.post(
+        "/api/sales",
+        {
+            "customerId": customer["id"],
+            "harvestId": harvest["id"],
+            "quantity": "10",
+            "unitPrice": "3.5",
+            "date": "2026-08-06",
+        },
+        format="json",
+    )
+    assert resold.status_code == 201
+
+
 def test_harvest_detail_get_patch_delete(client, cycle):
     built = cycle()
     created = client.post(
