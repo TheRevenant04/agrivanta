@@ -205,3 +205,174 @@ def test_seeded_customers_are_available(client):
         "Greenfield Grain Co.",
         "Harbour Mill",
     ]
+
+
+def test_harvest_detail_get_patch_delete(client, cycle):
+    built = cycle()
+    created = client.post(
+        "/api/harvests",
+        {
+            "cycleId": built["cycle"]["id"],
+            "quantity": "500",
+            "unitId": built["unit"]["id"],
+            "date": "2026-08-01",
+        },
+        format="json",
+    )
+    assert created.status_code == 201
+    harvest_id = created.data["id"]
+
+    detail = client.get(f"/api/harvests/{harvest_id}")
+    assert detail.status_code == 200
+    assert detail.data["id"] == harvest_id
+
+    patched = client.patch(
+        f"/api/harvests/{harvest_id}",
+        {"quantity": "600"},
+        format="json",
+    )
+    assert patched.status_code == 200
+    assert patched.data["quantity"] == 600
+
+    deleted = client.delete(f"/api/harvests/{harvest_id}")
+    assert deleted.status_code == 204
+
+    gone = client.get(f"/api/harvests/{harvest_id}")
+    assert gone.status_code == 404
+
+
+def test_harvest_aggregation_converts_units_and_is_per_cycle(client, setup):
+    data = setup()
+    cycle1 = client.post(
+        "/api/crop-cycles",
+        {
+            "fieldId": data["field"]["id"],
+            "cropId": data["crop"]["id"],
+            "varietyId": data["variety"]["id"],
+            "startDate": "2026-03-01",
+        },
+        format="json",
+    ).data
+    cycle2 = client.post(
+        "/api/crop-cycles",
+        {
+            "fieldId": data["field"]["id"],
+            "cropId": data["crop"]["id"],
+            "varietyId": data["variety"]["id"],
+            "startDate": "2026-04-01",
+        },
+        format="json",
+    ).data
+
+    kg = data["unit"]
+    g = client.post(
+        "/api/units", {"name": "g", "baseMeasure": "mass"}, format="json"
+    ).data
+    client.post(
+        "/api/conversions",
+        {"fromUnitId": g["id"], "toUnitId": kg["id"], "factor": "0.001"},
+        format="json",
+    )
+
+    assert (
+        client.post(
+            "/api/harvests",
+            {
+                "cycleId": cycle1["id"],
+                "quantity": "50",
+                "unitId": kg["id"],
+                "date": "2026-08-01",
+            },
+            format="json",
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/harvests",
+            {
+                "cycleId": cycle1["id"],
+                "quantity": "50000",
+                "unitId": g["id"],
+                "date": "2026-08-02",
+            },
+            format="json",
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/harvests",
+            {
+                "cycleId": cycle2["id"],
+                "quantity": "10",
+                "unitId": kg["id"],
+                "date": "2026-08-01",
+            },
+            format="json",
+        ).status_code
+        == 201
+    )
+
+    summary1 = client.get(f"/api/harvests/cycles/{cycle1['id']}/summary")
+    assert summary1.status_code == 200
+    assert summary1.data["totalHarvested"] == 100
+    assert summary1.data["unitId"] == kg["id"]
+
+    summary2 = client.get(f"/api/harvests/cycles/{cycle2['id']}/summary")
+    assert summary2.status_code == 200
+    assert summary2.data["totalHarvested"] == 10
+    assert summary2.data["unitId"] == kg["id"]
+
+
+def test_harvest_aggregation_missing_conversion_error_names_units(
+    client, setup
+):
+    data = setup()
+    cycle = client.post(
+        "/api/crop-cycles",
+        {
+            "fieldId": data["field"]["id"],
+            "cropId": data["crop"]["id"],
+            "varietyId": data["variety"]["id"],
+            "startDate": "2026-03-01",
+        },
+        format="json",
+    ).data
+    kg = data["unit"]
+    g = client.post(
+        "/api/units", {"name": "g", "baseMeasure": "mass"}, format="json"
+    ).data
+
+    assert (
+        client.post(
+            "/api/harvests",
+            {
+                "cycleId": cycle["id"],
+                "quantity": "50",
+                "unitId": kg["id"],
+                "date": "2026-08-01",
+            },
+            format="json",
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/harvests",
+            {
+                "cycleId": cycle["id"],
+                "quantity": "50000",
+                "unitId": g["id"],
+                "date": "2026-08-02",
+            },
+            format="json",
+        ).status_code
+        == 201
+    )
+
+    summary = client.get(f"/api/harvests/cycles/{cycle['id']}/summary")
+    assert summary.status_code in (400, 404)
+    detail = summary.data.get("detail") or str(summary.data)
+    assert "kg" in detail
+    assert "g" in detail

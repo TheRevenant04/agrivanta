@@ -67,7 +67,12 @@ urlpatterns = [
     ),
     path("payments", views.PaymentListView.as_view()),
     path("harvests/cycles", views.HarvestCycleListView.as_view()),
+    path(
+        "harvests/cycles/<str:cycle_id>/summary",
+        views.HarvestCycleSummaryView.as_view(),
+    ),
     path("harvests", views.HarvestListView.as_view()),
+    path("harvests/<str:harvest_id>", views.HarvestDetailView.as_view()),
     path("customers", views.CustomerListView.as_view()),
     path("sales", views.SaleListView.as_view()),
 ]

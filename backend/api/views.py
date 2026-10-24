@@ -1536,6 +1536,178 @@ class HarvestCycleListView(APIView):
         )
 
 
+class HarvestCycleSummaryView(APIView):
+    def get(self, request, cycle_id):
+        farm = get_farm(request.user)
+        cycle = scoped_get(
+            CropCycle, farm, cycle_id, "That crop cycle no longer exists."
+        )
+        total, unit = aggregate_harvest_quantity_for_cycle(farm, cycle)
+        return Response(
+            {
+                "cycleId": str(cycle.id),
+                "totalHarvested": as_number(total),
+                "unitId": str(unit.id) if unit is not None else None,
+            }
+        )
+
+
+class HarvestDetailView(APIView):
+    def get(self, request, harvest_id):
+        farm = get_farm(request.user)
+        harvest = scoped_get(
+            Harvest, farm, harvest_id, "That harvest no longer exists."
+        )
+        return Response(serialize_harvest(harvest))
+
+    def patch(self, request, harvest_id):
+        farm = get_farm(request.user)
+        harvest = scoped_get(
+            Harvest, farm, harvest_id, "That harvest no longer exists."
+        )
+        if harvest.cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "This crop cycle is closed and can no longer be harvested.",
+                status.HTTP_400_BAD_REQUEST,
+                "cycleId",
+            )
+
+        data = request.data
+        if "cycleId" in data:
+            cycle_id = data.get("cycleId")
+            if cycle_id in (None, ""):
+                raise ApiError(
+                    "Select a crop cycle.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "cycleId",
+                )
+            try:
+                cycle = CropCycle.objects.get(farm=farm, pk=cycle_id)
+            except (CropCycle.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "That crop cycle no longer exists.",
+                    status.HTTP_404_NOT_FOUND,
+                    "cycleId",
+                )
+            if cycle.status == CycleStatus.CLOSED:
+                raise ApiError(
+                    "This crop cycle is closed and can no longer be harvested.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "cycleId",
+                )
+            harvest.cycle = cycle
+
+        if "quantity" in data:
+            try:
+                quantity = parse_decimal(
+                    data.get("quantity"),
+                    "quantity",
+                    "Quantity is required.",
+                    "Quantity must be a number.",
+                    positive_message="Quantity must be greater than zero.",
+                )
+            except ValueError as exc:
+                raise ApiError(
+                    str(exc), status.HTTP_400_BAD_REQUEST, "quantity"
+                )
+            harvest.quantity = quantity
+
+        if "unitId" in data:
+            unit_id = data.get("unitId")
+            if unit_id in (None, ""):
+                raise ApiError(
+                    "Select a unit.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "unitId",
+                )
+            try:
+                unit = Unit.objects.get(farm=farm, pk=unit_id)
+            except (Unit.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "That unit does not exist.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "unitId",
+                )
+            harvest.unit = unit
+
+        if "date" in data:
+            harvest_date = parse_body_date(
+                data,
+                "date",
+                "Date is required.",
+                "Date must be a valid calendar date.",
+            )
+            harvest.date = harvest_date
+
+        harvest.save()
+        return Response(serialize_harvest(harvest))
+
+    def put(self, request, harvest_id):
+        return self.patch(request, harvest_id)
+
+    def delete(self, request, harvest_id):
+        farm = get_farm(request.user)
+        harvest = scoped_get(
+            Harvest, farm, harvest_id, "That harvest no longer exists."
+        )
+        if harvest.cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "This crop cycle is closed and can no longer be harvested.",
+                status.HTTP_400_BAD_REQUEST,
+                "cycleId",
+            )
+        harvest.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _convert_quantity_between_units(farm, quantity, from_unit, to_unit):
+    if from_unit.pk == to_unit.pk:
+        return quantity
+    if from_unit.base_measure != to_unit.base_measure:
+        raise ApiError(
+            f'Cannot convert "{from_unit.name}" '
+            f"({from_unit.base_measure}) to \"{to_unit.name}\" "
+            f"({to_unit.base_measure}): base measures do not match.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    forward = UnitConversion.objects.filter(
+        farm=farm, from_unit=from_unit, to_unit=to_unit
+    ).first()
+    if forward is not None:
+        return quantity * forward.factor
+
+    reverse = UnitConversion.objects.filter(
+        farm=farm, from_unit=to_unit, to_unit=from_unit
+    ).first()
+    if reverse is None:
+        raise ApiError(
+            f'No rule exists for converting from '
+            f'"{from_unit.name}" to "{to_unit.name}".',
+            status.HTTP_400_BAD_REQUEST,
+        )
+    return quantity / reverse.factor
+
+
+def aggregate_harvest_quantity_for_cycle(farm, cycle):
+    harvests = list(
+        Harvest.objects.filter(farm=farm, cycle=cycle).select_related(
+            "unit"
+        )
+    )
+    if not harvests:
+        return Decimal(0), None
+
+    target_unit = harvests[0].unit
+    total = Decimal(0)
+    for harvest in harvests:
+        converted = _convert_quantity_between_units(
+            farm, harvest.quantity, harvest.unit, target_unit
+        )
+        total += converted
+    return total, target_unit
+
+
 class HarvestListView(APIView):
     def get(self, request):
         farm = get_farm(request.user)
