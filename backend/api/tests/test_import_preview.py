@@ -507,3 +507,144 @@ def test_preview_requires_authentication(anon):
         format="multipart",
     )
     assert response.status_code == 401
+
+
+def test_expenses_reject_unrepresentable_amounts(client):
+    response = upload(
+        client,
+        "expenses",
+        csv_file(
+            "expenses.csv",
+            "date,category,amount",
+            "2026-03-01,inputs,1e100000",
+            "2026-03-01,inputs,1.23456",
+            "2026-03-01,inputs,10000000000",
+            "2026-03-01,inputs,9999999999.9999",
+        ),
+    )
+
+    assert response.status_code == 200, response.data
+    body = response.data
+    assert body["counts"] == {
+        "total": 4,
+        "valid": 1,
+        "invalid": 3,
+        "duplicate": 0,
+    }
+    errors = {row["row"]: row["errors"] for row in body["invalidRows"]}
+    assert [error["field"] for error in errors[2]] == ["amount"]
+    assert "exceed" in errors[2][0]["message"]
+    assert [error["field"] for error in errors[3]] == ["amount"]
+    assert "decimal places" in errors[3][0]["message"]
+    assert [error["field"] for error in errors[4]] == ["amount"]
+    assert "exceed" in errors[4][0]["message"]
+    assert body["validRows"][0]["row"] == 5
+
+
+def test_movements_reject_unrepresentable_quantities(client, setup):
+    make_item(client, setup()["unit"])
+
+    response = upload(
+        client,
+        "inventory_movements",
+        csv_file(
+            "movements.csv",
+            "item,type,quantity",
+            "Nitrogen,purchase,1e100000",
+            "Nitrogen,purchase,1.23456",
+            "Nitrogen,purchase,10000000000",
+            "Nitrogen,purchase,9999999999.9999",
+        ),
+    )
+
+    assert response.status_code == 200, response.data
+    body = response.data
+    assert body["counts"] == {
+        "total": 4,
+        "valid": 1,
+        "invalid": 3,
+        "duplicate": 0,
+    }
+    errors = {row["row"]: row["errors"] for row in body["invalidRows"]}
+    assert [error["field"] for error in errors[2]] == ["quantity"]
+    assert "exceed" in errors[2][0]["message"]
+    assert [error["field"] for error in errors[3]] == ["quantity"]
+    assert "decimal places" in errors[3][0]["message"]
+    assert [error["field"] for error in errors[4]] == ["quantity"]
+    assert "exceed" in errors[4][0]["message"]
+    assert body["validRows"][0]["row"] == 5
+
+
+def test_csv_blank_lines_preserve_source_row_numbers(client):
+    response = upload(
+        client,
+        "expenses",
+        csv_file(
+            "expenses.csv",
+            "date,category,amount",
+            "",
+            "2026-03-01,inputs,10",
+            "",
+            "not-a-date,inputs,10",
+        ),
+    )
+
+    assert response.status_code == 200, response.data
+    body = response.data
+    assert body["counts"] == {
+        "total": 2,
+        "valid": 1,
+        "invalid": 1,
+        "duplicate": 0,
+    }
+    assert body["validRows"][0]["row"] == 3
+    assert body["invalidRows"][0]["row"] == 5
+
+
+def test_xlsx_blank_rows_preserve_worksheet_row_numbers(client):
+    response = upload(
+        client,
+        "expenses",
+        xlsx_file(
+            "expenses.xlsx",
+            [
+                ["date", "category", "amount"],
+                ["2026-03-01", "inputs", 10],
+                [None, None, None],
+                ["not-a-date", "inputs", 10],
+            ],
+        ),
+    )
+
+    assert response.status_code == 200, response.data
+    body = response.data
+    assert body["validRows"][0]["row"] == 2
+    assert body["invalidRows"][0]["row"] == 4
+
+
+def test_extra_row_values_report_structural_error_only(client):
+    response = upload(
+        client,
+        "expenses",
+        csv_file(
+            "expenses.csv",
+            "date,category,amount",
+            "not-a-date,inputs,10,extra",
+        ),
+    )
+
+    assert response.status_code == 200, response.data
+    assert response.data["counts"] == {
+        "total": 1,
+        "valid": 0,
+        "invalid": 1,
+        "duplicate": 0,
+    }
+    row = response.data["invalidRows"][0]
+    assert row["row"] == 2
+    assert row["errors"] == [
+        {
+            "field": "row",
+            "message": "Row has more values than the headers define.",
+        }
+    ]

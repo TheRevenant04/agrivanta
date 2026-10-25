@@ -24,7 +24,6 @@ from .models import (
     MovementType,
     StockMovement,
 )
-from .serializers import as_number
 
 __all__ = [
     "ImportFileError",
@@ -65,6 +64,12 @@ CATEGORY_MESSAGE = (
 MOVEMENT_TYPE_MESSAGE = (
     "Type must be one of: purchase, usage, adjustment."
 )
+
+# The amount/quantity models use DecimalField(max_digits=14, decimal_places=4),
+# which allows at most 10 integer digits and 4 fractional digits.
+_MAX_ABSOLUTE_VALUE = Decimal("10000000000")
+_MAX_VALUE_TEXT = "9999999999.9999"
+_MAX_DECIMAL_PLACES = 4
 
 
 class ImportFileError(ValueError):
@@ -110,7 +115,12 @@ def _read_csv(content):
         raise ImportFileError("The uploaded file is empty.")
     try:
         reader = csv.reader(io.StringIO(text, newline=""), strict=True)
-        return [list(row) for row in reader]
+        rows = []
+        previous_line = 0
+        for row in reader:
+            rows.append((previous_line + 1, list(row)))
+            previous_line = reader.line_num
+        return rows
     except csv.Error as exc:
         raise ImportFileError(
             f"The CSV file could not be parsed: {exc}."
@@ -131,8 +141,10 @@ def _read_xlsx(content):
     try:
         worksheet = workbook.active
         rows = [
-            list(values)
-            for values in worksheet.iter_rows(values_only=True)
+            (row_number, list(values))
+            for row_number, values in enumerate(
+                worksheet.iter_rows(values_only=True), start=1
+            )
         ]
     except Exception as exc:
         raise ImportFileError(
@@ -141,7 +153,7 @@ def _read_xlsx(content):
     finally:
         workbook.close()
     if not rows or all(
-        _is_blank(value) for row in rows for value in row
+        _is_blank(value) for _, row in rows for value in row
     ):
         raise ImportFileError("The uploaded file is empty.")
     return rows
@@ -166,7 +178,7 @@ def _read_table(entity_type, uploaded_file):
     if not raw_rows:
         raise ImportFileError("The uploaded file is empty.")
 
-    raw_headers = _trim_trailing_blanks(raw_rows[0])
+    raw_headers = _trim_trailing_blanks(raw_rows[0][1])
     if not raw_headers:
         raise ImportFileError("The header row is empty.")
 
@@ -209,11 +221,11 @@ def _read_table(entity_type, uploaded_file):
         raise ImportFileError(" ".join(problems))
 
     data_rows = []
-    for row in raw_rows[1:]:
+    for line_number, row in raw_rows[1:]:
         values = _trim_trailing_blanks(row)
         if all(_is_blank(value) for value in values):
             continue
-        data_rows.append(values)
+        data_rows.append((line_number, values))
     return seen, data_rows
 
 
@@ -245,6 +257,18 @@ def _parse_positive_decimal(value, label):
         return None, f"{label} must be a number."
     if number <= 0:
         return None, f"{label} must be greater than zero."
+    if number >= _MAX_ABSOLUTE_VALUE:
+        return (
+            None,
+            f"{label} must not exceed {_MAX_VALUE_TEXT}.",
+        )
+    exponent = number.normalize().as_tuple().exponent
+    if exponent < -_MAX_DECIMAL_PLACES:
+        return (
+            None,
+            f"{label} must have at most {_MAX_DECIMAL_PLACES} "
+            "decimal places.",
+        )
     return number, None
 
 
@@ -370,7 +394,7 @@ def _validate_expense_row(values, index, farm, items_cache):
     data = {
         "date": expense_date.isoformat(),
         "category": category,
-        "amount": as_number(amount),
+        "amount": amount,
         "supplier": supplier,
         "notes": notes,
         "cycleId": str(cycle.id) if cycle is not None else None,
@@ -424,7 +448,7 @@ def _validate_movement_row(values, index, farm, items_cache):
         "item": item["name"],
         "itemId": str(item["id"]),
         "type": movement_type,
-        "quantity": as_number(quantity),
+        "quantity": quantity,
         "date": movement_date.isoformat() if movement_date else None,
         "note": note,
     }
@@ -466,13 +490,7 @@ def preview_import(farm, entity_type, uploaded_file):
     duplicate_rows = []
     seen_in_file = {}
 
-    for offset, values in enumerate(rows):
-        row_number = offset + 2
-        result, errors = validator(values, index, farm, items_cache)
-        if errors:
-            invalid_rows.append({"row": row_number, "errors": errors})
-            continue
-        data, key = result
+    for row_number, values in rows:
         if len(values) > len(index):
             invalid_rows.append(
                 {
@@ -488,6 +506,11 @@ def preview_import(farm, entity_type, uploaded_file):
                 }
             )
             continue
+        result, errors = validator(values, index, farm, items_cache)
+        if errors:
+            invalid_rows.append({"row": row_number, "errors": errors})
+            continue
+        data, key = result
         if key in db_keys:
             duplicate_rows.append(
                 {
