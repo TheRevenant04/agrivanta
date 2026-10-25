@@ -19,6 +19,7 @@ from .models import (
     ActivityType,
     Attachment,
     BaseMeasure,
+    Budget,
     Crop,
     CropCycle,
     CycleStatus,
@@ -51,6 +52,7 @@ from .serializers import (
     serialize_activity,
     serialize_activity_type,
     serialize_attachment,
+    serialize_budget,
     serialize_conversion,
     serialize_crop,
     serialize_cycle,
@@ -149,6 +151,16 @@ def parse_body_decimal(
             not_numeric_message,
             **kwargs,
         )
+    except ValueError as exc:
+        raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, key)
+
+
+def parse_optional_body_date(data, key, invalid_message):
+    value = data.get(key)
+    if value in (None, ""):
+        return None
+    try:
+        return parse_date(value, key, invalid_message, invalid_message)
     except ValueError as exc:
         raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, key)
 
@@ -1635,6 +1647,126 @@ class ExpenseAttachmentView(APIView):
             serialize_attachment(attachment),
             status=status.HTTP_201_CREATED,
         )
+
+
+class BudgetListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        budgets = farm.budgets.all()
+        cycle_id = request.query_params.get("cycle")
+        if cycle_id:
+            budgets = budgets.filter(cycle_id=cycle_id)
+        category = request.query_params.get("category")
+        if category:
+            budgets = budgets.filter(category=category)
+        return Response([serialize_budget(budget) for budget in budgets])
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        values = self._validate(request.data, farm)
+        budget = Budget.objects.create(farm=farm, **values)
+        return Response(
+            serialize_budget(budget), status=status.HTTP_201_CREATED
+        )
+
+    @staticmethod
+    def _validate(data, farm):
+        try:
+            amount = parse_decimal(
+                data.get("amount"),
+                "amount",
+                "Amount is required.",
+                "Amount must be a number.",
+                positive_message="Amount must be greater than zero.",
+            )
+        except ValueError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "amount"
+            )
+
+        category = None
+        raw_category = data.get("category")
+        if raw_category not in (None, ""):
+            category = str(raw_category).strip()
+            if category not in ExpenseCategory.values:
+                raise ApiError(
+                    "Category must be one of: inputs, labour, equipment, "
+                    "overhead, other.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "category",
+                )
+
+        cycle = None
+        cycle_id = data.get("cycleId")
+        if cycle_id not in (None, ""):
+            try:
+                cycle = CropCycle.objects.get(farm=farm, pk=cycle_id)
+            except (CropCycle.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "The selected crop cycle does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "cycleId",
+                )
+
+        period_start = parse_optional_body_date(
+            data,
+            "periodStart",
+            "Period start must be a valid calendar date.",
+        )
+        period_end = parse_optional_body_date(
+            data,
+            "periodEnd",
+            "Period end must be a valid calendar date.",
+        )
+        if (
+            period_start is not None
+            and period_end is not None
+            and period_end < period_start
+        ):
+            raise ApiError(
+                "Period end cannot be before the period start.",
+                status.HTTP_400_BAD_REQUEST,
+                "periodEnd",
+            )
+
+        return {
+            "cycle": cycle,
+            "category": category,
+            "amount": amount,
+            "period_start": period_start,
+            "period_end": period_end,
+        }
+
+
+class BudgetDetailView(APIView):
+    def get(self, request, budget_id):
+        farm = get_farm(request.user)
+        budget = scoped_get(
+            Budget, farm, budget_id, "That budget no longer exists."
+        )
+        return Response(serialize_budget(budget))
+
+    def put(self, request, budget_id):
+        farm = get_farm(request.user)
+        budget = scoped_get(
+            Budget, farm, budget_id, "That budget no longer exists."
+        )
+        values = BudgetListView._validate(request.data, farm)
+        budget.cycle = values["cycle"]
+        budget.category = values["category"]
+        budget.amount = values["amount"]
+        budget.period_start = values["period_start"]
+        budget.period_end = values["period_end"]
+        budget.save()
+        return Response(serialize_budget(budget))
+
+    def delete(self, request, budget_id):
+        farm = get_farm(request.user)
+        budget = scoped_get(
+            Budget, farm, budget_id, "That budget no longer exists."
+        )
+        budget.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PaymentListView(APIView):

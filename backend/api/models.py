@@ -419,6 +419,68 @@ class Expense(TimestampedModel):
         ordering = ["created_at", "id"]
 
 
+class Budget(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="budgets"
+    )
+    cycle = models.ForeignKey(
+        CropCycle,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="budgets",
+    )
+    category = models.CharField(
+        max_length=32,
+        choices=ExpenseCategory.choices,
+        null=True,
+        blank=True,
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=4)
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="budget_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(period_start__isnull=True)
+                    | models.Q(period_end__isnull=True)
+                    | models.Q(period_end__gte=models.F("period_start"))
+                ),
+                name="budget_period_valid",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.amount is not None and self.amount <= 0:
+            errors["amount"] = "Amount must be greater than zero."
+        if (
+            self.period_start is not None
+            and self.period_end is not None
+            and self.period_end < self.period_start
+        ):
+            errors["period_end"] = (
+                "period_end must not be earlier than period_start."
+            )
+        if (
+            self.cycle_id is not None
+            and self.farm_id is not None
+            and self.cycle.farm_id != self.farm_id
+        ):
+            errors["cycle"] = "The crop cycle must belong to the same farm."
+        if errors:
+            raise ValidationError(errors)
+
+
 class AllocationRule(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(

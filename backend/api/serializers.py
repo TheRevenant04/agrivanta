@@ -208,6 +208,17 @@ def serialize_expense(expense):
     }
 
 
+def serialize_budget(budget):
+    return {
+        "id": as_id(budget.id),
+        "cycleId": as_id(budget.cycle_id) if budget.cycle_id else None,
+        "category": budget.category,
+        "amount": as_number(budget.amount),
+        "periodStart": as_date(budget.period_start),
+        "periodEnd": as_date(budget.period_end),
+    }
+
+
 def serialize_payment(payment):
     return {
         "id": as_id(payment.id),
