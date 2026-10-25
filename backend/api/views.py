@@ -11,6 +11,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .exceptions import ApiError
+from .import_service import (
+    SUPPORTED_ENTITY_TYPES,
+    ImportFileError,
+    preview_import,
+)
 from .models import (
     Activity,
     ActivityCategory,
@@ -1647,6 +1652,47 @@ class ExpenseAttachmentView(APIView):
             serialize_attachment(attachment),
             status=status.HTTP_201_CREATED,
         )
+
+
+class ImportPreviewView(APIView):
+    def post(self, request):
+        farm = get_farm(request.user)
+        raw_type = request.data.get("entityType")
+        entity_type = (
+            str(raw_type).strip().lower() if raw_type is not None else ""
+        )
+        entity_type = {
+            "expense": "expenses",
+            "inventory-movements": "inventory_movements",
+            "inventorymovements": "inventory_movements",
+        }.get(entity_type, entity_type)
+        if not entity_type:
+            raise ApiError(
+                "Entity type is required.",
+                status.HTTP_400_BAD_REQUEST,
+                "entityType",
+            )
+        if entity_type not in SUPPORTED_ENTITY_TYPES:
+            raise ApiError(
+                "Unsupported import type. Use expenses or "
+                "inventory_movements.",
+                status.HTTP_400_BAD_REQUEST,
+                "entityType",
+            )
+        upload = request.FILES.get("file")
+        if upload is None or not getattr(upload, "name", ""):
+            raise ApiError(
+                "Import file is required.",
+                status.HTTP_400_BAD_REQUEST,
+                "file",
+            )
+        try:
+            payload = preview_import(farm, entity_type, upload)
+        except ImportFileError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "file"
+            )
+        return Response(payload)
 
 
 class BudgetListView(APIView):
