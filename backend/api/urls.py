@@ -72,6 +72,7 @@ urlpatterns = [
         "expenses/<str:expense_id>/attachments",
         views.ExpenseAttachmentView.as_view(),
     ),
+    path("imports/preview", views.ImportPreviewView.as_view()),
     path("payments", views.PaymentListView.as_view()),
     path("budgets", views.BudgetListView.as_view()),
     path("budgets/<str:budget_id>", views.BudgetDetailView.as_view()),
