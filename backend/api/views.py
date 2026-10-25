@@ -33,7 +33,9 @@ from .models import (
     MovementType,
     Payment,
     PaymentType,
+    ReportingPeriod,
     Sale,
+    Season,
     StockMovement,
     Unit,
     UnitConversion,
@@ -61,7 +63,9 @@ from .serializers import (
     serialize_inventory_item,
     serialize_movement,
     serialize_payment,
+    serialize_reporting_period,
     serialize_sale,
+    serialize_season,
     serialize_unit,
     serialize_user,
     serialize_variety,
@@ -147,6 +151,89 @@ def parse_body_decimal(
         )
     except ValueError as exc:
         raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, key)
+
+
+def create_farm_for(request):
+    farm_id = request.data.get("farmId")
+    if farm_id in (None, ""):
+        return get_farm(request.user)
+    try:
+        farm = Farm.objects.get(pk=farm_id)
+    except (Farm.DoesNotExist, ValueError, ValidationError):
+        raise ApiError(
+            "The selected farm does not exist.",
+            status.HTTP_400_BAD_REQUEST,
+            "farmId",
+        )
+    if farm.owner_id != request.user.id:
+        raise ApiError(
+            "You do not have access to that farm.",
+            status.HTTP_403_FORBIDDEN,
+            "farmId",
+        )
+    return farm
+
+
+def parse_optional_year(data):
+    value = data.get("year")
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    if isinstance(value, bool):
+        raise ApiError(
+            "Year must be a whole number.",
+            status.HTTP_400_BAD_REQUEST,
+            "year",
+        )
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        raise ApiError(
+            "Year must be a whole number.",
+            status.HTTP_400_BAD_REQUEST,
+            "year",
+        )
+
+
+def parse_period_payload(data, noun):
+    name = require_text(data, "name", f"{noun.capitalize()} name is required.")
+    start_date = parse_body_date(
+        data,
+        "startDate",
+        "Start date is required.",
+        "Start date must be a valid calendar date.",
+    )
+    end_date = parse_body_date(
+        data,
+        "endDate",
+        "End date is required.",
+        "End date must be a valid calendar date.",
+    )
+    if end_date < start_date:
+        raise ApiError(
+            "End date cannot be before the start date.",
+            status.HTTP_400_BAD_REQUEST,
+            "endDate",
+        )
+    return {
+        "name": name,
+        "start_date": start_date,
+        "end_date": end_date,
+        "year": parse_optional_year(data),
+    }
+
+
+def ensure_unique_period_name(model, farm, name, noun, instance=None):
+    query = model.objects.filter(farm=farm, name__iexact=name)
+    if instance is not None:
+        query = query.exclude(pk=instance.pk)
+    if query.exists():
+        raise ApiError(
+            f'A {noun} named "{name}" already exists.',
+            status.HTTP_400_BAD_REQUEST,
+            "name",
+        )
 
 
 def seed_farm(farm):
@@ -277,6 +364,105 @@ class FarmView(APIView):
         farm.reporting_currency = currency.upper()
         farm.save(update_fields=["name", "reporting_currency"])
         return Response(serialize_farm(farm))
+
+
+class PeriodListView(APIView):
+    model = None
+    noun = None
+    serializer = None
+
+    def get(self, request):
+        farm = get_farm(request.user)
+        return Response(
+            [
+                self.serializer(period)
+                for period in self.model.objects.filter(farm=farm)
+            ]
+        )
+
+    def post(self, request):
+        farm = create_farm_for(request)
+        values = parse_period_payload(request.data, self.noun)
+        ensure_unique_period_name(
+            self.model, farm, values["name"], self.noun
+        )
+        period = self.model.objects.create(farm=farm, **values)
+        return Response(
+            self.serializer(period), status=status.HTTP_201_CREATED
+        )
+
+
+class PeriodDetailView(APIView):
+    model = None
+    noun = None
+    serializer = None
+    missing_message = None
+    pk_kwarg = "period_id"
+
+    def _object(self, farm, kwargs):
+        return scoped_get(
+            self.model,
+            farm,
+            kwargs[self.pk_kwarg],
+            self.missing_message,
+        )
+
+    def get(self, request, **kwargs):
+        farm = get_farm(request.user)
+        period = self._object(farm, kwargs)
+        return Response(self.serializer(period))
+
+    def put(self, request, **kwargs):
+        farm = get_farm(request.user)
+        period = self._object(farm, kwargs)
+        values = parse_period_payload(request.data, self.noun)
+        ensure_unique_period_name(
+            self.model,
+            farm,
+            values["name"],
+            self.noun,
+            instance=period,
+        )
+        period.name = values["name"]
+        period.start_date = values["start_date"]
+        period.end_date = values["end_date"]
+        period.year = values["year"]
+        period.save()
+        return Response(self.serializer(period))
+
+    def delete(self, request, **kwargs):
+        farm = get_farm(request.user)
+        period = self._object(farm, kwargs)
+        period.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SeasonListView(PeriodListView):
+    model = Season
+    noun = "season"
+    serializer = staticmethod(serialize_season)
+
+
+class SeasonDetailView(PeriodDetailView):
+    model = Season
+    noun = "season"
+    serializer = staticmethod(serialize_season)
+    missing_message = "That season no longer exists."
+    pk_kwarg = "season_id"
+
+
+class ReportingPeriodListView(PeriodListView):
+    model = ReportingPeriod
+    noun = "reporting period"
+    serializer = staticmethod(serialize_reporting_period)
+
+
+class ReportingPeriodDetailView(PeriodDetailView):
+    model = ReportingPeriod
+    noun = "reporting period"
+    serializer = staticmethod(serialize_reporting_period)
+    missing_message = "That reporting period no longer exists."
+    pk_kwarg = "period_id"
 
 
 class FieldListView(APIView):

@@ -30,6 +30,32 @@ def serialize_farm(farm):
     }
 
 
+def serialize_season(season):
+    payload = {
+        "id": as_id(season.id),
+        "farmId": as_id(season.farm_id),
+        "name": season.name,
+        "startDate": as_date(season.start_date),
+        "endDate": as_date(season.end_date),
+    }
+    if season.year is not None:
+        payload["year"] = season.year
+    return payload
+
+
+def serialize_reporting_period(period):
+    payload = {
+        "id": as_id(period.id),
+        "farmId": as_id(period.farm_id),
+        "name": period.name,
+        "startDate": as_date(period.start_date),
+        "endDate": as_date(period.end_date),
+    }
+    if period.year is not None:
+        payload["year"] = period.year
+    return payload
+
+
 def serialize_field(field):
     payload = {
         "id": as_id(field.id),

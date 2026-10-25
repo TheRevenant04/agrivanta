@@ -126,6 +126,46 @@ class TimestampedModel(models.Model):
         abstract = True
 
 
+class Season(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="seasons"
+    )
+    name = models.CharField(max_length=255)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    year = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["start_date", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["farm", "name"],
+                name="uniq_season_farm_name",
+            )
+        ]
+
+
+class ReportingPeriod(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="reporting_periods"
+    )
+    name = models.CharField(max_length=255)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    year = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["start_date", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["farm", "name"],
+                name="uniq_report_period_farm_name",
+            )
+        ]
+
+
 class Field(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(

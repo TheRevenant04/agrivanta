@@ -8,6 +8,13 @@ urlpatterns = [
     path("auth/logout", views.LogoutView.as_view()),
     path("auth/me", views.MeView.as_view()),
     path("farm", views.FarmView.as_view()),
+    path("seasons", views.SeasonListView.as_view()),
+    path("seasons/<str:season_id>", views.SeasonDetailView.as_view()),
+    path("reporting-periods", views.ReportingPeriodListView.as_view()),
+    path(
+        "reporting-periods/<str:period_id>",
+        views.ReportingPeriodDetailView.as_view(),
+    ),
     path("fields", views.FieldListView.as_view()),
     path("fields/<str:field_id>", views.FieldDetailView.as_view()),
     path("crops", views.CropListView.as_view()),
