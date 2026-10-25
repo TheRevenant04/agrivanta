@@ -192,6 +192,9 @@ def serialize_attachment(attachment):
 def serialize_expense(expense):
     return {
         "id": as_id(expense.id),
+        "cycleId": (
+            as_id(expense.cycle_id) if expense.cycle_id else None
+        ),
         "category": expense.category,
         "amount": as_number(expense.amount),
         "date": as_date(expense.date),

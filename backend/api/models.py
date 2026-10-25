@@ -389,6 +389,13 @@ class Expense(TimestampedModel):
     farm = models.ForeignKey(
         Farm, on_delete=models.CASCADE, related_name="expenses"
     )
+    cycle = models.ForeignKey(
+        CropCycle,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="expenses",
+    )
     category = models.CharField(
         max_length=32, choices=ExpenseCategory.choices
     )

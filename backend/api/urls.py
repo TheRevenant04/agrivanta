@@ -83,4 +83,8 @@ urlpatterns = [
     path("customers", views.CustomerListView.as_view()),
     path("sales", views.SaleListView.as_view()),
     path("sales/<str:sale_id>", views.SaleDetailView.as_view()),
+    path(
+        "reports/profitability",
+        views.ProfitabilityReportView.as_view(),
+    ),
 ]

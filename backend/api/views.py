@@ -1498,9 +1498,10 @@ class ExpenseListView(APIView):
 
     def post(self, request):
         farm = get_farm(request.user)
-        values = self._validate(request.data)
+        values = self._validate(request.data, farm)
         expense = Expense.objects.create(
             farm=farm,
+            cycle=values["cycle"],
             category=values["category"],
             amount=values["amount"],
             date=values["date"],
@@ -1513,7 +1514,7 @@ class ExpenseListView(APIView):
         )
 
     @staticmethod
-    def _validate(data):
+    def _validate(data, farm):
         category = str(data.get("category") or "").strip()
         if category not in ExpenseCategory.values:
             raise ApiError(
@@ -1545,11 +1546,23 @@ class ExpenseListView(APIView):
                 str(exc), status.HTTP_400_BAD_REQUEST, "date"
             )
         supplier = optional_text(data, "supplier")
+        cycle = None
+        cycle_id = data.get("cycleId")
+        if cycle_id not in (None, ""):
+            try:
+                cycle = CropCycle.objects.get(farm=farm, pk=cycle_id)
+            except (CropCycle.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "The selected crop cycle does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "cycleId",
+                )
         return {
             "category": category,
             "amount": amount,
             "date": expense_date,
             "supplier": supplier or None,
+            "cycle": cycle,
         }
 
 
@@ -1564,11 +1577,12 @@ class ExpenseDetailView(APIView):
                 "Cannot edit a posted expense.",
                 status.HTTP_400_BAD_REQUEST,
             )
-        values = ExpenseListView._validate(request.data)
+        values = ExpenseListView._validate(request.data, farm)
         expense.category = values["category"]
         expense.amount = values["amount"]
         expense.date = values["date"]
         expense.supplier = values["supplier"]
+        expense.cycle = values["cycle"]
         expense.save()
         return Response(serialize_expense(expense))
 
@@ -2105,3 +2119,30 @@ class SaleDetailView(APIView):
         )
         sale.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProfitabilityReportView(APIView):
+    def get(self, request):
+        from .reporting import aggregate_profitability
+
+        farm = get_farm(request.user)
+        self._validate_farm_param(farm, request)
+        return Response(
+            aggregate_profitability(
+                farm, request.query_params.get("group_by")
+            )
+        )
+
+    @staticmethod
+    def _validate_farm_param(farm, request):
+        for key in ("farm", "farmId"):
+            value = request.query_params.get(key)
+            if value in (None, ""):
+                continue
+            if str(value) != str(farm.id):
+                raise ApiError(
+                    "That farm does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    key,
+                )
+
