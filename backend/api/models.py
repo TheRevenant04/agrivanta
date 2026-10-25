@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -61,6 +62,11 @@ class ExpenseStatus(models.TextChoices):
 class PaymentType(models.TextChoices):
     RECEIVED = "received", "received"
     PAID = "paid", "paid"
+
+
+class AllocationBasis(models.TextChoices):
+    PER_HECTARE = "per_hectare", "per hectare"
+    PER_CYCLE_SHARE = "per_cycle_share", "per cycle share"
 
 
 class UserManager(BaseUserManager):
@@ -411,6 +417,46 @@ class Expense(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+
+
+class AllocationRule(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="allocation_rules"
+    )
+    name = models.CharField(max_length=255)
+    basis = models.CharField(max_length=32, choices=AllocationBasis.choices)
+    parameters = models.JSONField(default=dict, blank=True)
+    active_from = models.DateField(null=True, blank=True)
+    active_to = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(active_from__isnull=True)
+                    | models.Q(active_to__isnull=True)
+                    | models.Q(active_to__gte=models.F("active_from"))
+                ),
+                name="allocation_rule_active_period_valid",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.active_from is not None
+            and self.active_to is not None
+            and self.active_to < self.active_from
+        ):
+            raise ValidationError(
+                {
+                    "active_to": (
+                        "active_to must not be earlier than active_from."
+                    )
+                }
+            )
 
 
 class Attachment(TimestampedModel):
