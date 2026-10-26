@@ -2,8 +2,10 @@ from decimal import Decimal
 
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
+from django.core.paginator import EmptyPage, Paginator
 from django.core.validators import validate_email
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny
@@ -39,6 +41,7 @@ from .models import (
     Harvest,
     InventoryItem,
     MovementType,
+    Notification,
     Payment,
     PaymentType,
     ReportingPeriod,
@@ -71,6 +74,7 @@ from .serializers import (
     serialize_harvest,
     serialize_inventory_item,
     serialize_movement,
+    serialize_notification,
     serialize_payment,
     serialize_reporting_period,
     serialize_sale,
@@ -2347,4 +2351,136 @@ class ProfitabilityReportView(APIView):
                     status.HTTP_404_NOT_FOUND,
                     key,
                 )
+
+
+DEFAULT_NOTIFICATION_PAGE_SIZE = 20
+MAX_NOTIFICATION_PAGE_SIZE = 100
+
+
+def notification_for_user(user, notification_id):
+    try:
+        return Notification.objects.get(user=user, pk=notification_id)
+    except (Notification.DoesNotExist, ValueError, ValidationError):
+        raise ApiError(
+            "That notification no longer exists.",
+            status.HTTP_404_NOT_FOUND,
+            "id",
+        )
+
+
+def notification_page_param(request, key, default, maximum=None):
+    raw = request.query_params.get(key)
+    if raw in (None, ""):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ApiError(
+            f"{key} must be a positive whole number.",
+            status.HTTP_400_BAD_REQUEST,
+            key,
+        )
+    if value < 1 or (maximum is not None and value > maximum):
+        limit = f" between 1 and {maximum}" if maximum is not None else ""
+        raise ApiError(
+            f"{key} must be a positive whole number{limit}.",
+            status.HTTP_400_BAD_REQUEST,
+            key,
+        )
+    return value
+
+
+class NotificationListView(APIView):
+    def get(self, request):
+        page_size = notification_page_param(
+            request,
+            "page_size",
+            DEFAULT_NOTIFICATION_PAGE_SIZE,
+            MAX_NOTIFICATION_PAGE_SIZE,
+        )
+        page_number = notification_page_param(request, "page", 1)
+        notifications = Notification.objects.filter(user=request.user)
+        unread_count = notifications.filter(read=False).count()
+        paginator = Paginator(notifications, page_size)
+        try:
+            page = paginator.page(page_number)
+        except EmptyPage:
+            raise ApiError(
+                "That page does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "page",
+            )
+        return Response(
+            {
+                "count": paginator.count,
+                "unreadCount": unread_count,
+                "page": page.number,
+                "pageSize": page_size,
+                "totalPages": paginator.num_pages,
+                "nextPage": (
+                    page.next_page_number() if page.has_next() else None
+                ),
+                "previousPage": (
+                    page.previous_page_number()
+                    if page.has_previous()
+                    else None
+                ),
+                "results": [
+                    serialize_notification(notification)
+                    for notification in page.object_list
+                ],
+            }
+        )
+
+
+class NotificationDetailView(APIView):
+    def get(self, request, notification_id):
+        notification = notification_for_user(
+            request.user, notification_id
+        )
+        return Response(serialize_notification(notification))
+
+
+class NotificationMarkReadView(APIView):
+    def post(self, request, notification_id):
+        return self._mark_read(request, notification_id)
+
+    def put(self, request, notification_id):
+        return self._mark_read(request, notification_id)
+
+    def patch(self, request, notification_id):
+        return self._mark_read(request, notification_id)
+
+    @staticmethod
+    def _mark_read(request, notification_id):
+        notification = notification_for_user(
+            request.user, notification_id
+        )
+        if not notification.read:
+            notification.read = True
+            notification.save(update_fields=["read", "updated_at"])
+        return Response(serialize_notification(notification))
+
+
+class NotificationMarkAllReadView(APIView):
+    def post(self, request):
+        return self._mark_all_read(request)
+
+    def put(self, request):
+        return self._mark_all_read(request)
+
+    @staticmethod
+    def _mark_all_read(request):
+        updated = Notification.objects.filter(
+            user=request.user, read=False
+        ).update(read=True, updated_at=timezone.now())
+        return Response({"updated": updated, "unreadCount": 0})
+
+
+class NotificationUnreadCountView(APIView):
+    def get(self, request):
+        count = Notification.objects.filter(
+            user=request.user, read=False
+        ).count()
+        return Response({"unreadCount": count})
 

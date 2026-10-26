@@ -13,6 +13,12 @@ class Role(models.TextChoices):
     WORKER = "worker", "worker"
 
 
+class NotificationType(models.TextChoices):
+    INFO = "info", "info"
+    WARNING = "warning", "warning"
+    ALERT = "alert", "alert"
+
+
 class BaseMeasure(models.TextChoices):
     MASS = "mass", "mass"
     VOLUME = "volume", "volume"
@@ -636,3 +642,35 @@ class ImportCommit(models.Model):
 
     class Meta:
         ordering = ["-created_at", "id"]
+
+
+class Notification(TimestampedModel):
+    """An in-app notification addressed to a single user."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
+    type = models.CharField(
+        max_length=20,
+        choices=NotificationType.choices,
+        default=NotificationType.INFO,
+    )
+    message = models.TextField()
+    read = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+        indexes = [
+            models.Index(
+                fields=["user", "read", "-created_at"],
+                name="notif_user_read_created_idx",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.type}: {self.message[:50]}"
+
+    @property
+    def is_read(self):
+        return self.read
