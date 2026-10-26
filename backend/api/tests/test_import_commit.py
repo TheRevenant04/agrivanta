@@ -215,6 +215,50 @@ def test_per_entry_correction_is_supported(client):
     assert Expense.objects.get().amount == Decimal("12.5000")
 
 
+def test_invalid_preview_row_can_be_corrected_before_import(client):
+    data = expenses_preview(
+        client,
+        "2026-03-01,inputs,10,,,",
+        "2026-03-02,labour,not-a-number,,,",
+    ).data
+    assert data["counts"] == {
+        "total": 2,
+        "valid": 1,
+        "invalid": 1,
+        "duplicate": 0,
+    }
+    token = data["previewToken"]
+    invalid_row = data["invalidRows"][0]["row"]
+
+    rejected = commit(client, token, [invalid_row])
+
+    assert rejected.status_code == 400
+    assert rejected.data["field"] == "confirmedRows"
+    assert "amount" in rejected.data["detail"]
+    assert Expense.objects.count() == 0
+    assert ImportCommit.objects.count() == 0
+    record = ImportPreview.objects.get(token=token)
+    assert record.consumed_at is None
+
+    corrected = commit(
+        client,
+        token,
+        [invalid_row],
+        {str(invalid_row): {"amount": "20"}},
+    )
+
+    assert corrected.status_code == 201, corrected.data
+    expense = Expense.objects.get()
+    assert expense.date == date(2026, 3, 2)
+    assert expense.category == "labour"
+    assert expense.amount == Decimal("20.0000")
+    assert corrected.data["counts"] == {
+        "confirmed": 1,
+        "imported": 1,
+        "skipped": 1,
+    }
+
+
 def test_empty_confirmation_is_rejected_without_writes(client):
     data = expenses_preview(
         client,

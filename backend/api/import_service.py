@@ -480,10 +480,12 @@ def _validate_movement_row(values, index, farm, items_cache):
 
 
 def preview_import(farm, entity_type, uploaded_file):
-    """Return a validated, read-only preview for a CSV or Excel upload.
+    """Return a validated preview for a CSV or Excel upload.
 
-    ``uploaded_file`` must be a file-like object with a ``name`` and ``read``
-    method, such as a Django ``UploadedFile``. Structural file problems raise
+    A server-side token stores the normalized rows so a later confirmation
+    can commit them without trusting client data. ``uploaded_file`` must be a
+    file-like object with a ``name`` and ``read`` method, such as a Django
+    ``UploadedFile``. Structural file problems raise
     :class:`ImportFileError`; row problems are reported in the preview.
     """
 
@@ -528,6 +530,12 @@ def preview_import(farm, entity_type, uploaded_file):
                 }
             )
             continue
+        stored_rows.append(
+            {
+                "row": row_number,
+                "values": [_cell_text(value) for value in values],
+            }
+        )
         result, errors = validator(values, index, farm, items_cache)
         if errors:
             invalid_rows.append({"row": row_number, "errors": errors})
@@ -556,12 +564,6 @@ def preview_import(farm, entity_type, uploaded_file):
             continue
         seen_in_file[key] = row_number
         valid_rows.append({"row": row_number, **data})
-        stored_rows.append(
-            {
-                "row": row_number,
-                "values": [_cell_text(value) for value in values],
-            }
-        )
 
     total = len(rows)
     preview = ImportPreview.objects.create(
@@ -818,11 +820,14 @@ def commit_import(farm, actor, token, confirmed_rows, corrections=None):
         if preview.entity_type == "expenses":
             validator = _validate_expense_row
             items_cache = None
+            db_keys = _existing_expense_keys(farm)
         else:
             validator = _validate_movement_row
             items_cache = _item_lookup(farm)
+            db_keys = _existing_movement_keys(farm)
 
         pending = []
+        confirmed_keys = set()
         for row, overrides in selections:
             if row not in stored:
                 raise ImportCommitError(
@@ -839,7 +844,18 @@ def commit_import(farm, actor, token, confirmed_rows, corrections=None):
                 raise ImportCommitError(
                     _format_row_errors(row, errors), "confirmedRows"
                 )
-            data, _ = result
+            data, key = result
+            if key in db_keys:
+                raise ImportCommitError(
+                    f"Row {row} duplicates an existing record.",
+                    "confirmedRows",
+                )
+            if key in confirmed_keys:
+                raise ImportCommitError(
+                    f"Row {row} duplicates another confirmed row.",
+                    "confirmedRows",
+                )
+            confirmed_keys.add(key)
             pending.append((row, data))
 
         created = []
