@@ -594,3 +594,45 @@ class Payment(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+
+
+class ImportPreview(models.Model):
+    """Server-side state for a validated import preview.
+
+    The token is single-use: a successful commit records ``consumed_at`` so
+    replaying the same preview cannot create records twice.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="import_previews"
+    )
+    entity_type = models.CharField(max_length=32)
+    columns = models.JSONField(default=dict)
+    rows = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+
+
+class ImportCommit(models.Model):
+    """Minimal audit record for a confirmed import commit."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="import_commits"
+    )
+    actor = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="import_commits"
+    )
+    preview_token = models.UUIDField()
+    entity_type = models.CharField(max_length=32)
+    entity_counts = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "id"]

@@ -1,35 +1,46 @@
-"""Read-only CSV and Excel import previews.
+"""CSV and Excel import previews plus confirmed import commits.
 
 The service parses an uploaded file, validates every data row, and flags
-duplicates both inside the file and against existing farm records. It never
-writes to the database: all access is through read-only ORM queries so the
-preview can be shown before a confirmation step performs the import.
+duplicates both inside the file and against existing farm records. A valid
+preview is stored server-side behind a single-use token so the confirmation
+step can persist only the rows the user selected. Previewing never creates
+expense or stock movement records.
 """
 
 import csv
 import io
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import openpyxl
 from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.utils import timezone
 
 from .models import (
     CropCycle,
     Expense,
     ExpenseCategory,
+    ExpenseStatus,
+    ImportCommit,
+    ImportPreview,
     InventoryItem,
     MovementType,
     StockMovement,
 )
 
 __all__ = [
+    "ImportCommitError",
     "ImportFileError",
+    "PREVIEW_TOKEN_TTL",
     "SUPPORTED_ENTITY_TYPES",
+    "commit_import",
     "preview_import",
 ]
+
+PREVIEW_TOKEN_TTL = timedelta(minutes=30)
 
 SUPPORTED_ENTITY_TYPES = ("expenses", "inventory_movements")
 
@@ -74,6 +85,16 @@ _MAX_DECIMAL_PLACES = 4
 
 class ImportFileError(ValueError):
     """Raised when a whole file cannot be read or is structurally invalid."""
+
+
+class ImportCommitError(ValueError):
+    """Raised when a preview cannot be committed as requested."""
+
+    def __init__(self, message, field=None, status_code=400):
+        super().__init__(message)
+        self.message = message
+        self.field = field
+        self.status_code = status_code
 
 
 def _cell_text(value):
@@ -488,6 +509,7 @@ def preview_import(farm, entity_type, uploaded_file):
     valid_rows = []
     invalid_rows = []
     duplicate_rows = []
+    stored_rows = []
     seen_in_file = {}
 
     for row_number, values in rows:
@@ -534,11 +556,26 @@ def preview_import(farm, entity_type, uploaded_file):
             continue
         seen_in_file[key] = row_number
         valid_rows.append({"row": row_number, **data})
+        stored_rows.append(
+            {
+                "row": row_number,
+                "values": [_cell_text(value) for value in values],
+            }
+        )
 
     total = len(rows)
+    preview = ImportPreview.objects.create(
+        farm=farm,
+        entity_type=entity_type,
+        columns=index,
+        rows=stored_rows,
+        expires_at=timezone.now() + PREVIEW_TOKEN_TTL,
+    )
     return {
         "entityType": entity_type,
         "fileName": file_name,
+        "previewToken": str(preview.token),
+        "expiresAt": preview.expires_at.isoformat(),
         "totalRows": total,
         "validRows": valid_rows,
         "invalidRows": invalid_rows,
@@ -566,4 +603,280 @@ def _key_payload(entity_type, data):
         "quantity": data["quantity"],
         "date": data["date"],
         "note": data["note"],
+    }
+
+
+def _alias_lookup(entity_type):
+    return {
+        alias: canonical
+        for canonical, aliases in _COLUMNS[entity_type].items()
+        for alias in aliases
+    }
+
+
+def _row_identifier(value):
+    if isinstance(value, bool):
+        raise ValueError
+    if isinstance(value, int):
+        row = value
+    else:
+        text = _cell_text(value)
+        if not text:
+            raise ValueError
+        row = int(text)
+    if row <= 0:
+        raise ValueError
+    return row
+
+
+def _parse_corrections(corrections):
+    if corrections is None:
+        return {}
+    if not isinstance(corrections, dict):
+        raise ImportCommitError(
+            "Corrections must be an object keyed by row number.",
+            "corrections",
+        )
+    parsed = {}
+    for key, values in corrections.items():
+        try:
+            row = _row_identifier(key)
+        except (TypeError, ValueError):
+            raise ImportCommitError(
+                "Corrections must be keyed by a valid row number.",
+                "corrections",
+            )
+        if not isinstance(values, dict):
+            raise ImportCommitError(
+                "Each correction must be an object of field values.",
+                "corrections",
+            )
+        parsed[row] = values
+    return parsed
+
+
+def _parse_confirmation(confirmed_rows, corrections):
+    if not isinstance(confirmed_rows, list) or not confirmed_rows:
+        raise ImportCommitError(
+            "Select at least one row to import.", "confirmedRows"
+        )
+    parsed = []
+    seen = set()
+    for entry in confirmed_rows:
+        overrides = {}
+        if isinstance(entry, dict):
+            if "row" not in entry:
+                raise ImportCommitError(
+                    "Each confirmed row must include a row number.",
+                    "confirmedRows",
+                )
+            raw_row = entry.get("row")
+            values = entry.get("values", entry.get("corrections"))
+            if values is not None:
+                if not isinstance(values, dict):
+                    raise ImportCommitError(
+                        "Corrected values must be an object of field values.",
+                        "confirmedRows",
+                    )
+                overrides.update(values)
+        else:
+            raw_row = entry
+        try:
+            row = _row_identifier(raw_row)
+        except (TypeError, ValueError):
+            raise ImportCommitError(
+                "Each confirmed row must include a valid row number.",
+                "confirmedRows",
+            )
+        if row in seen:
+            raise ImportCommitError(
+                f"Row {row} is confirmed more than once.", "confirmedRows"
+            )
+        overrides = {**corrections.get(row, {}), **overrides}
+        seen.add(row)
+        parsed.append((row, overrides))
+    return parsed
+
+
+def _apply_corrections(entity_type, values, index, overrides):
+    values = list(values)
+    index = dict(index)
+    lookup = _alias_lookup(entity_type)
+    for field, value in overrides.items():
+        if field == "itemId":
+            # Derived from the item name; never trust a client-supplied id.
+            continue
+        canonical = lookup.get(_normalize_header(field))
+        if canonical is None:
+            raise ImportCommitError(
+                f'Field "{field}" cannot be corrected for this import.',
+                "corrections",
+            )
+        position = index.get(canonical)
+        if position is None:
+            position = len(values)
+            index[canonical] = position
+        while len(values) <= position:
+            values.append(None)
+        values[position] = value
+    return values, index
+
+
+def _format_row_errors(row, errors):
+    messages = "; ".join(
+        f'{error["field"]}: {error["message"]}' for error in errors
+    )
+    return f"Row {row} could not be imported: {messages}"
+
+
+def _get_preview(farm, token):
+    if token in (None, ""):
+        raise ImportCommitError("Preview token is required.", "token")
+    try:
+        preview = (
+            ImportPreview.objects.select_for_update()
+            .get(token=token, farm=farm)
+        )
+    except (
+        ImportPreview.DoesNotExist,
+        ValidationError,
+        TypeError,
+        ValueError,
+    ):
+        raise ImportCommitError(
+            "The preview token is invalid.", "token"
+        )
+    if preview.consumed_at is not None:
+        raise ImportCommitError(
+            "This preview has already been imported and cannot be reused.",
+            "token",
+            status_code=409,
+        )
+    if preview.expires_at <= timezone.now():
+        raise ImportCommitError(
+            "This preview has expired. Upload the file again to continue.",
+            "token",
+        )
+    return preview
+
+
+def _stored_index(columns):
+    return {
+        str(key): int(value) for key, value in (columns or {}).items()
+    }
+
+
+def _create_expense(farm, data):
+    return Expense.objects.create(
+        farm=farm,
+        cycle_id=data["cycleId"] or None,
+        category=data["category"],
+        amount=data["amount"],
+        date=date.fromisoformat(data["date"]),
+        supplier=data["supplier"],
+        notes=data["notes"],
+        status=ExpenseStatus.DRAFT,
+    )
+
+
+def _create_movement(farm, data):
+    movement_date = (
+        date.fromisoformat(data["date"]) if data["date"] else None
+    )
+    return StockMovement.objects.create(
+        farm=farm,
+        item_id=data["itemId"],
+        type=data["type"],
+        quantity=data["quantity"],
+        date=movement_date,
+        note=data["note"] or "",
+    )
+
+
+def commit_import(farm, actor, token, confirmed_rows, corrections=None):
+    """Persist only the confirmed rows from a server-side preview.
+
+    ``confirmed_rows`` is a list of preview row numbers. Items may also be
+    objects with a ``row`` key and optional ``values``/``corrections``
+    mapping. ``corrections`` is a top-level object keyed by row number. The
+    preview token is consumed only after a successful import.
+    """
+
+    if token in (None, ""):
+        raise ImportCommitError("Preview token is required.", "token")
+    if not isinstance(confirmed_rows, list) or not confirmed_rows:
+        raise ImportCommitError(
+            "Select at least one row to import.", "confirmedRows"
+        )
+    corrections = _parse_corrections(corrections)
+
+    with transaction.atomic():
+        preview = _get_preview(farm, token)
+        selections = _parse_confirmation(confirmed_rows, corrections)
+        index = _stored_index(preview.columns)
+        stored = {row["row"]: row["values"] for row in preview.rows}
+        if preview.entity_type == "expenses":
+            validator = _validate_expense_row
+            items_cache = None
+        else:
+            validator = _validate_movement_row
+            items_cache = _item_lookup(farm)
+
+        pending = []
+        for row, overrides in selections:
+            if row not in stored:
+                raise ImportCommitError(
+                    f"Row {row} is not part of this preview.",
+                    "confirmedRows",
+                )
+            values, row_index = _apply_corrections(
+                preview.entity_type, stored[row], index, overrides
+            )
+            result, errors = validator(
+                values, row_index, farm, items_cache
+            )
+            if errors:
+                raise ImportCommitError(
+                    _format_row_errors(row, errors), "confirmedRows"
+                )
+            data, _ = result
+            pending.append((row, data))
+
+        created = []
+        for row, data in pending:
+            if preview.entity_type == "expenses":
+                instance = _create_expense(farm, data)
+            else:
+                instance = _create_movement(farm, data)
+            created.append((row, instance))
+
+        preview.consumed_at = timezone.now()
+        preview.save(update_fields=["consumed_at"])
+        audit = ImportCommit.objects.create(
+            farm=farm,
+            actor=actor,
+            preview_token=preview.token,
+            entity_type=preview.entity_type,
+            entity_counts={preview.entity_type: len(created)},
+        )
+
+    return {
+        "previewToken": str(preview.token),
+        "entityType": preview.entity_type,
+        "imported": [
+            {"row": row, "id": str(instance.id)}
+            for row, instance in created
+        ],
+        "counts": {
+            "confirmed": len(pending),
+            "imported": len(created),
+            "skipped": max(0, len(preview.rows) - len(pending)),
+        },
+        "audit": {
+            "id": str(audit.id),
+            "actorId": str(audit.actor_id),
+            "committedAt": audit.created_at.isoformat(),
+            "entityCounts": audit.entity_counts,
+            "previewToken": str(audit.preview_token),
+        },
     }

@@ -13,7 +13,9 @@ from rest_framework.views import APIView
 from .exceptions import ApiError
 from .import_service import (
     SUPPORTED_ENTITY_TYPES,
+    ImportCommitError,
     ImportFileError,
+    commit_import,
     preview_import,
 )
 from .models import (
@@ -1693,6 +1695,28 @@ class ImportPreviewView(APIView):
                 str(exc), status.HTTP_400_BAD_REQUEST, "file"
             )
         return Response(payload)
+
+
+class ImportCommitView(APIView):
+    def post(self, request):
+        farm = get_farm(request.user)
+        token = request.data.get("token") or request.data.get(
+            "previewToken"
+        )
+        confirmed = request.data.get("confirmedRows")
+        if confirmed is None:
+            confirmed = request.data.get("confirmed")
+        try:
+            payload = commit_import(
+                farm,
+                request.user,
+                token,
+                confirmed,
+                request.data.get("corrections"),
+            )
+        except ImportCommitError as exc:
+            raise ApiError(str(exc), exc.status_code, exc.field)
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 class BudgetListView(APIView):
