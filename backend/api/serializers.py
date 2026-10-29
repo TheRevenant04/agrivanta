@@ -299,7 +299,27 @@ def serialize_harvest(harvest):
 
 
 def serialize_customer(customer):
-    return {"id": as_id(customer.id), "name": customer.name}
+    return {
+        "id": as_id(customer.id),
+        "name": customer.name,
+        "contactName": customer.contact_name,
+        "email": customer.email,
+        "phone": customer.phone,
+        "address": customer.address,
+        "notes": customer.notes,
+    }
+
+
+def serialize_supplier(supplier):
+    return {
+        "id": as_id(supplier.id),
+        "name": supplier.name,
+        "contactName": supplier.contact_name,
+        "email": supplier.email,
+        "phone": supplier.phone,
+        "address": supplier.address,
+        "notes": supplier.notes,
+    }
 
 
 def serialize_sale(sale):

@@ -48,6 +48,7 @@ from .models import (
     Sale,
     Season,
     StockMovement,
+    Supplier,
     Unit,
     UnitConversion,
     User,
@@ -82,6 +83,7 @@ from .serializers import (
     serialize_reporting_period,
     serialize_sale,
     serialize_season,
+    serialize_supplier,
     serialize_unit,
     serialize_user,
     serialize_variety,
@@ -97,6 +99,14 @@ STANDARD_ACTIVITY_TEMPLATES = [
 ]
 
 DEFAULT_CUSTOMER_NAMES = ["Greenfield Grain Co.", "Harbour Mill"]
+
+COUNTERPARTY_OPTIONAL_FIELDS = (
+    ("contactName", "contact_name"),
+    ("email", "email"),
+    ("phone", "phone"),
+    ("address", "address"),
+    ("notes", "notes"),
+)
 
 ACTIVITY_TRANSITIONS = {
     ActivityStatus.PLANNED: [ActivityStatus.IN_PROGRESS],
@@ -2642,15 +2652,126 @@ class HarvestListView(APIView):
         )
 
 
-class CustomerListView(APIView):
+class CounterpartyListView(APIView):
+    model = None
+    serializer = None
+    noun = None
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
             [
-                serialize_customer(customer)
-                for customer in farm.customers.all()
+                self.serializer(counterparty)
+                for counterparty in self.model.objects.filter(farm=farm)
             ]
         )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        name = require_text(
+            request.data, "name", f"{self.noun} name is required."
+        )
+        values = self._optional_values(request.data)
+        counterparty = self.model.objects.create(
+            farm=farm, name=name, **values
+        )
+        return Response(
+            self.serializer(counterparty),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _optional_values(data):
+        values = {}
+        for api_field, model_field in COUNTERPARTY_OPTIONAL_FIELDS:
+            if api_field not in data:
+                continue
+            value = optional_text(data, api_field)
+            if api_field == "email" and value:
+                try:
+                    validate_email(value)
+                except ValidationError:
+                    raise ApiError(
+                        "Enter a valid email address.",
+                        status.HTTP_400_BAD_REQUEST,
+                        "email",
+                    )
+            values[model_field] = value
+        return values
+
+
+class CounterpartyDetailView(APIView):
+    model = None
+    serializer = None
+    noun = None
+    id_kwarg = None
+
+    def get(self, request, **kwargs):
+        counterparty = self._get(request, kwargs)
+        return Response(self.serializer(counterparty))
+
+    def put(self, request, **kwargs):
+        return self._update(request, kwargs)
+
+    def patch(self, request, **kwargs):
+        return self._update(request, kwargs)
+
+    def delete(self, request, **kwargs):
+        counterparty = self._get(request, kwargs)
+        counterparty.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _get(self, request, kwargs):
+        farm = get_farm(request.user)
+        return scoped_get(
+            self.model,
+            farm,
+            kwargs[self.id_kwarg],
+            f"That {self.noun} no longer exists.",
+        )
+
+    def _update(self, request, kwargs):
+        counterparty = self._get(request, kwargs)
+        changed = False
+        if "name" in request.data:
+            counterparty.name = require_text(
+                request.data, "name", f"{self.noun} name is required."
+            )
+            changed = True
+        for model_field, value in CounterpartyListView._optional_values(
+            request.data
+        ).items():
+            setattr(counterparty, model_field, value)
+            changed = True
+        if changed:
+            counterparty.save()
+        return Response(self.serializer(counterparty))
+
+
+class SupplierListView(CounterpartyListView):
+    model = Supplier
+    serializer = staticmethod(serialize_supplier)
+    noun = "Supplier"
+
+
+class SupplierDetailView(CounterpartyDetailView):
+    model = Supplier
+    serializer = staticmethod(serialize_supplier)
+    noun = "supplier"
+    id_kwarg = "supplier_id"
+
+
+class CustomerListView(CounterpartyListView):
+    model = Customer
+    serializer = staticmethod(serialize_customer)
+    noun = "Customer"
+
+
+class CustomerDetailView(CounterpartyDetailView):
+    model = Customer
+    serializer = staticmethod(serialize_customer)
+    noun = "customer"
+    id_kwarg = "customer_id"
 
 
 class SaleListView(APIView):

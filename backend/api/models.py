@@ -495,6 +495,11 @@ class Supplier(TimestampedModel):
         Farm, on_delete=models.CASCADE, related_name="suppliers"
     )
     name = models.CharField(max_length=255)
+    contact_name = models.CharField(max_length=255, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=255, blank=True, default="")
+    address = models.TextField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["name", "id"]
@@ -506,6 +511,11 @@ class Customer(TimestampedModel):
         Farm, on_delete=models.CASCADE, related_name="customers"
     )
     name = models.CharField(max_length=255)
+    contact_name = models.CharField(max_length=255, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=255, blank=True, default="")
+    address = models.TextField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["created_at", "id"]
