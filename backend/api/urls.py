@@ -56,6 +56,16 @@ urlpatterns = [
         "labour-records/<str:record_id>",
         views.LabourRecordDetailView.as_view(),
     ),
+    path("equipment", views.EquipmentListView.as_view()),
+    path(
+        "equipment/<str:equipment_id>",
+        views.EquipmentDetailView.as_view(),
+    ),
+    path("equipment-usages", views.EquipmentUsageListView.as_view()),
+    path(
+        "equipment-usages/<str:usage_id>",
+        views.EquipmentUsageDetailView.as_view(),
+    ),
     path("inventory-items", views.InventoryItemListView.as_view()),
     path(
         "inventory-items/<str:item_id>",
