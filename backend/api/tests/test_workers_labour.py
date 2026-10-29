@@ -110,6 +110,12 @@ def test_labour_records_support_crud_and_activity_filter(client, cycle):
     assert client.get(
         f"{LABOUR_RECORDS}?activityId=00000000-0000-0000-0000-000000000000"
     ).data == []
+    invalid_filter = client.get(
+        f"{LABOUR_RECORDS}?activityId=not-a-uuid"
+    )
+    assert invalid_filter.status_code == 400
+    assert invalid_filter.data["field"] == "activityId"
+    assert "valid activity ID" in invalid_filter.data["detail"]
 
     changed = client.put(
         f"{LABOUR_RECORDS}/{record['id']}",

@@ -1398,7 +1398,15 @@ class LabourRecordListView(APIView):
         activity_id = request.query_params.get(
             "activityId", request.query_params.get("activity")
         )
-        if activity_id:
+        if activity_id is not None:
+            try:
+                activity_id = Activity._meta.pk.to_python(activity_id)
+            except (AttributeError, TypeError, ValueError, ValidationError):
+                raise ApiError(
+                    "The activity filter must be a valid activity ID.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "activityId",
+                )
             records = records.filter(activity_id=activity_id)
         return Response(
             [serialize_labour_record(record) for record in records]
