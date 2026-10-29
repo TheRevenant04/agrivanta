@@ -4,6 +4,7 @@ from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny
@@ -107,6 +108,10 @@ COUNTERPARTY_OPTIONAL_FIELDS = (
     ("address", "address"),
     ("notes", "notes"),
 )
+COUNTERPARTY_MAX_LENGTHS = {
+    api_field: Supplier._meta.get_field(model_field).max_length
+    for api_field, model_field in COUNTERPARTY_OPTIONAL_FIELDS
+}
 
 ACTIVITY_TRANSITIONS = {
     ActivityStatus.PLANNED: [ActivityStatus.IN_PROGRESS],
@@ -128,6 +133,17 @@ def optional_text(data, key):
     if value is None:
         return ""
     return str(value).strip()
+
+
+def validate_counterparty_length(value, api_field):
+    max_length = COUNTERPARTY_MAX_LENGTHS[api_field]
+    if max_length and len(value) > max_length:
+        raise ApiError(
+            f"Ensure this field has no more than {max_length} characters.",
+            status.HTTP_400_BAD_REQUEST,
+            api_field,
+        )
+    return value
 
 
 def get_farm(user):
@@ -2686,7 +2702,9 @@ class CounterpartyListView(APIView):
         for api_field, model_field in COUNTERPARTY_OPTIONAL_FIELDS:
             if api_field not in data:
                 continue
-            value = optional_text(data, api_field)
+            value = validate_counterparty_length(
+                optional_text(data, api_field), api_field
+            )
             if api_field == "email" and value:
                 try:
                     validate_email(value)
@@ -2718,7 +2736,15 @@ class CounterpartyDetailView(APIView):
 
     def delete(self, request, **kwargs):
         counterparty = self._get(request, kwargs)
-        counterparty.delete()
+        try:
+            counterparty.delete()
+        except ProtectedError:
+            raise ApiError(
+                f"This {self.noun} is linked to existing records and "
+                "cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+                "id",
+            )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _get(self, request, kwargs):

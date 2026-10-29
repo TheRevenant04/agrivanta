@@ -1,6 +1,6 @@
 import pytest
 
-from api.models import Customer, Farm, Supplier, User
+from api.models import Customer, Farm, Sale, Supplier, User
 
 
 RESOURCES = (
@@ -112,6 +112,93 @@ def test_counterparty_email_must_be_valid(client, path, _model, _noun):
 
     assert response.status_code == 400
     assert response.data["field"] == "email"
+
+
+@pytest.mark.parametrize(("path", "model", "_noun"), RESOURCES)
+@pytest.mark.parametrize(
+    ("field", "model_field", "max_length"),
+    (
+        ("contactName", "contact_name", 255),
+        ("email", "email", 254),
+        ("phone", "phone", 255),
+    ),
+)
+@pytest.mark.parametrize("operation", ("create", "update"))
+def test_counterparties_reject_overlong_optional_fields(
+    client,
+    path,
+    model,
+    _noun,
+    field,
+    model_field,
+    max_length,
+    operation,
+):
+    profile = None
+    if operation == "update":
+        created = client.post(path, {"name": "Length Check"}, format="json")
+        assert created.status_code == 201
+        profile = created.data
+
+    if operation == "create":
+        response = client.post(
+            path,
+            {"name": "Length Check", field: "x" * (max_length + 1)},
+            format="json",
+        )
+    else:
+        response = client.patch(
+            f"{path}/{profile['id']}",
+            {field: "x" * (max_length + 1)},
+            format="json",
+        )
+
+    assert response.status_code == 400
+    assert response.data["field"] == field
+    assert f"no more than {max_length} characters" in response.data["detail"]
+    if profile:
+        saved = model.objects.get(pk=profile["id"])
+        assert getattr(saved, model_field) == ""
+
+
+def test_customer_linked_to_sale_cannot_be_deleted(client, cycle):
+    built = cycle()
+    harvest = client.post(
+        "/api/harvests",
+        {
+            "cycleId": built["cycle"]["id"],
+            "quantity": "100",
+            "unitId": built["unit"]["id"],
+            "date": "2026-08-01",
+        },
+        format="json",
+    )
+    assert harvest.status_code == 201
+    customer = client.post(
+        "/api/customers", {"name": "Linked Customer"}, format="json"
+    )
+    assert customer.status_code == 201
+    sale = client.post(
+        "/api/sales",
+        {
+            "customerId": customer.data["id"],
+            "harvestId": harvest.data["id"],
+            "quantity": "10",
+            "unitPrice": "3.5",
+            "date": "2026-08-05",
+        },
+        format="json",
+    )
+    assert sale.status_code == 201
+
+    deleted = client.delete(f"/api/customers/{customer.data['id']}")
+
+    assert deleted.status_code == 409
+    assert deleted.data["field"] == "id"
+    assert "linked" in deleted.data["detail"].lower()
+    assert "cannot be deleted" in deleted.data["detail"].lower()
+    assert Customer.objects.filter(pk=customer.data["id"]).exists()
+    assert Sale.objects.filter(pk=sale.data["id"]).exists()
 
 
 @pytest.mark.parametrize(("path", "_model", "_noun"), RESOURCES)
