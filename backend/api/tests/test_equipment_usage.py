@@ -179,6 +179,7 @@ def test_equipment_usage_activity_filter_and_empty_results(client, cycle):
     built = cycle()
     first_activity = create_activity(client, cycle, built)
     second_activity = create_activity(client, cycle, built)
+    empty_activity = create_activity(client, cycle, built)
     equipment = create_equipment(client)
     first_usage = create_usage(
         client, equipment["id"], first_activity["id"]
@@ -190,6 +191,9 @@ def test_equipment_usage_activity_filter_and_empty_results(client, cycle):
     ).data == [first_usage]
     assert client.get(
         f"{EQUIPMENT_USAGES}?activityId=00000000-0000-0000-0000-000000000000"
+    ).data == []
+    assert client.get(
+        f"{EQUIPMENT_USAGES}?activityId={empty_activity['id']}"
     ).data == []
     invalid = client.get(f"{EQUIPMENT_USAGES}?activityId=not-a-uuid")
     assert invalid.status_code == 400
