@@ -49,6 +49,13 @@ urlpatterns = [
         "activities/<str:activity_id>/resource-needs",
         views.ActivityResourceNeedsView.as_view(),
     ),
+    path("workers", views.WorkerListView.as_view()),
+    path("workers/<str:worker_id>", views.WorkerDetailView.as_view()),
+    path("labour-records", views.LabourRecordListView.as_view()),
+    path(
+        "labour-records/<str:record_id>",
+        views.LabourRecordDetailView.as_view(),
+    ),
     path("inventory-items", views.InventoryItemListView.as_view()),
     path(
         "inventory-items/<str:item_id>",

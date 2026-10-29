@@ -38,6 +38,7 @@ from .models import (
     Field,
     Harvest,
     InventoryItem,
+    LabourRecord,
     MovementType,
     Payment,
     PaymentType,
@@ -49,6 +50,7 @@ from .models import (
     UnitConversion,
     User,
     Variety,
+    Worker,
 )
 from .serializers import (
     as_date,
@@ -70,6 +72,7 @@ from .serializers import (
     serialize_field,
     serialize_harvest,
     serialize_inventory_item,
+    serialize_labour_record,
     serialize_movement,
     serialize_payment,
     serialize_reporting_period,
@@ -78,6 +81,7 @@ from .serializers import (
     serialize_unit,
     serialize_user,
     serialize_variety,
+    serialize_worker,
 )
 
 STANDARD_ACTIVITY_TEMPLATES = [
@@ -1117,7 +1121,7 @@ class ActivityListView(APIView):
         farm = get_farm(request.user)
         activities = farm.activities.select_related(
             "cycle", "type"
-        ).prefetch_related("input_needs")
+        ).prefetch_related("input_needs", "labour_records")
         cycle_id = request.query_params.get("cycle")
         if cycle_id:
             activities = activities.filter(cycle_id=cycle_id)
@@ -1316,6 +1320,199 @@ class ActivityResourceNeedsView(APIView):
             )
 
         return Response(serialize_activity(activity))
+
+
+class WorkerListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        return Response(
+            [
+                serialize_worker(worker)
+                for worker in farm.workers.select_related("user")
+            ]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        worker = self._save(farm, None, request.data)
+        return Response(
+            serialize_worker(worker), status=status.HTTP_201_CREATED
+        )
+
+    @staticmethod
+    def _save(farm, worker, data):
+        name = require_text(data, "name", "Worker name is required.")
+        user = None
+        user_id = data.get("userId")
+        if user_id not in (None, ""):
+            try:
+                user = User.objects.get(pk=user_id)
+            except (User.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "The selected user does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "userId",
+                )
+        if worker is None:
+            return Worker.objects.create(farm=farm, name=name, user=user)
+        worker.name = name
+        worker.user = user
+        worker.save()
+        return worker
+
+
+class WorkerDetailView(APIView):
+    def get(self, request, worker_id):
+        farm = get_farm(request.user)
+        worker = scoped_get(
+            Worker, farm, worker_id, "That worker no longer exists."
+        )
+        return Response(serialize_worker(worker))
+
+    def put(self, request, worker_id):
+        farm = get_farm(request.user)
+        worker = scoped_get(
+            Worker, farm, worker_id, "That worker no longer exists."
+        )
+        worker = WorkerListView._save(farm, worker, request.data)
+        return Response(serialize_worker(worker))
+
+    def delete(self, request, worker_id):
+        farm = get_farm(request.user)
+        worker = scoped_get(
+            Worker, farm, worker_id, "That worker no longer exists."
+        )
+        if worker.labour_records.exists():
+            raise ApiError(
+                "A worker with labour records cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        worker.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LabourRecordListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        records = farm.labour_records.select_related("worker", "activity")
+        activity_id = request.query_params.get(
+            "activityId", request.query_params.get("activity")
+        )
+        if activity_id:
+            records = records.filter(activity_id=activity_id)
+        return Response(
+            [serialize_labour_record(record) for record in records]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        record = self._save(farm, None, request.data)
+        return Response(
+            serialize_labour_record(record), status=status.HTTP_201_CREATED
+        )
+
+    @staticmethod
+    def _save(farm, record, data):
+        worker_id = data.get("workerId")
+        try:
+            worker = Worker.objects.get(farm=farm, pk=worker_id)
+        except (Worker.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "The selected worker does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "workerId",
+            )
+
+        activity_id = data.get("activityId")
+        try:
+            activity = Activity.objects.get(farm=farm, pk=activity_id)
+        except (Activity.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "The selected activity does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "activityId",
+            )
+
+        try:
+            hours = parse_decimal(
+                data.get("hours"),
+                "hours",
+                "Hours are required.",
+                "Hours must be a number.",
+                positive_message="Hours must be greater than zero.",
+            )
+        except ValueError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "hours"
+            )
+        try:
+            hourly_cost = parse_decimal(
+                data.get("hourlyCost", data.get("hourly_cost")),
+                "hourly_cost",
+                "Hourly cost is required.",
+                "Hourly cost must be a number.",
+                positive_message="Hourly cost must be greater than zero.",
+            )
+        except ValueError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "hourly_cost"
+            )
+        record_date = parse_body_date(
+            data,
+            "date",
+            "Date is required.",
+            "Date must be a valid calendar date.",
+        )
+        if record is None:
+            return LabourRecord.objects.create(
+                farm=farm,
+                worker=worker,
+                activity=activity,
+                hours=hours,
+                hourly_cost=hourly_cost,
+                date=record_date,
+            )
+        record.worker = worker
+        record.activity = activity
+        record.hours = hours
+        record.hourly_cost = hourly_cost
+        record.date = record_date
+        record.save()
+        return record
+
+
+class LabourRecordDetailView(APIView):
+    def get(self, request, record_id):
+        farm = get_farm(request.user)
+        record = scoped_get(
+            LabourRecord,
+            farm,
+            record_id,
+            "That labour record no longer exists.",
+        )
+        return Response(serialize_labour_record(record))
+
+    def put(self, request, record_id):
+        farm = get_farm(request.user)
+        record = scoped_get(
+            LabourRecord,
+            farm,
+            record_id,
+            "That labour record no longer exists.",
+        )
+        record = LabourRecordListView._save(farm, record, request.data)
+        return Response(serialize_labour_record(record))
+
+    def delete(self, request, record_id):
+        farm = get_farm(request.user)
+        record = scoped_get(
+            LabourRecord,
+            farm,
+            record_id,
+            "That labour record no longer exists.",
+        )
+        record.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class InventoryItemListView(APIView):
@@ -2347,4 +2544,3 @@ class ProfitabilityReportView(APIView):
                     status.HTTP_404_NOT_FOUND,
                     key,
                 )
-
