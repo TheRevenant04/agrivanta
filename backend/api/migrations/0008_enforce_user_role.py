@@ -3,6 +3,18 @@
 from django.db import migrations, models
 
 
+def normalize_invalid_roles(apps, schema_editor):
+    """Downgrade legacy invalid roles to worker before enforcing valid choices.
+
+    Worker is the least-privileged application role, avoiding privilege
+    escalation when repairing values that predate role validation.
+    """
+    User = apps.get_model('api', 'User')
+    User.objects.using(schema_editor.connection.alias).exclude(
+        role__in=['owner', 'manager', 'worker']
+    ).update(role='worker')
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -11,6 +23,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunPython(normalize_invalid_roles, migrations.RunPython.noop),
         migrations.AddConstraint(
             model_name='user',
             constraint=models.CheckConstraint(condition=models.Q(('role__in', ['owner', 'manager', 'worker'])), name='api_user_role_valid'),
