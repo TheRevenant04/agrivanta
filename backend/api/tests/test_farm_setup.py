@@ -225,6 +225,107 @@ def test_conversion_rejects_duplicate_pair(client):
     assert duplicate.status_code == 409
 
 
+def test_conversion_api_enforces_symmetric_pair_uniqueness_atomically(
+    client, monkeypatch
+):
+    from api import views
+
+    kg = client.post(
+        "/api/units", {"name": "kg", "baseMeasure": "mass"}, format="json"
+    ).data
+    grams = client.post(
+        "/api/units", {"name": "g", "baseMeasure": "mass"}, format="json"
+    ).data
+    ounce = client.post(
+        "/api/units", {"name": "oz", "baseMeasure": "mass"}, format="json"
+    ).data
+    pound = client.post(
+        "/api/units", {"name": "lb", "baseMeasure": "mass"}, format="json"
+    ).data
+    existing = client.post(
+        "/api/conversions",
+        {"fromUnitId": kg["id"], "toUnitId": grams["id"], "factor": "1000"},
+        format="json",
+    )
+    second = client.post(
+        "/api/conversions",
+        {"fromUnitId": ounce["id"], "toUnitId": pound["id"], "factor": "16"},
+        format="json",
+    )
+    assert existing.status_code == second.status_code == 201
+
+    monkeypatch.setattr(
+        views, "validate_conversion_rule", lambda *args, **kwargs: None
+    )
+    raced_create = client.post(
+        "/api/conversions",
+        {"fromUnitId": grams["id"], "toUnitId": kg["id"], "factor": "0.001"},
+        format="json",
+    )
+    assert raced_create.status_code == 409
+    assert raced_create.data["field"] == "toUnitId"
+
+    raced_update = client.put(
+        f"/api/conversions/{second.data['id']}",
+        {"fromUnitId": grams["id"], "toUnitId": kg["id"], "factor": "0.001"},
+        format="json",
+    )
+    assert raced_update.status_code == 409
+    assert raced_update.data["field"] == "toUnitId"
+    assert client.get(f"/api/conversions/{second.data['id']}").data == second.data
+
+
+def test_conversion_factor_respects_model_precision_on_create_and_update(client):
+    kg = client.post(
+        "/api/units", {"name": "kg", "baseMeasure": "mass"}, format="json"
+    ).data
+    grams = client.post(
+        "/api/units", {"name": "g", "baseMeasure": "mass"}, format="json"
+    ).data
+    ounce = client.post(
+        "/api/units", {"name": "oz", "baseMeasure": "mass"}, format="json"
+    ).data
+
+    valid_boundary = client.post(
+        "/api/conversions",
+        {
+            "fromUnitId": kg["id"],
+            "toUnitId": grams["id"],
+            "factor": "1.123456",
+        },
+        format="json",
+    )
+    assert valid_boundary.status_code == 201
+
+    for too_precise in ("1000000000000", "0.0000001"):
+        invalid_create = client.post(
+            "/api/conversions",
+            {
+                "fromUnitId": kg["id"],
+                "toUnitId": ounce["id"],
+                "factor": too_precise,
+            },
+            format="json",
+        )
+        assert invalid_create.status_code == 400
+        assert invalid_create.data["field"] == "factor"
+
+        invalid_update = client.put(
+            f"/api/conversions/{valid_boundary.data['id']}",
+            {
+                "fromUnitId": kg["id"],
+                "toUnitId": grams["id"],
+                "factor": too_precise,
+            },
+            format="json",
+        )
+        assert invalid_update.status_code == 400
+        assert invalid_update.data["field"] == "factor"
+        assert client.get(
+            f"/api/conversions/{valid_boundary.data['id']}"
+        ).data == valid_boundary.data
+
+
 def test_conversion_rule_api_supports_crud_and_validation(client, anon):
     from rest_framework.test import APIClient
 
