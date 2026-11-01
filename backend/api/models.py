@@ -3,6 +3,7 @@ import uuid
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.functions import Lower
 from django.utils import timezone
@@ -42,7 +43,6 @@ class ActivityCategory(models.TextChoices):
     FERTILIZING = "fertilizing", "fertilizing"
     SPRAYING = "spraying", "spraying"
     HARVESTING = "harvesting", "harvesting"
-    CUSTOM = "custom", "custom"
 
 
 class ActivityStatus(models.TextChoices):
@@ -320,13 +320,30 @@ class ActivityType(TimestampedModel):
         Farm, on_delete=models.CASCADE, related_name="activity_types"
     )
     name = models.CharField(max_length=255)
-    category = models.CharField(
-        max_length=32, choices=ActivityCategory.choices
-    )
+    category = models.CharField(max_length=32)
     standard = models.BooleanField(default=False)
+    default_inputs = models.JSONField(default=list)
+    default_labour_hours = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    default_equipment = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                "farm",
+                name="uniq_activity_type_farm_name_ci",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(default_labour_hours__gte=0),
+                name="activity_type_labour_hours_nonnegative",
+            ),
+        ]
 
 
 class Activity(TimestampedModel):

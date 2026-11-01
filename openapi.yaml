@@ -1062,6 +1062,7 @@ paths:
       tags: [activities]
       operationId: listActivityTypes
       summary: List standard and custom activity types
+      description: Returns types belonging to the authenticated user's farm. Any authenticated farm role may read.
       responses:
         '200':
           description: Activity types.
@@ -1077,6 +1078,7 @@ paths:
       tags: [activities]
       operationId: createActivityType
       summary: Create a custom activity type
+      description: Only farm owners and managers can create custom activity types. Default resource values are exposed for client prefill and are not copied to activities automatically.
       requestBody:
         required: true
         content:
@@ -1094,8 +1096,105 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can create activity types.
         '409':
           description: "An activity type with this name already exists (`field: name`)."
+
+  /activity-types/{typeId}:
+    parameters:
+      - name: typeId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [activities]
+      operationId: getActivityType
+      summary: Get a farm-scoped activity type
+      responses:
+        '200':
+          description: The activity type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityType'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [activities]
+      operationId: replaceActivityType
+      summary: Replace a custom activity type
+      description: Only farm owners and managers can update custom types; standard types are read-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityTypeInput'
+      responses:
+        '200':
+          description: The updated activity type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityType'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can update activity types.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The type is standard or its name conflicts with another type in the farm.
+    patch:
+      tags: [activities]
+      operationId: updateActivityType
+      summary: Partially update a custom activity type
+      description: Only farm owners and managers can update custom types; standard types are read-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityTypePatch'
+      responses:
+        '200':
+          description: The updated activity type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityType'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can update activity types.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The type is standard or its name conflicts with another type in the farm.
+    delete:
+      tags: [activities]
+      operationId: deleteActivityType
+      summary: Delete an unreferenced custom activity type
+      description: Only farm owners and managers can delete custom types. Deletion is rejected if an activity references the type.
+      responses:
+        '204':
+          description: The type was deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can delete activity types.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The type is standard or referenced by an activity.
 
   /activities/cycles:
     get:
@@ -2272,21 +2371,36 @@ components:
         - fertilizing
         - spraying
         - harvesting
-        - custom
 
     ActivityType:
       type: object
-      required: [id, name, category, standard]
+      required: [id, name, category, standard, inputs, labourHours, equipment]
       properties:
         id:
           type: string
         name:
           type: string
         category:
-          $ref: '#/components/schemas/ActivityCategory'
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: A nonblank category; standard types use one of the five standard categories.
         standard:
           type: boolean
           description: True for the templates seeded on farm creation.
+        inputs:
+          type: array
+          description: Default input needs for client prefill only; not copied to activities automatically.
+          default: []
+          items:
+            $ref: '#/components/schemas/ActivityTypeInputNeed'
+        labourHours:
+          type: number
+          minimum: 0
+          default: 0
+        equipment:
+          type: string
+          default: ""
 
     ActivityTypeInput:
       type: object
@@ -2294,9 +2408,58 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 255
         category:
           type: string
-          description: One of the `ActivityCategory` values (validated by the backend).
+          minLength: 1
+          maxLength: 32
+        inputs:
+          type: array
+          default: []
+          items:
+            $ref: '#/components/schemas/ActivityTypeInputNeed'
+        labourHours:
+          type: number
+          minimum: 0
+          default: 0
+        equipment:
+          type: string
+          default: ""
+
+    ActivityTypePatch:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        category:
+          type: string
+          minLength: 1
+          maxLength: 32
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityTypeInputNeed'
+        labourHours:
+          type: number
+          minimum: 0
+        equipment:
+          type: string
+
+    ActivityTypeInputNeed:
+      type: object
+      required: [itemName, quantity]
+      properties:
+        itemName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        quantity:
+          type: number
+          exclusiveMinimum: 0
 
     CycleRef:
       type: object

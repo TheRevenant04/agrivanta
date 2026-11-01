@@ -97,13 +97,13 @@ from .unit_conversion import (
     convert_quantity,
 )
 
-STANDARD_ACTIVITY_TEMPLATES = [
+STANDARD_ACTIVITY_TEMPLATES = (
     ("Land preparation", ActivityCategory.LAND_PREPARATION),
     ("Planting", ActivityCategory.PLANTING),
     ("Fertilizing", ActivityCategory.FERTILIZING),
     ("Spraying", ActivityCategory.SPRAYING),
     ("Harvesting", ActivityCategory.HARVESTING),
-]
+)
 
 DEFAULT_CUSTOMER_NAMES = ["Greenfield Grain Co.", "Harbour Mill"]
 
@@ -384,20 +384,14 @@ def ensure_unique_period_name(model, farm, name, noun, instance=None):
 
 
 def seed_farm(farm):
-    ActivityType.objects.bulk_create(
-        [
-            ActivityType(
-                farm=farm,
-                name=name,
-                category=category,
-                standard=True,
-            )
-            for name, category in STANDARD_ACTIVITY_TEMPLATES
-        ]
-    )
-    Customer.objects.bulk_create(
-        [Customer(farm=farm, name=name) for name in DEFAULT_CUSTOMER_NAMES]
-    )
+    for name, category in STANDARD_ACTIVITY_TEMPLATES:
+        ActivityType.objects.get_or_create(
+            farm=farm,
+            name=name,
+            defaults={"category": category, "standard": True},
+        )
+    for name in DEFAULT_CUSTOMER_NAMES:
+        Customer.objects.get_or_create(farm=farm, name=name)
 
 
 def format_amount(value):
@@ -1585,6 +1579,8 @@ class CropCycleReopenView(APIView):
 
 
 class ActivityTypeListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
@@ -1595,22 +1591,28 @@ class ActivityTypeListView(APIView):
         )
 
     def post(self, request):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Template name is required."
-        )
+        name = require_name(request.data, "name", "Activity type")
         category = self._category(request.data.get("category"))
-        if ActivityType.objects.filter(
-            farm=farm, name__iexact=name
-        ).exists():
-            raise ApiError(
-                f'A template named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
-        activity_type = ActivityType.objects.create(
-            farm=farm, name=name, category=category, standard=False
+        inputs = self._inputs(request.data.get("inputs", []))
+        labour_hours = self._labour_hours(
+            request.data.get("labourHours", 0)
         )
+        equipment = self._equipment(request.data.get("equipment", ""))
+        ensure_unique_farm_name(
+            ActivityType, farm, name, "Activity type"
+        )
+        activity_type = ActivityType(
+            farm=farm,
+            name=name,
+            category=category,
+            standard=False,
+            default_inputs=inputs,
+            default_labour_hours=labour_hours,
+            default_equipment=equipment,
+        )
+        save_unique_farm_name(activity_type, "Activity type")
         return Response(
             serialize_activity_type(activity_type),
             status=status.HTTP_201_CREATED,
@@ -1618,21 +1620,207 @@ class ActivityTypeListView(APIView):
 
     @staticmethod
     def _category(value):
-        text = str(value).strip() if value is not None else ""
-        if not text:
+        if not isinstance(value, str) or not value.strip():
             raise ApiError(
-                "A template category is required.",
+                "An activity type category is required.",
                 status.HTTP_400_BAD_REQUEST,
                 "category",
             )
-        if text not in ActivityCategory.values:
+        text = value.strip()
+        if len(text) > 32:
             raise ApiError(
-                "Category must be one of: land preparation, planting, "
-                "fertilizing, spraying, harvesting, custom.",
+                "Activity type category must be 32 characters or fewer.",
                 status.HTTP_400_BAD_REQUEST,
                 "category",
             )
         return text
+
+    @staticmethod
+    def _inputs(value):
+        if not isinstance(value, list):
+            raise ApiError(
+                "Inputs must be a list.",
+                status.HTTP_400_BAD_REQUEST,
+                "inputs",
+            )
+        parsed = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise ApiError(
+                    "Each input must include an item name and quantity.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "inputs",
+                )
+            item_name = item.get("itemName")
+            if not isinstance(item_name, str) or not item_name.strip():
+                raise ApiError(
+                    "Each input must include an item name.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "inputs",
+                )
+            item_name = item_name.strip()
+            if len(item_name) > 255:
+                raise ApiError(
+                    "Input item names must be 255 characters or fewer.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "inputs",
+                )
+            try:
+                quantity = parse_decimal(
+                    item.get("quantity"),
+                    "quantity",
+                    "Input quantity is required.",
+                    "Input quantity must be a number.",
+                    positive_message="Input quantity must be greater than zero.",
+                )
+                ActivityInputNeed._meta.get_field(
+                    "quantity"
+                ).run_validators(quantity)
+            except (ValueError, ValidationError) as exc:
+                message = (
+                    "Input quantity must be a positive number with at most "
+                    "four decimal places."
+                    if isinstance(exc, ValidationError)
+                    else str(exc)
+                )
+                raise ApiError(
+                    message,
+                    status.HTTP_400_BAD_REQUEST,
+                    "inputs",
+                ) from exc
+            parsed.append(
+                {"itemName": item_name, "quantity": str(quantity)}
+            )
+        return parsed
+
+    @staticmethod
+    def _labour_hours(value):
+        try:
+            hours = parse_decimal(
+                value,
+                "labourHours",
+                "Labour hours are required.",
+                "Labour hours must be a number.",
+                negative_message="Labour hours cannot be negative.",
+            )
+            ActivityType._meta.get_field(
+                "default_labour_hours"
+            ).run_validators(hours)
+        except ValueError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "labourHours"
+            ) from exc
+        except ValidationError as exc:
+            raise ApiError(
+                "Labour hours must be non-negative with at most four "
+                "decimal places.",
+                status.HTTP_400_BAD_REQUEST,
+                "labourHours",
+            ) from exc
+        return hours
+
+    @staticmethod
+    def _equipment(value):
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ApiError(
+                "Equipment must be text.",
+                status.HTTP_400_BAD_REQUEST,
+                "equipment",
+            )
+        text = value.strip()
+        if len(text) > 255:
+            raise ApiError(
+                "Equipment must be 255 characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "equipment",
+            )
+        return text
+
+
+class ActivityTypeDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, type_id):
+        farm = get_farm(request.user)
+        activity_type = scoped_get(
+            ActivityType,
+            farm,
+            type_id,
+            "That activity type no longer exists.",
+        )
+        return Response(serialize_activity_type(activity_type))
+
+    def put(self, request, type_id):
+        return self._update(request, type_id, partial=False)
+
+    def patch(self, request, type_id):
+        return self._update(request, type_id, partial=True)
+
+    def _update(self, request, type_id, *, partial):
+        farm = get_farm(request.user)
+        activity_type = scoped_get(
+            ActivityType,
+            farm,
+            type_id,
+            "That activity type no longer exists.",
+        )
+        require_farm_setup_write(request)
+        if activity_type.standard:
+            raise ApiError(
+                "Standard activity types cannot be changed.",
+                status.HTTP_409_CONFLICT,
+            )
+
+        data = request.data
+        if not partial or "name" in data:
+            name = require_name(data, "name", "Activity type")
+            ensure_unique_farm_name(
+                ActivityType, farm, name, "Activity type", activity_type
+            )
+            activity_type.name = name
+        if not partial or "category" in data:
+            activity_type.category = ActivityTypeListView._category(
+                data.get("category")
+            )
+        if not partial or "inputs" in data:
+            activity_type.default_inputs = ActivityTypeListView._inputs(
+                data.get("inputs", [])
+            )
+        if not partial or "labourHours" in data:
+            activity_type.default_labour_hours = (
+                ActivityTypeListView._labour_hours(data.get("labourHours", 0))
+            )
+        if not partial or "equipment" in data:
+            activity_type.default_equipment = ActivityTypeListView._equipment(
+                data.get("equipment", "")
+            )
+        save_unique_farm_name(activity_type, "Activity type")
+        return Response(serialize_activity_type(activity_type))
+
+    def delete(self, request, type_id):
+        farm = get_farm(request.user)
+        activity_type = scoped_get(
+            ActivityType,
+            farm,
+            type_id,
+            "That activity type no longer exists.",
+        )
+        require_farm_setup_write(request)
+        if activity_type.standard:
+            raise ApiError(
+                "Standard activity types cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            activity_type.delete()
+        except (ProtectedError, RestrictedError):
+            raise ApiError(
+                "An activity type referenced by an activity cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ActivityCycleListView(APIView):
