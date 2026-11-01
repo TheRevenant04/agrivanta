@@ -1,0 +1,2048 @@
+openapi: 3.1.0
+info:
+  title: Agrivanta API
+  version: 0.1.0
+  description: |
+    The backend contract the Agrivanta frontend expects. This specification was
+    derived from the frontend's typed services layer in `frontend/src/services/`
+    (`httpServices.ts` plus the per-domain `*Http.ts` modules), which is the only
+    place the app talks to a backend.
+
+    ## Base URL
+
+    Paths are relative to a configurable base URL (see `servers`). The frontend
+    joins the base URL and the path with a single slash and strips trailing
+    slashes from the base, e.g. base `http://localhost:8000/api` + path
+    `/fields` → `http://localhost:8000/api/fields`.
+
+    ## Authentication
+
+    Every endpoint except `POST /auth/login` and `POST /auth/register` requires
+    a bearer token, sent as `Authorization: Bearer <token>`. The token comes
+    from the `token` field of the login/register response and is stored
+    client-side. An authenticated request that receives `401` clears the session
+    and redirects to login; a `401` from login/register is surfaced as invalid
+    credentials.
+
+    ## Errors
+
+    All non-2xx responses must be JSON. The frontend understands two envelopes
+    and maps the first one it finds onto an inline form error:
+
+    1. `{ "detail": string, "field"?: string }` — a message plus the offending
+       input field name (e.g. `startDate`), rendered next to that control.
+    2. A field-keyed validation map such as `{ "name": ["This field is required."] }`
+       (Django REST Framework style); the first key with a string array becomes
+       the field and its first entry the message.
+
+    Non-JSON error bodies fall back to a generic message. `204` responses are
+    treated as empty success.
+
+    ## Field-level rules mirrored by the frontend
+
+    The frontend mirrors backend validation rules in its `*Rules.ts` modules so
+    forms fail fast; the backend remains the source of truth. Notable statuses
+    the frontend maps explicitly:
+
+    - `400` with `field` for any failed form input (blank dates, non-numeric
+      amounts, unknown enum values including unknown activity status values,
+      sold-exceeds-harvested sales, unknown customer/harvest references on
+      sales, movements that would drive stock below zero, edits/deletes of
+      posted expenses).
+    - `404` for unknown referenced records (field, crop, variety, unit, crop
+      cycle, activity type, inventory item, conversion rule).
+    - `409` for conflicts: duplicate crop/unit names, duplicate conversion
+      pairs, duplicate activity-type names, duplicate registration emails,
+      illegal activity status transitions, and crop-cycle lifecycle
+      violations (editing or re-closing a closed cycle).
+
+    ## Scope
+
+    Role-based authorization (`403`) is out of scope for this contract: the
+    frontend performs no role checks yet. Reversal-and-replacement flows and
+    audit-history endpoints (backlog tasks 21/22) are not yet called by the
+    frontend and are intentionally absent.
+servers:
+  - url: http://localhost:8000/api
+    description: Local development backend (configurable at runtime).
+security:
+  - bearerAuth: []
+tags:
+  - name: auth
+  - name: farm-setup
+  - name: crop-cycles
+  - name: activities
+  - name: inventory
+  - name: expenses
+  - name: payments
+  - name: harvests
+  - name: sales
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Sign in and receive a session token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginCredentials'
+      responses:
+        '200':
+          description: Authenticated session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          description: Invalid email or password.
+
+  /auth/register:
+    post:
+      tags: [auth]
+      operationId: register
+      summary: Create an account and receive a session token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterInput'
+      responses:
+        '201':
+          description: Account created; session returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '400':
+          description: Registration input rejected (e.g. missing email or password). The mock uses 422 for this case; the frontend treats 400 and 422 identically.
+        '409':
+          description: An account with that email already exists.
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Invalidate the current session
+      responses:
+        '204':
+          description: Logged out. The frontend clears the stored token regardless of this response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [auth]
+      operationId: me
+      summary: Return the authenticated user
+      responses:
+        '200':
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /farm:
+    get:
+      tags: [farm-setup]
+      operationId: getFarm
+      summary: Return the farm profile
+      responses:
+        '200':
+          description: The farm.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Farm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No farm is configured for this account.
+    put:
+      tags: [farm-setup]
+      operationId: updateFarm
+      summary: Update the farm profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FarmInput'
+      responses:
+        '200':
+          description: Updated farm.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Farm'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No farm is configured for this account.
+
+  /fields:
+    get:
+      tags: [farm-setup]
+      operationId: listFields
+      summary: List the farm's fields
+      responses:
+        '200':
+          description: Fields.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Field'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [farm-setup]
+      operationId: createField
+      summary: Create a field
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FieldInput'
+      responses:
+        '201':
+          description: Created field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Field'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /fields/{fieldId}:
+    parameters:
+      - $ref: '#/components/parameters/FieldId'
+    put:
+      tags: [farm-setup]
+      operationId: updateField
+      summary: Update a field
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FieldInput'
+      responses:
+        '200':
+          description: Updated field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Field'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /crops:
+    get:
+      tags: [farm-setup]
+      operationId: listCrops
+      summary: List the farm's crops
+      responses:
+        '200':
+          description: Crops.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Crop'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [farm-setup]
+      operationId: createCrop
+      summary: Create a crop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CropInput'
+      responses:
+        '201':
+          description: Created crop.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Crop'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: "A crop with this name already exists (`field: name`)."
+
+  /crops/{cropId}:
+    parameters:
+      - $ref: '#/components/parameters/CropId'
+    put:
+      tags: [farm-setup]
+      operationId: updateCrop
+      summary: Rename a crop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CropInput'
+      responses:
+        '200':
+          description: Updated crop.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Crop'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: "Another crop already uses this name (`field: name`)."
+
+  /varieties:
+    get:
+      tags: [farm-setup]
+      operationId: listVarieties
+      summary: List varieties, optionally filtered by crop
+      parameters:
+        - name: crop
+          in: query
+          required: false
+          description: Only return varieties of this crop.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Varieties.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Variety'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [farm-setup]
+      operationId: createVariety
+      summary: Create a variety under a crop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VarietyInput'
+      responses:
+        '201':
+          description: Created variety.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Variety'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "The referenced crop does not exist (`field: cropId`)."
+
+  /varieties/{varietyId}:
+    parameters:
+      - $ref: '#/components/parameters/VarietyId'
+    put:
+      tags: [farm-setup]
+      operationId: updateVariety
+      summary: Update a variety
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VarietyInput'
+      responses:
+        '200':
+          description: Updated variety.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Variety'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /units:
+    get:
+      tags: [farm-setup]
+      operationId: listUnits
+      summary: List units of measure
+      responses:
+        '200':
+          description: Units.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Unit'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [farm-setup]
+      operationId: createUnit
+      summary: Create a unit of measure
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnitInput'
+      responses:
+        '201':
+          description: Created unit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: "A unit with this name already exists (`field: name`)."
+
+  /units/{unitId}:
+    parameters:
+      - $ref: '#/components/parameters/UnitId'
+    put:
+      tags: [farm-setup]
+      operationId: updateUnit
+      summary: Update a unit of measure
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnitInput'
+      responses:
+        '200':
+          description: Updated unit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: "Another unit already uses this name (`field: name`)."
+
+  /conversions:
+    get:
+      tags: [farm-setup]
+      operationId: listConversions
+      summary: List the configured unit conversion rules
+      responses:
+        '200':
+          description: Conversion rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UnitConversion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [farm-setup]
+      operationId: createConversion
+      summary: Create a conversion rule between two units
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionInput'
+      responses:
+        '201':
+          description: Created conversion rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitConversion'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "One of the units does not exist (`field: fromUnitId` or `field: toUnitId`)."
+        '409':
+          description: A rule for this unit pair already exists.
+
+  /conversions/convert:
+    post:
+      tags: [farm-setup]
+      operationId: convertQuantity
+      summary: Convert a quantity between units using the configured rules
+      description: >
+        Resolves the conversion in either direction (direct rule or inverse of
+        the reverse rule). Raises 404 when no rule exists between the two units.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionQuery'
+      responses:
+        '200':
+          description: Conversion result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversionResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No conversion rule exists between the two units.
+
+  /crop-cycles:
+    get:
+      tags: [crop-cycles]
+      operationId: listCropCycles
+      summary: List crop cycles, optionally filtered by field
+      parameters:
+        - name: field
+          in: query
+          required: false
+          description: Only return cycles on this field. Overlapping cycles on one field are allowed and all appear.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Crop cycles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CropCycle'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [crop-cycles]
+      operationId: createCropCycle
+      summary: Create an open crop cycle on a field
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CropCycleInput'
+      responses:
+        '201':
+          description: Created cycle, status `open`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CropCycle'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "The referenced field, crop, or variety does not exist (`field: fieldId`, `cropId`, or `varietyId`)."
+
+  /crop-cycles/{cycleId}:
+    parameters:
+      - $ref: '#/components/parameters/CycleId'
+    put:
+      tags: [crop-cycles]
+      operationId: updateCropCycle
+      summary: Update the forecast fields of an open cycle
+      description: Only `expectedYield` and `expectedPrice` are editable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CropCycleUpdateInput'
+      responses:
+        '200':
+          description: Updated cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CropCycle'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The cycle is closed and locked.
+
+  /crop-cycles/{cycleId}/close:
+    parameters:
+      - $ref: '#/components/parameters/CycleId'
+    post:
+      tags: [crop-cycles]
+      operationId: closeCropCycle
+      summary: Formally close a crop cycle
+      responses:
+        '200':
+          description: The closed cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CropCycle'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The cycle is already closed. Reopening a closed cycle is not supported.
+
+  /activity-types:
+    get:
+      tags: [activities]
+      operationId: listActivityTypes
+      summary: List standard and custom activity types
+      responses:
+        '200':
+          description: Activity types.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActivityType'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [activities]
+      operationId: createActivityType
+      summary: Create a custom activity type
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityTypeInput'
+      responses:
+        '201':
+          description: Created activity type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityType'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: "An activity type with this name already exists (`field: name`)."
+
+  /activities/cycles:
+    get:
+      tags: [activities]
+      operationId: listActivityCycles
+      summary: List crop-cycle references for the activity cycle picker
+      responses:
+        '200':
+          description: Minimal cycle references (`id` + display `label`).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CycleRef'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /activities:
+    get:
+      tags: [activities]
+      operationId: listActivities
+      summary: List activities, optionally filtered by cycle
+      parameters:
+        - name: cycle
+          in: query
+          required: false
+          description: Only return activities on this crop cycle.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Activities.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Activity'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [activities]
+      operationId: createActivity
+      summary: Create a planned activity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityInput'
+      responses:
+        '201':
+          description: Created activity, status `planned`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "The referenced activity type does not exist (`field: typeId`)."
+
+  /activities/{activityId}:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+    put:
+      tags: [activities]
+      operationId: updateActivity
+      summary: Update an activity's type, planned date, or description
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityInput'
+      responses:
+        '200':
+          description: Updated activity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /activities/{activityId}/status:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+    put:
+      tags: [activities]
+      operationId: updateActivityStatus
+      summary: Move an activity to a new status
+      description: >
+        Allowed transitions are planned → in_progress, in_progress →
+        completed, and overdue → in_progress (an overdue activity can still
+        be started); completed is terminal. The API rejects an illegal
+        transition (e.g. completed → in_progress) with 409 on `status`, and
+        an unknown status value with 400 on `status`. `overdue` is produced
+        by a server-side job and is not settable by the client.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  description: The target status value as the API reports it.
+      responses:
+        '200':
+          description: The activity with its new status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          description: "Unknown status value (`field: status`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: "Illegal status transition, e.g. completed → in_progress (`field: status`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /activities/{activityId}/resource-needs:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+    put:
+      tags: [activities]
+      operationId: updateActivityResourceNeeds
+      summary: Replace an activity's planned resource needs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResourceNeedsInput'
+      responses:
+        '200':
+          description: The activity with normalised resource needs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /inventory-items:
+    get:
+      tags: [inventory]
+      operationId: listInventoryItems
+      summary: List inventory items with derived current quantities
+      responses:
+        '200':
+          description: Inventory items. `currentQuantity` is derived from movements and read-only.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InventoryItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [inventory]
+      operationId: createInventoryItem
+      summary: Create an inventory item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryItemInput'
+      responses:
+        '201':
+          description: Created item; `currentQuantity` starts at 0.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryItem'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "The referenced unit does not exist (`field: unitId`)."
+
+  /inventory-items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/ItemId'
+    put:
+      tags: [inventory]
+      operationId: updateInventoryItem
+      summary: Update an inventory item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryItemInput'
+      responses:
+        '200':
+          description: Updated item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryItem'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /inventory-items/{itemId}/movements:
+    parameters:
+      - $ref: '#/components/parameters/ItemId'
+    get:
+      tags: [inventory]
+      operationId: listItemMovements
+      summary: List an item's stock movements
+      responses:
+        '200':
+          description: Movements for the item.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StockMovement'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [inventory]
+      operationId: createItemMovement
+      summary: Record a stock movement against an item
+      description: >
+        `purchase` increases and `usage` decreases the derived quantity;
+        `adjustment` applies a signed quantity. A usage that would drive the
+        quantity below zero is rejected with 400. The body's `itemId` must
+        match the path parameter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockMovementInput'
+      responses:
+        '201':
+          description: Recorded movement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovement'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "The item does not exist (`field: itemId`)."
+
+  /stock-movements:
+    get:
+      tags: [inventory]
+      operationId: listStockMovements
+      summary: List stock movements across all items
+      responses:
+        '200':
+          description: All movements.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StockMovement'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /expenses:
+    get:
+      tags: [expenses]
+      operationId: listExpenses
+      summary: List expenses (drafts and posted)
+      responses:
+        '200':
+          description: Expenses.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Expense'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [expenses]
+      operationId: createExpense
+      summary: Create an expense as a draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpenseInput'
+      responses:
+        '201':
+          description: Created expense with status `draft`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expense'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /expenses/{expenseId}:
+    parameters:
+      - $ref: '#/components/parameters/ExpenseId'
+    put:
+      tags: [expenses]
+      operationId: updateExpense
+      summary: Update a draft expense
+      description: >
+        Only drafts may be edited. A posted expense must be rejected with 400
+        ("Cannot edit a posted expense.") rather than silently accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpenseInput'
+      responses:
+        '200':
+          description: Updated expense.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expense'
+        '400':
+          description: Validation failure, or the expense is posted and immutable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [expenses]
+      operationId: deleteExpense
+      summary: Delete a draft expense
+      description: Only drafts may be deleted; posted expenses are rejected with 400.
+      responses:
+        '204':
+          description: Deleted.
+        '400':
+          description: The expense is posted and immutable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /expenses/{expenseId}/post:
+    parameters:
+      - $ref: '#/components/parameters/ExpenseId'
+    post:
+      tags: [expenses]
+      operationId: postExpense
+      summary: Post a draft expense (draft → posted)
+      description: >
+        Re-posting an already-posted expense is a no-op (200, unchanged
+        expense); the frontend never sends this request for a posted
+        expense, so the contract treats it as undefined-but-harmless.
+      responses:
+        '200':
+          description: The posted expense.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expense'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /expenses/{expenseId}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/ExpenseId'
+    post:
+      tags: [expenses]
+      operationId: uploadExpenseAttachment
+      summary: Upload a receipt/invoice attachment for an expense
+      description: >
+        Multipart upload; the file is sent under the form field name `file`.
+        No JSON content-type header is set. Attachments cannot be added to a
+        posted expense (posted transactions are immutable).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: The stored attachment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /payments:
+    get:
+      tags: [payments]
+      operationId: listPayments
+      summary: List money received and paid
+      responses:
+        '200':
+          description: Payments.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Payment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [payments]
+      operationId: createPayment
+      summary: Record a money-in or money-out payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInput'
+      responses:
+        '201':
+          description: Created payment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /harvests/cycles:
+    get:
+      tags: [harvests]
+      operationId: listHarvestCycles
+      summary: List crop-cycle references for the harvest cycle picker
+      responses:
+        '200':
+          description: Minimal cycle references (`id` + display `label`).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CycleRef'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /harvests:
+    get:
+      tags: [harvests]
+      operationId: listHarvests
+      summary: List harvests, optionally filtered by cycle
+      parameters:
+        - name: cycle
+          in: query
+          required: false
+          description: Only return harvests of this crop cycle.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Harvests.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Harvest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [harvests]
+      operationId: createHarvest
+      summary: Record a harvest against a crop cycle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HarvestInput'
+      responses:
+        '201':
+          description: Created harvest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Harvest'
+        '400':
+          description: "Validation failure, or the crop cycle is closed (`field: cycleId`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "The referenced crop cycle does not exist (`field: cycleId`)."
+
+  /customers:
+    get:
+      tags: [sales]
+      operationId: listCustomers
+      summary: List customer profiles for the sale form
+      responses:
+        '200':
+          description: Customers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SaleCustomer'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /sales:
+    get:
+      tags: [sales]
+      operationId: listSales
+      summary: List sales
+      responses:
+        '200':
+          description: Sales.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Sale'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [sales]
+      operationId: createSale
+      summary: Record a sale of harvested produce
+      description: >
+        The sale draws from one harvest. A quantity greater than
+        harvested-minus-already-sold must be rejected with 400 on `quantity`
+        ("Maximum sellable is N.") so the form can show it next to the
+        quantity field. An unknown customer or harvest is also rejected with
+        400 (on `customerId` / `harvestId` respectively), not 404, so the
+        form can attach the message to the offending control.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaleInput'
+      responses:
+        '201':
+          description: Created sale; `revenue` is computed by the backend.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sale'
+        '400':
+          description: "Validation failure, including unknown customer/harvest (`field: customerId` or `field: harvestId`) and sold-exceeds-harvested (`field: quantity`)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Opaque-or-JWT bearer token obtained from `/auth/login` or
+        `/auth/register`, sent as `Authorization: Bearer <token>`.
+
+  parameters:
+    FieldId:
+      name: fieldId
+      in: path
+      required: true
+      schema:
+        type: string
+    CropId:
+      name: cropId
+      in: path
+      required: true
+      schema:
+        type: string
+    VarietyId:
+      name: varietyId
+      in: path
+      required: true
+      schema:
+        type: string
+    UnitId:
+      name: unitId
+      in: path
+      required: true
+      schema:
+        type: string
+    CycleId:
+      name: cycleId
+      in: path
+      required: true
+      schema:
+        type: string
+    ActivityId:
+      name: activityId
+      in: path
+      required: true
+      schema:
+        type: string
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: string
+    ExpenseId:
+      name: expenseId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    Unauthorized:
+      description: Missing or expired bearer token. The frontend clears the session and redirects to login.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: >
+        Input rejected. Either `{detail, field}` or a field-keyed validation
+        map; `field` names the offending input so forms render the message
+        inline.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Referenced record does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      description: >
+        Error envelope. Either `{detail, field?}` or a Django REST
+        Framework-style field-keyed map such as
+        `{"name": ["This field is required."]}`; the frontend treats the
+        first array-of-strings entry as `{field, message}`.
+      oneOf:
+        - type: object
+          required: [detail]
+          properties:
+            detail:
+              type: string
+            field:
+              type: string
+              description: Offending input field name, when the error belongs to one.
+        - type: object
+          description: Field-keyed validation map (DRF style); each value is a list of messages for that field.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          propertyNames:
+            pattern: '^(?!detail$).+'
+
+    User:
+      type: object
+      required: [id, email, role]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          description: Farm-level role (e.g. owner, manager, worker).
+
+    AuthSession:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          description: Bearer token for subsequent authenticated requests.
+        user:
+          $ref: '#/components/schemas/User'
+
+    LoginCredentials:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    RegisterInput:
+      type: object
+      required: [email, password]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    FlexibleNumber:
+      type: [string, number]
+      description: >
+        Numbers are submitted as strings from forms so blank and non-numeric
+        values reach the backend's validation rules instead of being coerced.
+
+    Farm:
+      type: object
+      required: [id, name, reportingCurrency]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        reportingCurrency:
+          type: string
+          description: Three-letter reporting currency code, e.g. `USD`.
+          minLength: 3
+          maxLength: 3
+
+    FarmInput:
+      type: object
+      required: [name, reportingCurrency]
+      properties:
+        name:
+          type: string
+        reportingCurrency:
+          type: string
+
+    Field:
+      type: object
+      required: [id, farmId, name, area]
+      properties:
+        id:
+          type: string
+        farmId:
+          type: string
+        name:
+          type: string
+        area:
+          type: number
+        notes:
+          type: string
+
+    FieldInput:
+      type: object
+      required: [name, area]
+      properties:
+        name:
+          type: string
+        area:
+          $ref: '#/components/schemas/FlexibleNumber'
+        notes:
+          type: string
+
+    Crop:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    CropInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+
+    Variety:
+      type: object
+      required: [id, cropId, name]
+      properties:
+        id:
+          type: string
+        cropId:
+          type: string
+        name:
+          type: string
+
+    VarietyInput:
+      type: object
+      required: [cropId, name]
+      properties:
+        cropId:
+          type: string
+        name:
+          type: string
+
+    BaseMeasureCategory:
+      type: string
+      enum: [mass, volume, count]
+
+    Unit:
+      type: object
+      required: [id, name, baseMeasure]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        baseMeasure:
+          $ref: '#/components/schemas/BaseMeasureCategory'
+
+    UnitInput:
+      type: object
+      required: [name, baseMeasure]
+      properties:
+        name:
+          type: string
+        baseMeasure:
+          type: string
+          description: One of `mass`, `volume`, `count` (validated by the backend).
+
+    UnitConversion:
+      type: object
+      required: [id, fromUnitId, toUnitId, factor]
+      properties:
+        id:
+          type: string
+        fromUnitId:
+          type: string
+        toUnitId:
+          type: string
+        factor:
+          type: number
+
+    ConversionInput:
+      type: object
+      required: [fromUnitId, toUnitId, factor]
+      properties:
+        fromUnitId:
+          type: string
+        toUnitId:
+          type: string
+        factor:
+          $ref: '#/components/schemas/FlexibleNumber'
+
+    ConversionQuery:
+      type: object
+      required: [fromUnitId, toUnitId, quantity]
+      properties:
+        fromUnitId:
+          type: string
+        toUnitId:
+          type: string
+        quantity:
+          $ref: '#/components/schemas/FlexibleNumber'
+
+    ConversionResult:
+      type: object
+      required: [fromUnitId, toUnitId, quantity, factor, converted]
+      properties:
+        fromUnitId:
+          type: string
+        toUnitId:
+          type: string
+        quantity:
+          type: number
+        factor:
+          type: number
+          description: Effective factor applied (inverse of the stored rule when converted the other way).
+        converted:
+          type: number
+
+    CropCycleStatus:
+      type: string
+      enum: [open, closed]
+
+    CropCycle:
+      type: object
+      required: [id, fieldId, cropId, varietyId, startDate, status]
+      properties:
+        id:
+          type: string
+        fieldId:
+          type: string
+        cropId:
+          type: string
+        varietyId:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/CropCycleStatus'
+        expectedYield:
+          type: number
+        expectedPrice:
+          type: number
+
+    CropCycleInput:
+      type: object
+      required: [fieldId, cropId, varietyId, startDate]
+      properties:
+        fieldId:
+          type: string
+        cropId:
+          type: string
+        varietyId:
+          type: string
+        startDate:
+          type: string
+          description: ISO calendar date (`YYYY-MM-DD`); sent as a string so blank values are rejected.
+        endDate:
+          type: string
+          description: ISO calendar date; must not precede `startDate`.
+        expectedYield:
+          $ref: '#/components/schemas/FlexibleNumber'
+        expectedPrice:
+          $ref: '#/components/schemas/FlexibleNumber'
+
+    CropCycleUpdateInput:
+      type: object
+      description: Only forecast amounts are editable after creation.
+      properties:
+        expectedYield:
+          $ref: '#/components/schemas/FlexibleNumber'
+        expectedPrice:
+          $ref: '#/components/schemas/FlexibleNumber'
+
+    ActivityStatus:
+      type: string
+      enum: [planned, in_progress, completed, overdue]
+
+    ActivityCategory:
+      type: string
+      enum:
+        - land preparation
+        - planting
+        - fertilizing
+        - spraying
+        - harvesting
+        - custom
+
+    ActivityType:
+      type: object
+      required: [id, name, category, standard]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          $ref: '#/components/schemas/ActivityCategory'
+        standard:
+          type: boolean
+          description: True for the templates seeded on farm creation.
+
+    ActivityTypeInput:
+      type: object
+      required: [name, category]
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+          description: One of the `ActivityCategory` values (validated by the backend).
+
+    CycleRef:
+      type: object
+      description: Minimal display reference for a crop cycle, used by pickers.
+      required: [id, label]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+
+    SavedInputNeed:
+      type: object
+      required: [id, itemName, quantity]
+      properties:
+        id:
+          type: string
+        itemName:
+          type: string
+        quantity:
+          type: number
+
+    ActivityResourceNeeds:
+      type: object
+      required: [inputs, labourHours, equipment]
+      properties:
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SavedInputNeed'
+        labourHours:
+          type: number
+        equipment:
+          type: string
+
+    Activity:
+      type: object
+      required: [id, cycleId, typeId, plannedDate, status, resourceNeeds]
+      properties:
+        id:
+          type: string
+        cycleId:
+          type: string
+        typeId:
+          type: string
+        plannedDate:
+          type: string
+          format: date
+        status:
+          $ref: '#/components/schemas/ActivityStatus'
+        description:
+          type: string
+        resourceNeeds:
+          $ref: '#/components/schemas/ActivityResourceNeeds'
+
+    ActivityInput:
+      type: object
+      required: [cycleId, typeId, plannedDate]
+      properties:
+        cycleId:
+          type: string
+        typeId:
+          type: string
+        plannedDate:
+          type: string
+          description: ISO calendar date (`YYYY-MM-DD`); sent as a string so blank values are rejected.
+        description:
+          type: string
+
+    ActivityInputNeed:
+      type: object
+      required: [itemName, quantity]
+      properties:
+        itemName:
+          type: string
+        quantity:
+          $ref: '#/components/schemas/FlexibleNumber'
+
+    ResourceNeedsInput:
+      type: object
+      required: [inputs, labourHours, equipment]
+      properties:
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityInputNeed'
+        labourHours:
+          $ref: '#/components/schemas/FlexibleNumber'
+        equipment:
+          type: string
+
+    InventoryItem:
+      type: object
+      required: [id, name, unitId, reorderLevel, currentQuantity]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        unitId:
+          type: string
+        reorderLevel:
+          type: number
+        currentQuantity:
+          type: number
+          description: Derived from stock movements; read-only in the UI.
+
+    InventoryItemInput:
+      type: object
+      required: [name, unitId, reorderLevel]
+      properties:
+        name:
+          type: string
+        unitId:
+          type: string
+        reorderLevel:
+          $ref: '#/components/schemas/FlexibleNumber'
+
+    StockMovementType:
+      type: string
+      enum: [purchase, usage, adjustment]
+
+    StockMovement:
+      type: object
+      required: [id, itemId, type, quantity]
+      properties:
+        id:
+          type: string
+        itemId:
+          type: string
+        type:
+          $ref: '#/components/schemas/StockMovementType'
+        quantity:
+          type: number
+          description: Signed for `adjustment`; positive for `purchase` and `usage`.
+        date:
+          type: string
+          format: date
+        note:
+          type: string
+
+    StockMovementInput:
+      type: object
+      required: [itemId, type, quantity]
+      properties:
+        itemId:
+          type: string
+        type:
+          $ref: '#/components/schemas/StockMovementType'
+        quantity:
+          $ref: '#/components/schemas/FlexibleNumber'
+        date:
+          type: string
+        note:
+          type: string
+
+    ExpenseCategory:
+      type: string
+      enum: [inputs, labour, equipment, overhead, other]
+
+    ExpenseStatus:
+      type: string
+      enum: [draft, posted]
+
+    Attachment:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: Uploaded file name, shown on the saved expense.
+        url:
+          type: string
+
+    Expense:
+      type: object
+      required: [id, category, amount, date, status]
+      properties:
+        id:
+          type: string
+        category:
+          $ref: '#/components/schemas/ExpenseCategory'
+        amount:
+          type: number
+        date:
+          type: string
+          format: date
+        supplier:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/ExpenseStatus'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        notes:
+          type: [string, 'null']
+
+    ExpenseInput:
+      type: object
+      required: [category, amount, date]
+      properties:
+        category:
+          $ref: '#/components/schemas/ExpenseCategory'
+        amount:
+          $ref: '#/components/schemas/FlexibleNumber'
+        date:
+          type: string
+          description: ISO calendar date (`YYYY-MM-DD`).
+        supplier:
+          type: string
+          description: Optional counterparty; an expense may exist without one.
+
+    PaymentType:
+      type: string
+      enum: [received, paid]
+
+    Payment:
+      type: object
+      required: [id, type, amount, date]
+      properties:
+        id:
+          type: string
+        type:
+          $ref: '#/components/schemas/PaymentType'
+        amount:
+          type: number
+        date:
+          type: string
+          format: date
+        linkedExpenseId:
+          type: [string, 'null']
+        linkedSaleId:
+          type: [string, 'null']
+        reference:
+          type: [string, 'null']
+
+    PaymentInput:
+      type: object
+      required: [type, amount, date]
+      properties:
+        type:
+          $ref: '#/components/schemas/PaymentType'
+        amount:
+          $ref: '#/components/schemas/FlexibleNumber'
+        date:
+          type: string
+          description: ISO calendar date (`YYYY-MM-DD`).
+        linkedExpenseId:
+          type: string
+          description: A payment may link to an expense, a sale, or neither.
+        linkedSaleId:
+          type: string
+        reference:
+          type: string
+
+    Harvest:
+      type: object
+      required: [id, cycleId, quantity, unitId, date]
+      properties:
+        id:
+          type: string
+        cycleId:
+          type: string
+        quantity:
+          type: number
+        unitId:
+          type: string
+        date:
+          type: string
+          format: date
+
+    HarvestInput:
+      type: object
+      required: [cycleId, quantity, unitId, date]
+      properties:
+        cycleId:
+          type: string
+        quantity:
+          $ref: '#/components/schemas/FlexibleNumber'
+        unitId:
+          type: string
+        date:
+          type: string
+          description: ISO calendar date (`YYYY-MM-DD`); sent as a string so blank values are rejected.
+
+    SaleCustomer:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    Sale:
+      type: object
+      required: [id, customerId, harvestId, quantity, unitPrice, date, revenue]
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+        harvestId:
+          type: string
+          description: The harvest this sale draws from; its cycle scopes the sale.
+        quantity:
+          type: number
+        unitPrice:
+          type: number
+        date:
+          type: string
+          format: date
+        revenue:
+          type: number
+          description: Quantity × unit price, computed by the backend.
+
+    SaleInput:
+      type: object
+      required: [customerId, harvestId, quantity, unitPrice, date]
+      properties:
+        customerId:
+          type: string
+        harvestId:
+          type: string
+        quantity:
+          $ref: '#/components/schemas/FlexibleNumber'
+        unitPrice:
+          $ref: '#/components/schemas/FlexibleNumber'
+        date:
+          type: string
+          description: ISO calendar date (`YYYY-MM-DD`).
