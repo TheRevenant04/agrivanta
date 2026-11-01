@@ -4,6 +4,7 @@ from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
@@ -209,6 +210,13 @@ class Crop(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                "farm",
+                name="uniq_crop_farm_name_ci",
+            )
+        ]
 
 
 class Variety(TimestampedModel):
@@ -235,6 +243,13 @@ class Unit(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                "farm",
+                name="uniq_unit_farm_name_ci",
+            )
+        ]
 
 
 class UnitConversion(TimestampedModel):
@@ -263,10 +278,10 @@ class CropCycle(TimestampedModel):
         Field, on_delete=models.CASCADE, related_name="crop_cycles"
     )
     crop = models.ForeignKey(
-        Crop, on_delete=models.CASCADE, related_name="crop_cycles"
+        Crop, on_delete=models.RESTRICT, related_name="crop_cycles"
     )
     variety = models.ForeignKey(
-        Variety, on_delete=models.CASCADE, related_name="crop_cycles"
+        Variety, on_delete=models.RESTRICT, related_name="crop_cycles"
     )
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)

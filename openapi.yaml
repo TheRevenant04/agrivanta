@@ -344,6 +344,8 @@ paths:
                   $ref: '#/components/schemas/Crop'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [farm-setup]
       operationId: createCrop
@@ -365,12 +367,31 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           description: "A crop with this name already exists (`field: name`)."
 
   /crops/{cropId}:
     parameters:
       - $ref: '#/components/parameters/CropId'
+    get:
+      tags: [farm-setup]
+      operationId: getCrop
+      summary: Retrieve a crop
+      responses:
+        '200':
+          description: Crop.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Crop'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [farm-setup]
       operationId: updateCrop
@@ -392,10 +413,54 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           description: "Another crop already uses this name (`field: name`)."
+    patch:
+      tags: [farm-setup]
+      operationId: patchCrop
+      summary: Partially update a crop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CropPatch'
+      responses:
+        '200':
+          description: Updated crop.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Crop'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: "Another crop already uses this name (`field: name`)."
+    delete:
+      tags: [farm-setup]
+      operationId: deleteCrop
+      summary: Delete an unreferenced crop
+      responses:
+        '204':
+          description: Crop deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Crop is referenced by a crop cycle.
 
   /varieties:
     get:
@@ -420,6 +485,8 @@ paths:
                   $ref: '#/components/schemas/Variety'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [farm-setup]
       operationId: createVariety
@@ -441,12 +508,31 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: "The referenced crop does not exist (`field: cropId`)."
 
   /varieties/{varietyId}:
     parameters:
       - $ref: '#/components/parameters/VarietyId'
+    get:
+      tags: [farm-setup]
+      operationId: getVariety
+      summary: Retrieve a variety
+      responses:
+        '200':
+          description: Variety.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Variety'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [farm-setup]
       operationId: updateVariety
@@ -468,8 +554,50 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [farm-setup]
+      operationId: patchVariety
+      summary: Partially update a variety
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VarietyPatch'
+      responses:
+        '200':
+          description: Updated variety.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Variety'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [farm-setup]
+      operationId: deleteVariety
+      summary: Delete an unreferenced variety
+      responses:
+        '204':
+          description: Variety deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Variety is referenced by a crop cycle.
 
   /units:
     get:
@@ -487,6 +615,8 @@ paths:
                   $ref: '#/components/schemas/Unit'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [farm-setup]
       operationId: createUnit
@@ -508,12 +638,31 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           description: "A unit with this name already exists (`field: name`)."
 
   /units/{unitId}:
     parameters:
       - $ref: '#/components/parameters/UnitId'
+    get:
+      tags: [farm-setup]
+      operationId: getUnit
+      summary: Retrieve a unit of measure
+      responses:
+        '200':
+          description: Unit of measure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Unit'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [farm-setup]
       operationId: updateUnit
@@ -535,10 +684,54 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           description: "Another unit already uses this name (`field: name`)."
+    patch:
+      tags: [farm-setup]
+      operationId: patchUnit
+      summary: Partially update a unit of measure
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnitPatch'
+      responses:
+        '200':
+          description: Updated unit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: "Another unit already uses this name (`field: name`)."
+    delete:
+      tags: [farm-setup]
+      operationId: deleteUnit
+      summary: Delete an unreferenced unit of measure
+      responses:
+        '204':
+          description: Unit deleted; its conversion rules are deleted as well.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Unit is referenced by inventory or harvest records.
 
   /conversions:
     get:
@@ -1504,6 +1697,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The authenticated farm role does not allow this operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     ValidationError:
       description: >
         Input rejected. Either `{detail, field}` or a field-keyed validation
@@ -1733,6 +1932,7 @@ components:
           type: string
         name:
           type: string
+          maxLength: 255
 
     CropInput:
       type: object
@@ -1740,6 +1940,16 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 255
+
+    CropPatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
 
     Variety:
       type: object
@@ -1751,6 +1961,7 @@ components:
           type: string
         name:
           type: string
+          maxLength: 255
 
     VarietyInput:
       type: object
@@ -1760,6 +1971,18 @@ components:
           type: string
         name:
           type: string
+          minLength: 1
+          maxLength: 255
+
+    VarietyPatch:
+      type: object
+      properties:
+        cropId:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
 
     BaseMeasureCategory:
       type: string
@@ -1773,6 +1996,7 @@ components:
           type: string
         name:
           type: string
+          maxLength: 255
         baseMeasure:
           $ref: '#/components/schemas/BaseMeasureCategory'
 
@@ -1782,9 +2006,20 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 255
         baseMeasure:
+          $ref: '#/components/schemas/BaseMeasureCategory'
+
+    UnitPatch:
+      type: object
+      properties:
+        name:
           type: string
-          description: One of `mass`, `volume`, `count` (validated by the backend).
+          minLength: 1
+          maxLength: 255
+        baseMeasure:
+          $ref: '#/components/schemas/BaseMeasureCategory'
 
     UnitConversion:
       type: object
