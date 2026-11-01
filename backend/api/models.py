@@ -114,6 +114,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
 
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(role__in=Role.values),
+                name="api_user_role_valid",
+            )
+        ]
+
     def __str__(self):
         return self.email
 
