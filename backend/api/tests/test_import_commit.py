@@ -413,7 +413,7 @@ def test_preview_token_is_scoped_to_the_farm(client):
         {
             "name": "Other Owner",
             "email": "other-import@agrivanta.test",
-            "password": "password123",
+            "password": "OliveHarvest#42",
         },
         format="json",
     )
