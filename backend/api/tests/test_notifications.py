@@ -29,7 +29,7 @@ def make_user_client(email="other@agrivanta.test"):
         {
             "name": "Other Owner",
             "email": email,
-            "password": "password123",
+            "password": "OliveHarvest#42",
         },
         format="json",
     )

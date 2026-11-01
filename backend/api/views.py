@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, Paginator
 from django.core.validators import validate_email
@@ -310,11 +311,20 @@ class RegisterView(APIView):
         if User.objects.filter(email__iexact=email).exists():
             raise ApiError(
                 "An account with that email already exists.",
-                status.HTTP_409_CONFLICT,
+                status.HTTP_400_BAD_REQUEST,
                 "email",
             )
 
         name = str(data.get("name") or "").strip()
+        try:
+            validate_password(password, user=User(email=email, name=name))
+        except ValidationError as exc:
+            raise ApiError(
+                " ".join(exc.messages),
+                status.HTTP_400_BAD_REQUEST,
+                "password",
+            )
+
         with transaction.atomic():
             user = User.objects.create_user(
                 email=email, password=password, name=name

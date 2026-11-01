@@ -10,7 +10,7 @@ def make_user_client(email, name="Other Owner"):
         {
             "name": name,
             "email": email,
-            "password": "password123",
+            "password": "OliveHarvest#42",
         },
         format="json",
     )

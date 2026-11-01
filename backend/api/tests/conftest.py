@@ -8,7 +8,7 @@ def register(client, **overrides):
     payload = {
         "name": "Olive Owner",
         "email": "owner@agrivanta.test",
-        "password": "password123",
+        "password": "OliveHarvest#42",
     }
     payload.update(overrides)
     return client.post(REGISTER, payload, format="json")

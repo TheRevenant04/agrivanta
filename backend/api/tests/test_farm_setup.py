@@ -652,7 +652,7 @@ def test_conversion_rule_api_supports_crud_and_validation(client, anon):
         {
             "name": "Other Owner",
             "email": "other-owner@agrivanta.test",
-            "password": "password123",
+            "password": "OliveHarvest#42",
         },
         format="json",
     )
