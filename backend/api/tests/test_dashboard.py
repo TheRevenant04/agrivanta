@@ -279,6 +279,34 @@ def test_date_range_and_reporting_period_narrow_dashboard(
     _sale(client, harvest, customer, "10", "2", "2026-09-20")
     _sale(client, harvest, customer, "20", "3", "2026-10-20")
 
+    low_during_period = InventoryItem.objects.create(
+        farm=farm,
+        name="Restocked after period",
+        unit_id=data["unit"]["id"],
+        reorder_level=Decimal("5"),
+    )
+    StockMovement.objects.create(
+        farm=farm,
+        item=low_during_period,
+        type="purchase",
+        quantity=Decimal("10"),
+        date=date(2026, 9, 20),
+    )
+    StockMovement.objects.create(
+        farm=farm,
+        item=low_during_period,
+        type="usage",
+        quantity=Decimal("7"),
+        date=date(2026, 10, 20),
+    )
+    StockMovement.objects.create(
+        farm=farm,
+        item=low_during_period,
+        type="purchase",
+        quantity=Decimal("20"),
+        date=date(2026, 11, 1),
+    )
+
     args = {"startDate": "2026-10-01", "endDate": "2026-10-31"}
     date_response = client.get(DASHBOARD, args)
     assert date_response.status_code == 200, date_response.data
@@ -291,6 +319,7 @@ def test_date_range_and_reporting_period_narrow_dashboard(
             "unitId": data["unit"]["id"],
         }
     ]
+    assert date_response.data["lowStockItemCount"] == 1
 
     period = ReportingPeriod.objects.create(
         farm=farm,
@@ -301,6 +330,35 @@ def test_date_range_and_reporting_period_narrow_dashboard(
     period_response = client.get(DASHBOARD, {"periodId": str(period.id)})
     assert period_response.status_code == 200, period_response.data
     assert period_response.data == date_response.data
+    current_response = client.get(DASHBOARD)
+    assert current_response.status_code == 200, current_response.data
+    assert current_response.data["lowStockItemCount"] == 0
+
+
+def test_historical_low_stock_requires_dated_movements(client, setup):
+    data = setup()
+    farm = Farm.objects.get(owner__email="owner@agrivanta.test")
+    item = InventoryItem.objects.create(
+        farm=farm,
+        name="Undated movement",
+        unit_id=data["unit"]["id"],
+        reorder_level=Decimal("5"),
+    )
+    StockMovement.objects.create(
+        farm=farm,
+        item=item,
+        type="purchase",
+        quantity=Decimal("10"),
+    )
+
+    response = client.get(
+        DASHBOARD,
+        {"startDate": "2026-10-01", "endDate": "2026-10-31"},
+    )
+
+    assert response.status_code == 400
+    assert response.data["field"] == "stockMovements"
+    assert "no date" in response.data["detail"]
 
 
 def test_dashboard_is_farm_scoped(client, setup, fixed_today):
