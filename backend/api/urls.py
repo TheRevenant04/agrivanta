@@ -25,6 +25,7 @@ urlpatterns = [
     path("units/<str:unit_id>", views.UnitDetailView.as_view()),
     path("conversions", views.ConversionListView.as_view()),
     path("conversions/convert", views.ConversionConvertView.as_view()),
+    path("conversions/<str:conversion_id>", views.ConversionDetailView.as_view()),
     path("crop-cycles", views.CropCycleListView.as_view()),
     path(
         "crop-cycles/<str:cycle_id>",
