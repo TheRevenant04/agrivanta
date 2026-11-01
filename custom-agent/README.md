@@ -3,7 +3,8 @@
 Custom agent implementing the `_docs/process.md` lifecycle without an
 interactive session, suitable for CI or scheduled runs:
 
-1. PM grooms the issue into the four-section template
+1. PM grooms the issue into the four-section template, unless it already has
+   all four sections
 2. Engineer implements it on a branch (fresh session per role)
 3. QA verifies and posts the `## QA: PASS` / `## QA: FAIL` comment
 4. On FAIL, the engineer retries with the QA comment as input
@@ -15,9 +16,14 @@ is shared between roles. `--auto` approves only what
 `_docs/permissions.md` and the `opencode.json` permission rules allow —
 denied commands still fail.
 
+This runner processes issues sequentially. It does not schedule concurrent
+issue tracks or create isolated worktrees, and it does not perform the
+independent PR review stage. For parallel tracks and complete PR review, use
+the orchestrated workflow in `_docs/process.md`.
+
 ## Usage
 
-``` bash
+```bash
 uv run custom-agent/agent.py              # work the whole open backlog
 uv run custom-agent/agent.py --issue 12   # work a single issue
 uv run custom-agent/agent.py --issue 12 --dry-run   # print the plan only

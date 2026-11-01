@@ -4,34 +4,36 @@ Guidance for AI agents working in this repository.
 
 ## Project
 
-Agrivanta is a responsive web application for commercially managed crop
-farms: farm operations, financial records, profitability reporting, and a
-read-only AI analyst that answers natural-language questions from recorded
-data with traceable evidence.
+Agrivanta's product vision is a responsive application for commercially
+managed crop farms, combining farm operations, financial records,
+profitability reporting, and a read-only AI analyst with traceable evidence.
+The product vision is broader than the currently implemented features.
 
 - Scope and requirements: [`_docs/plan.md`](_docs/plan.md)
 - Implementation backlog (tasks 1–63): [`_docs/tasks.md`](_docs/tasks.md)
 
-Planned stack (not yet built): Django 5 + DRF backend, PostgreSQL,
-Celery + Redis, React 18 + TypeScript (Vite) frontend.
-
-Current state: a minimal Python 3.13 project managed with `uv`
-(`pyproject.toml`, `.python-version`, sample `main.py`). There is no
-application code, test suite, or CI yet — start with Phase 0 of the backlog
-unless the user directs otherwise.
+Current implementation: a Django 5.2 + DRF backend with farm-scoped
+operations, inventory, financial, reporting, notification, and dashboard
+APIs; a React 18 + TypeScript (Vite) frontend; and backend/frontend test
+suites. Local backend development uses SQLite by default, with PostgreSQL
+available through environment configuration. Celery/Redis and the AI analyst
+remain in the product plan/backlog; do not describe them as implemented.
+There is currently no GitHub Actions CI workflow.
 
 ## Repository layout
 
-``` text
-_docs/               Product plan, backlog, and agent workflow rules
-.agents/             Portable agent and skill definitions
-.opencode/           OpenCode agents and the guardrails plugin
-custom-agent/        Headless PM/engineer/QA orchestrator
-mcp-server/          Read-only backlog + issues MCP server
-main.py              Sample script (PyCharm scaffold)
-opencode.json        OpenCode config: permissions, MCP, instructions
-pyproject.toml       Project metadata and dependencies
-README.md            Setup instructions (currently empty)
+```text
+_docs/                Product plan, backlog, and agent workflow rules
+.agents/              Portable agent and skill definitions
+.opencode/             OpenCode agents and the guardrails plugin
+backend/              Django project, API app, migrations, and pytest suite
+frontend/             React/Vite app, services, and Vitest suite
+custom-agent/         Headless PM/engineer/QA issue orchestrator
+mcp-server/           Read-only backlog + issues MCP server
+openapi.yaml          Backend API contract
+opencode.json         OpenCode config: permissions, MCP, instructions
+pyproject.toml        Python project metadata and dependencies
+README.md             Project overview and local setup
 ```
 
 ## Required reading
@@ -75,15 +77,29 @@ Summary of the non-negotiables:
 
 ## Commands
 
-``` bash
-uv sync                          # install dependencies
-uv run main.py                   # run the sample script
-uv run mcp-server/server.py      # backlog MCP server (normally auto-started by opencode)
-uv run custom-agent/agent.py     # headless issue lifecycle (--issue N, --dry-run)
+```bash
+uv sync
+uv run python backend/manage.py migrate
+uv run python backend/manage.py runserver
+uv run pytest
+uv run mcp-server/server.py      # read-only backlog MCP server
+uv run custom-agent/agent.py     # headless issue lifecycle
 ```
 
-Test, lint, and build commands do not exist yet; add them to this file when
-the toolchain from `_docs/tasks.md` Phase 0 is in place.
+Frontend commands run from `frontend/` after `npm ci`:
+
+```bash
+npm run dev
+npm run lint
+npm run format:check
+npm run test
+npm run build
+```
+
+The frontend defaults to mock services. Set `VITE_API_CLIENT=http` and
+`VITE_API_BASE_URL=http://localhost:8000/api` in `frontend/.env` to use the
+local backend. Backend tests use `uv run pytest`; frontend tests use Vitest
+through `npm run test`.
 
 ## Process
 
