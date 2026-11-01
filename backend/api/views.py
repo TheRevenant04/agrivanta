@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, Paginator
 from django.core.validators import validate_email
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
@@ -744,6 +745,100 @@ def unit_lookup(farm, unit_id, field):
         )
 
 
+def validate_conversion_rule(
+    farm,
+    from_unit,
+    to_unit,
+    *,
+    existing_instance=None,
+):
+    if from_unit.pk == to_unit.pk:
+        raise ApiError(
+            "Choose two different units.",
+            status.HTTP_400_BAD_REQUEST,
+            "toUnitId",
+        )
+    if from_unit.base_measure != to_unit.base_measure:
+        raise ApiError(
+            "Units must share the same base measure category.",
+            status.HTTP_400_BAD_REQUEST,
+            "toUnitId",
+        )
+    if conversion_pair_query(
+        farm, from_unit, to_unit, existing_instance=existing_instance
+    ).exists():
+        raise_conversion_pair_conflict(from_unit, to_unit)
+
+
+def raise_conversion_pair_conflict(from_unit, to_unit):
+    raise ApiError(
+        f'A conversion rule for "{from_unit.name}" and '
+        f'"{to_unit.name}" already exists.',
+        status.HTTP_409_CONFLICT,
+        "toUnitId",
+    )
+
+
+def conversion_pair_query(farm, from_unit, to_unit, existing_instance=None):
+    query = UnitConversion.objects.filter(farm=farm).filter(
+        Q(from_unit=from_unit, to_unit=to_unit)
+        | Q(from_unit=to_unit, to_unit=from_unit)
+    )
+    if existing_instance is not None:
+        query = query.exclude(pk=existing_instance.pk)
+    return query
+
+
+def lock_conversion_farm(farm):
+    Farm.objects.select_for_update().get(pk=farm.pk)
+
+
+def parse_conversion_factor(value):
+    try:
+        factor = parse_decimal(
+            value,
+            "factor",
+            "Conversion factor must be a positive number.",
+            "Conversion factor must be a positive number.",
+            positive_message="Conversion factor must be a positive number.",
+        )
+    except ValueError as exc:
+        raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, "factor")
+    try:
+        return UnitConversion._meta.get_field("factor").clean(factor, None)
+    except ValidationError as exc:
+        raise ApiError(
+            "Conversion factor must fit within 18 digits and 6 decimal places.",
+            status.HTTP_400_BAD_REQUEST,
+            "factor",
+        ) from exc
+
+
+def save_conversion_rule(
+    conversion,
+    farm,
+    from_unit,
+    to_unit,
+    factor_value,
+    *,
+    existing_instance=None,
+    update_fields=None,
+):
+    with transaction.atomic():
+        lock_conversion_farm(farm)
+        validate_conversion_rule(
+            farm,
+            from_unit,
+            to_unit,
+            existing_instance=existing_instance,
+        )
+        factor = parse_conversion_factor(factor_value)
+        conversion.from_unit = from_unit
+        conversion.to_unit = to_unit
+        conversion.factor = factor
+        conversion.save(update_fields=update_fields)
+
+
 class ConversionListView(APIView):
     def get(self, request):
         farm = get_farm(request.user)
@@ -762,42 +857,76 @@ class ConversionListView(APIView):
         to_unit = unit_lookup(
             farm, request.data.get("toUnitId"), "toUnitId"
         )
-        if from_unit.pk == to_unit.pk:
-            raise ApiError(
-                "Choose two different units.",
-                status.HTTP_400_BAD_REQUEST,
-                "toUnitId",
-            )
-        try:
-            factor = parse_decimal(
-                request.data.get("factor"),
-                "factor",
-                "Conversion factor must be a positive number.",
-                "Conversion factor must be a positive number.",
-                positive_message="Conversion factor must be a positive number.",
-            )
-        except ValueError as exc:
-            raise ApiError(
-                str(exc), status.HTTP_400_BAD_REQUEST, "factor"
-            )
-        if UnitConversion.objects.filter(
-            farm=farm, from_unit=from_unit, to_unit=to_unit
-        ).exists():
-            raise ApiError(
-                f'A conversion rule from "{from_unit.name}" to '
-                f'"{to_unit.name}" already exists.',
-                status.HTTP_409_CONFLICT,
-            )
-        conversion = UnitConversion.objects.create(
+        conversion = UnitConversion(
             farm=farm,
             from_unit=from_unit,
             to_unit=to_unit,
-            factor=factor,
+        )
+        save_conversion_rule(
+            conversion,
+            farm,
+            from_unit,
+            to_unit,
+            request.data.get("factor"),
         )
         return Response(
             serialize_conversion(conversion),
             status=status.HTTP_201_CREATED,
         )
+
+
+class ConversionDetailView(APIView):
+    def get(self, request, conversion_id):
+        farm = get_farm(request.user)
+        conversion = scoped_get(
+            UnitConversion,
+            farm,
+            conversion_id,
+            "That conversion rule no longer exists.",
+        )
+        return Response(serialize_conversion(conversion))
+
+    def put(self, request, conversion_id):
+        farm = get_farm(request.user)
+        from_unit = unit_lookup(
+            farm, request.data.get("fromUnitId"), "fromUnitId"
+        )
+        to_unit = unit_lookup(
+            farm, request.data.get("toUnitId"), "toUnitId"
+        )
+        with transaction.atomic():
+            lock_conversion_farm(farm)
+            conversion = scoped_get(
+                UnitConversion,
+                farm,
+                conversion_id,
+                "That conversion rule no longer exists.",
+            )
+            validate_conversion_rule(
+                farm,
+                from_unit,
+                to_unit,
+                existing_instance=conversion,
+            )
+            factor = parse_conversion_factor(request.data.get("factor"))
+            conversion.from_unit = from_unit
+            conversion.to_unit = to_unit
+            conversion.factor = factor
+            conversion.save(update_fields=["from_unit", "to_unit", "factor"])
+        return Response(serialize_conversion(conversion))
+
+    def delete(self, request, conversion_id):
+        farm = get_farm(request.user)
+        with transaction.atomic():
+            lock_conversion_farm(farm)
+            conversion = scoped_get(
+                UnitConversion,
+                farm,
+                conversion_id,
+                "That conversion rule no longer exists.",
+            )
+            conversion.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ConversionConvertView(APIView):
