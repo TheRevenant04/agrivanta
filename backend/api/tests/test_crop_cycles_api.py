@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -248,6 +249,81 @@ def test_detail_full_update_and_date_boundaries(client, setup):
         {"cropId": data["crop"]["id"]},
         format="json",
     ).status_code == 400
+
+
+def test_expected_amounts_accept_maximum_model_precision_on_create_and_update(
+    client, setup
+):
+    data = setup()
+    maximum = "9999999999.9999"
+    created = create_cycle(
+        client,
+        data,
+        expectedYield=maximum,
+        expectedPrice=maximum,
+    )
+    cycle = CropCycle.objects.get(pk=created["id"])
+    assert cycle.expected_yield == Decimal(maximum)
+    assert cycle.expected_price == Decimal(maximum)
+
+    updated = client.patch(
+        f"{URL}/{created['id']}",
+        {"expectedYield": "9999999998.9999", "expectedPrice": maximum},
+        format="json",
+    )
+    assert updated.status_code == 200, updated.data
+    cycle.refresh_from_db()
+    assert cycle.expected_yield == Decimal("9999999998.9999")
+    assert cycle.expected_price == Decimal(maximum)
+
+
+@pytest.mark.parametrize(
+    ("field", "too_large"),
+    [
+        ("expectedYield", "10000000000"),
+        ("expectedYield", "0.00001"),
+        ("expectedPrice", "10000000000"),
+        ("expectedPrice", "0.00001"),
+    ],
+)
+def test_expected_amounts_reject_precision_overflow_on_create_and_update(
+    client, setup, field, too_large
+):
+    data = setup()
+    initial_count = CropCycle.objects.count()
+    invalid_create = client.post(
+        URL,
+        {
+            "fieldId": data["field"]["id"],
+            "cropId": data["crop"]["id"],
+            "cycleType": "annual",
+            "startDate": "2026-03-01",
+            field: too_large,
+        },
+        format="json",
+    )
+    assert invalid_create.status_code == 400
+    assert invalid_create.data["field"] == field
+    assert CropCycle.objects.count() == initial_count
+
+    created = create_cycle(
+        client,
+        data,
+        expectedYield="120.5",
+        expectedPrice="0.75",
+    )
+    unchanged_values = {
+        "expectedYield": Decimal("120.5"),
+        "expectedPrice": Decimal("0.75"),
+    }
+    invalid_update = client.patch(
+        f"{URL}/{created['id']}", {field: too_large}, format="json"
+    )
+    assert invalid_update.status_code == 400
+    assert invalid_update.data["field"] == field
+    cycle = CropCycle.objects.get(pk=created["id"])
+    assert cycle.expected_yield == unchanged_values["expectedYield"]
+    assert cycle.expected_price == unchanged_values["expectedPrice"]
 
 
 def test_cycle_reads_and_writes_are_farm_scoped(client, setup):

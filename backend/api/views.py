@@ -1423,7 +1423,7 @@ class CropCycleListView(APIView):
         if isinstance(value, str) and not value.strip():
             return None
         try:
-            return parse_decimal(
+            amount = parse_decimal(
                 value,
                 key,
                 f"{'Expected yield' if key == 'expectedYield' else 'Expected price'} must be a number.",
@@ -1438,6 +1438,25 @@ class CropCycleListView(APIView):
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, key
             )
+        model_field = {
+            "expectedYield": "expected_yield",
+            "expectedPrice": "expected_price",
+        }[key]
+        try:
+            return CropCycle._meta.get_field(model_field).clean(
+                amount, None
+            )
+        except ValidationError as exc:
+            label = (
+                "Expected yield"
+                if key == "expectedYield"
+                else "Expected price"
+            )
+            raise ApiError(
+                f"{label} must fit within 14 digits and 4 decimal places.",
+                status.HTTP_400_BAD_REQUEST,
+                key,
+            ) from exc
 
 
 class CropCycleDetailView(APIView):
