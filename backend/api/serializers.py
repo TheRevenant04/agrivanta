@@ -108,7 +108,10 @@ def serialize_cycle(cycle):
         "id": as_id(cycle.id),
         "fieldId": as_id(cycle.field_id),
         "cropId": as_id(cycle.crop_id),
-        "varietyId": as_id(cycle.variety_id),
+        "varietyId": (
+            as_id(cycle.variety_id) if cycle.variety_id else None
+        ),
+        "cycleType": cycle.cycle_type,
         "startDate": as_date(cycle.start_date),
         "status": cycle.status,
     }

@@ -31,6 +31,11 @@ class CycleStatus(models.TextChoices):
     CLOSED = "closed", "closed"
 
 
+class CycleType(models.TextChoices):
+    ANNUAL = "annual", "annual"
+    PERENNIAL = "perennial", "perennial"
+
+
 class ActivityCategory(models.TextChoices):
     LAND_PREPARATION = "land preparation", "land preparation"
     PLANTING = "planting", "planting"
@@ -281,7 +286,17 @@ class CropCycle(TimestampedModel):
         Crop, on_delete=models.RESTRICT, related_name="crop_cycles"
     )
     variety = models.ForeignKey(
-        Variety, on_delete=models.RESTRICT, related_name="crop_cycles"
+        Variety,
+        on_delete=models.RESTRICT,
+        related_name="crop_cycles",
+        null=True,
+        blank=True,
+    )
+    cycle_type = models.CharField(
+        max_length=16,
+        choices=CycleType.choices,
+        null=True,
+        blank=True,
     )
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)

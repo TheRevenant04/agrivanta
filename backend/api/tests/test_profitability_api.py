@@ -53,6 +53,7 @@ def _create_cycle(client, field, crop, variety, start, end=None):
         "fieldId": field["id"],
         "cropId": crop["id"],
         "varietyId": variety["id"],
+        "cycleType": "annual",
         "startDate": start,
     }
     if end is not None:

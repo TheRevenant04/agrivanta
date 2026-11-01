@@ -912,17 +912,37 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can create cycles.
         '404':
-          description: "The referenced field, crop, or variety does not exist (`field: fieldId`, `cropId`, or `varietyId`)."
+          description: "The referenced field, crop, or variety does not exist (`fieldId`, `cropId`, or `varietyId`)."
 
   /crop-cycles/{cycleId}:
     parameters:
       - $ref: '#/components/parameters/CycleId'
+    get:
+      tags: [crop-cycles]
+      operationId: getCropCycle
+      summary: Read a crop cycle, including closed cycles
+      responses:
+        '200':
+          description: Crop cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CropCycle'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [crop-cycles]
       operationId: updateCropCycle
-      summary: Update the forecast fields of an open cycle
-      description: Only `expectedYield` and `expectedPrice` are editable.
+      summary: Update an open crop cycle
+      description: >
+        Updates the supplied cycle fields. `status` can only be changed using
+        the close or reopen actions. Closed cycles must be reopened before
+        they can be updated.
       requestBody:
         required: true
         content:
@@ -940,6 +960,51 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The cycle is closed and locked.
+        '403':
+          description: Only farm owners and managers can update cycles.
+    patch:
+      tags: [crop-cycles]
+      operationId: partiallyUpdateCropCycle
+      summary: Partially update an open crop cycle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CropCycleUpdateInput'
+      responses:
+        '200':
+          description: Updated cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CropCycle'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can update cycles.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The cycle is closed and locked.
+    delete:
+      tags: [crop-cycles]
+      operationId: deleteCropCycle
+      summary: Delete an open crop cycle
+      description: Closed cycles must be reopened before deletion.
+      responses:
+        '204':
+          description: Crop cycle deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can delete cycles.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -964,7 +1029,33 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The cycle is already closed. Reopening a closed cycle is not supported.
+          description: The cycle is already closed.
+        '403':
+          description: Only farm owners and managers can close cycles.
+
+  /crop-cycles/{cycleId}/reopen:
+    parameters:
+      - $ref: '#/components/parameters/CycleId'
+    post:
+      tags: [crop-cycles]
+      operationId: reopenCropCycle
+      summary: Reopen a closed crop cycle
+      description: Only farm owners and managers can reopen a cycle.
+      responses:
+        '200':
+          description: The reopened cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CropCycle'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can reopen cycles.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The cycle is already open.
 
   /activity-types:
     get:
@@ -2079,9 +2170,13 @@ components:
       type: string
       enum: [open, closed]
 
+    CropCycleType:
+      type: string
+      enum: [annual, perennial]
+
     CropCycle:
       type: object
-      required: [id, fieldId, cropId, varietyId, startDate, status]
+      required: [id, fieldId, cropId, varietyId, cycleType, startDate, status]
       properties:
         id:
           type: string
@@ -2090,7 +2185,11 @@ components:
         cropId:
           type: string
         varietyId:
-          type: string
+          type: [string, 'null']
+        cycleType:
+          anyOf:
+            - $ref: '#/components/schemas/CropCycleType'
+            - type: 'null'
         startDate:
           type: string
           format: date
@@ -2106,14 +2205,17 @@ components:
 
     CropCycleInput:
       type: object
-      required: [fieldId, cropId, varietyId, startDate]
+      required: [fieldId, cropId, cycleType, startDate]
       properties:
         fieldId:
           type: string
         cropId:
           type: string
         varietyId:
-          type: string
+          type: [string, 'null']
+          description: Optional variety belonging to the selected crop.
+        cycleType:
+          $ref: '#/components/schemas/CropCycleType'
         startDate:
           type: string
           description: ISO calendar date (`YYYY-MM-DD`); sent as a string so blank values are rejected.
@@ -2121,18 +2223,42 @@ components:
           type: string
           description: ISO calendar date; must not precede `startDate`.
         expectedYield:
-          $ref: '#/components/schemas/FlexibleNumber'
+          anyOf:
+            - $ref: '#/components/schemas/FlexibleNumber'
+            - type: 'null'
         expectedPrice:
-          $ref: '#/components/schemas/FlexibleNumber'
+          anyOf:
+            - $ref: '#/components/schemas/FlexibleNumber'
+            - type: 'null'
 
     CropCycleUpdateInput:
       type: object
-      description: Only forecast amounts are editable after creation.
+      description: >
+        Any supplied cycle fields may be updated while the cycle is open.
+        Status is managed only by close and reopen actions.
       properties:
+        fieldId:
+          type: string
+        cropId:
+          type: string
+        varietyId:
+          type: [string, 'null']
+        cycleType:
+          $ref: '#/components/schemas/CropCycleType'
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: [string, 'null']
+          format: date
         expectedYield:
-          $ref: '#/components/schemas/FlexibleNumber'
+          anyOf:
+            - $ref: '#/components/schemas/FlexibleNumber'
+            - type: 'null'
         expectedPrice:
-          $ref: '#/components/schemas/FlexibleNumber'
+          anyOf:
+            - $ref: '#/components/schemas/FlexibleNumber'
+            - type: 'null'
 
     ActivityStatus:
       type: string

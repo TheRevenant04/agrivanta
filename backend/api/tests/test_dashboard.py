@@ -36,6 +36,7 @@ def _cycle(client, data, *, start="2026-01-01", end=None):
         "fieldId": data["field"]["id"],
         "cropId": data["crop"]["id"],
         "varietyId": data["variety"]["id"],
+        "cycleType": "annual",
         "startDate": start,
     }
     if end is not None:
@@ -117,6 +118,7 @@ def test_dashboard_aggregates_cycle_costs_sales_units_activities_and_stock(
             "fieldId": other_field["id"],
             "cropId": data["crop"]["id"],
             "varietyId": data["variety"]["id"],
+            "cycleType": "annual",
             "startDate": "2026-02-01",
         },
     )

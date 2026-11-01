@@ -41,6 +41,7 @@ def make_cycle(client, label):
             "fieldId": field.data["id"],
             "cropId": crop.data["id"],
             "varietyId": variety.data["id"],
+            "cycleType": "annual",
             "startDate": "2026-03-01",
         },
         format="json",

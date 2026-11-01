@@ -35,6 +35,7 @@ from .models import (
     Crop,
     CropCycle,
     CycleStatus,
+    CycleType,
     Customer,
     Expense,
     ExpenseCategory,
@@ -1276,11 +1277,13 @@ class CropCycleListView(APIView):
         return Response([serialize_cycle(cycle) for cycle in cycles])
 
     def post(self, request):
+        require_farm_setup_write(request)
+        self._reject_status_input(request.data)
         farm = get_farm(request.user)
         field = self._field(farm, request.data.get("fieldId"))
         crop = self._crop(farm, request.data.get("cropId"))
         variety = self._variety(farm, request.data.get("varietyId"))
-        if variety.crop_id != crop.id:
+        if variety is not None and variety.crop_id != crop.id:
             raise ApiError(
                 "The selected variety does not belong to the selected crop.",
                 status.HTTP_400_BAD_REQUEST,
@@ -1292,6 +1295,7 @@ class CropCycleListView(APIView):
             "Start date is required.",
             "Start date must be a valid calendar date.",
         )
+        cycle_type = self._cycle_type(request.data.get("cycleType"))
         end_date = self._end_date(
             request.data.get("endDate"), start_date
         )
@@ -1306,6 +1310,7 @@ class CropCycleListView(APIView):
             field=field,
             crop=crop,
             variety=variety,
+            cycle_type=cycle_type,
             start_date=start_date,
             end_date=end_date,
             expected_yield=expected_yield,
@@ -1353,11 +1358,7 @@ class CropCycleListView(APIView):
     @staticmethod
     def _variety(farm, variety_id):
         if variety_id in (None, ""):
-            raise ApiError(
-                "Select a variety for this crop cycle.",
-                status.HTTP_400_BAD_REQUEST,
-                "varietyId",
-            )
+            return None
         try:
             return Variety.objects.get(farm=farm, pk=variety_id)
         except (Variety.DoesNotExist, ValueError, ValidationError):
@@ -1365,6 +1366,28 @@ class CropCycleListView(APIView):
                 "The selected variety does not exist.",
                 status.HTTP_404_NOT_FOUND,
                 "varietyId",
+            )
+
+    @staticmethod
+    def _cycle_type(value):
+        if value not in CycleType.values:
+            message = (
+                "Select whether this crop cycle is annual or perennial."
+                if value in (None, "")
+                else "Cycle type must be annual or perennial."
+            )
+            raise ApiError(
+                message, status.HTTP_400_BAD_REQUEST, "cycleType"
+            )
+        return value
+
+    @staticmethod
+    def _reject_status_input(data):
+        if "status" in data:
+            raise ApiError(
+                "Change crop cycle status through the close or reopen action.",
+                status.HTTP_400_BAD_REQUEST,
+                "status",
             )
 
     @staticmethod
@@ -1400,7 +1423,7 @@ class CropCycleListView(APIView):
         if isinstance(value, str) and not value.strip():
             return None
         try:
-            return parse_decimal(
+            amount = parse_decimal(
                 value,
                 key,
                 f"{'Expected yield' if key == 'expectedYield' else 'Expected price'} must be a number.",
@@ -1415,10 +1438,44 @@ class CropCycleListView(APIView):
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, key
             )
+        model_field = {
+            "expectedYield": "expected_yield",
+            "expectedPrice": "expected_price",
+        }[key]
+        try:
+            return CropCycle._meta.get_field(model_field).clean(
+                amount, None
+            )
+        except ValidationError as exc:
+            label = (
+                "Expected yield"
+                if key == "expectedYield"
+                else "Expected price"
+            )
+            raise ApiError(
+                f"{label} must fit within 14 digits and 4 decimal places.",
+                status.HTTP_400_BAD_REQUEST,
+                key,
+            ) from exc
 
 
 class CropCycleDetailView(APIView):
+    def get(self, request, cycle_id):
+        farm = get_farm(request.user)
+        cycle = scoped_get(
+            CropCycle, farm, cycle_id, "That crop cycle no longer exists."
+        )
+        return Response(serialize_cycle(cycle))
+
     def put(self, request, cycle_id):
+        return self._update(request, cycle_id)
+
+    def patch(self, request, cycle_id):
+        return self._update(request, cycle_id)
+
+    def _update(self, request, cycle_id):
+        require_farm_setup_write(request)
+        CropCycleListView._reject_status_input(request.data)
         farm = get_farm(request.user)
         cycle = scoped_get(
             CropCycle, farm, cycle_id, "That crop cycle no longer exists."
@@ -1428,6 +1485,45 @@ class CropCycleDetailView(APIView):
                 "This crop cycle is closed and can no longer be edited.",
                 status.HTTP_409_CONFLICT,
             )
+        if "fieldId" in request.data:
+            cycle.field = CropCycleListView._field(
+                farm, request.data.get("fieldId")
+            )
+        if "cropId" in request.data:
+            cycle.crop = CropCycleListView._crop(
+                farm, request.data.get("cropId")
+            )
+        if "varietyId" in request.data:
+            cycle.variety = CropCycleListView._variety(
+                farm, request.data.get("varietyId")
+            )
+        if cycle.variety_id and cycle.variety.crop_id != cycle.crop_id:
+            raise ApiError(
+                "The selected variety does not belong to the selected crop.",
+                status.HTTP_400_BAD_REQUEST,
+                "varietyId",
+            )
+        if "cycleType" in request.data:
+            cycle.cycle_type = CropCycleListView._cycle_type(
+                request.data.get("cycleType")
+            )
+        if "startDate" in request.data:
+            cycle.start_date = parse_body_date(
+                request.data,
+                "startDate",
+                "Start date is required.",
+                "Start date must be a valid calendar date.",
+            )
+        if "endDate" in request.data:
+            cycle.end_date = CropCycleListView._end_date(
+                request.data.get("endDate"), cycle.start_date
+            )
+        elif cycle.end_date and cycle.end_date < cycle.start_date:
+            raise ApiError(
+                "End date cannot be before the start date.",
+                status.HTTP_400_BAD_REQUEST,
+                "endDate",
+            )
         if "expectedYield" in request.data:
             cycle.expected_yield = CropCycleListView._optional_amount(
                 request.data, "expectedYield"
@@ -1436,12 +1532,27 @@ class CropCycleDetailView(APIView):
             cycle.expected_price = CropCycleListView._optional_amount(
                 request.data, "expectedPrice"
             )
-        cycle.save(update_fields=["expected_yield", "expected_price"])
+        cycle.save()
         return Response(serialize_cycle(cycle))
+
+    def delete(self, request, cycle_id):
+        require_farm_setup_write(request)
+        farm = get_farm(request.user)
+        cycle = scoped_get(
+            CropCycle, farm, cycle_id, "That crop cycle no longer exists."
+        )
+        if cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "This crop cycle is closed and can no longer be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        cycle.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CropCycleCloseView(APIView):
     def post(self, request, cycle_id):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
         cycle = scoped_get(
             CropCycle, farm, cycle_id, "That crop cycle no longer exists."
@@ -1452,6 +1563,23 @@ class CropCycleCloseView(APIView):
                 status.HTTP_409_CONFLICT,
             )
         cycle.status = CycleStatus.CLOSED
+        cycle.save(update_fields=["status"])
+        return Response(serialize_cycle(cycle))
+
+
+class CropCycleReopenView(APIView):
+    def post(self, request, cycle_id):
+        require_farm_setup_write(request)
+        farm = get_farm(request.user)
+        cycle = scoped_get(
+            CropCycle, farm, cycle_id, "That crop cycle no longer exists."
+        )
+        if cycle.status == CycleStatus.OPEN:
+            raise ApiError(
+                "This crop cycle is already open.",
+                status.HTTP_409_CONFLICT,
+            )
+        cycle.status = CycleStatus.OPEN
         cycle.save(update_fields=["status"])
         return Response(serialize_cycle(cycle))
 
