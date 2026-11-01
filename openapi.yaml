@@ -1393,8 +1393,9 @@ paths:
         completed, and overdue → in_progress (an overdue activity can still
         be started); completed is terminal. The API rejects an illegal
         transition (e.g. completed → in_progress) with 409 on `status`, and
-        an unknown status value with 400 on `status`. `overdue` is produced by
-        a server-side job and is not settable by the client.
+        an unknown status value with 400 on `status`. Clients cannot set
+        `overdue` as a target status; this endpoint can only move an already
+        overdue activity back to `in_progress`.
       requestBody:
         required: true
         content:
@@ -1421,6 +1422,8 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The user's role cannot progress this activity.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -2607,6 +2610,7 @@ components:
         - assignedWorkerIds
         - plannedDate
         - status
+        - description
         - resourceNeeds
       properties:
         id:
@@ -2616,6 +2620,7 @@ components:
         typeId:
           type: string
         assignedWorkerIds:
+          description: IDs of worker accounts assigned to this activity.
           type: array
           items:
             type: string
@@ -2626,7 +2631,7 @@ components:
         status:
           $ref: '#/components/schemas/ActivityStatus'
         description:
-          type: string
+          type: [string, 'null']
         resourceNeeds:
           $ref: '#/components/schemas/ActivityResourceNeeds'
 

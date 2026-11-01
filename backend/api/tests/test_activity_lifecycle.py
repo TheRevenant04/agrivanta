@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from rest_framework.test import APIClient
@@ -28,6 +29,39 @@ def create_activity(client, cycle_id, type_id, **overrides):
     }
     payload.update(overrides)
     return client.post(ACTIVITIES, payload, format="json")
+
+
+@pytest.mark.django_db
+def test_activity_resource_needs_do_not_inherit_activity_type_defaults(
+    client, cycle
+):
+    built = cycle()
+    activity_type = client.post(
+        "/api/activity-types",
+        {
+            "name": "Defaulted application",
+            "category": "custom",
+            "inputs": [{"itemName": "Fertilizer", "quantity": 12}],
+            "labourHours": 4,
+            "equipment": "Spreader",
+        },
+        format="json",
+    )
+    assert activity_type.status_code == 201
+    assert activity_type.data["inputs"] == [
+        {"itemName": "Fertilizer", "quantity": 12}
+    ]
+
+    activity = create_activity(
+        client, built["cycle"]["id"], activity_type.data["id"]
+    )
+
+    assert activity.status_code == 201
+    assert activity.data["resourceNeeds"] == {
+        "inputs": [],
+        "labourHours": 0,
+        "equipment": "",
+    }
 
 
 def foreign_resources():
@@ -367,6 +401,11 @@ def test_assignee_replacement_validation_and_worker_visibility(
         client.put(
             url,
             {"assignedWorkerIds": [str(worker.id), str(outsider.id)]},
+            format="json",
+        ),
+        client.put(
+            url,
+            {"assignedWorkerIds": [str(worker.id), str(uuid4())]},
             format="json",
         ),
     ]
