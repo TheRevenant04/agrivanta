@@ -4,8 +4,6 @@ from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import F
-from django.db.models.functions import Greatest, Least
 from django.utils import timezone
 
 
@@ -245,14 +243,6 @@ class UnitConversion(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
-        constraints = [
-            models.UniqueConstraint(
-                F("farm"),
-                Least("from_unit", "to_unit"),
-                Greatest("from_unit", "to_unit"),
-                name="unique_conversion_unit_pair_per_farm",
-            )
-        ]
 
 
 class CropCycle(TimestampedModel):

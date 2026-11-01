@@ -225,10 +225,13 @@ def test_conversion_rejects_duplicate_pair(client):
     assert duplicate.status_code == 409
 
 
-def test_conversion_api_enforces_symmetric_pair_uniqueness_atomically(
+def test_conversion_api_locks_farm_before_pair_check_and_rejects_conflicts(
     client, monkeypatch
 ):
+    from django.db import connection
+
     from api import views
+    from api.models import Farm
 
     kg = client.post(
         "/api/units", {"name": "kg", "baseMeasure": "mass"}, format="json"
@@ -242,6 +245,28 @@ def test_conversion_api_enforces_symmetric_pair_uniqueness_atomically(
     pound = client.post(
         "/api/units", {"name": "lb", "baseMeasure": "mass"}, format="json"
     ).data
+    select_for_update = Farm.objects.select_for_update
+    lock_calls = []
+    validation_calls = []
+    validate_conversion_rule = views.validate_conversion_rule
+
+    def track_select_for_update(*args, **kwargs):
+        assert connection.in_atomic_block
+        lock_calls.append(True)
+        return select_for_update(*args, **kwargs)
+
+    def track_validate_conversion_rule(*args, **kwargs):
+        assert connection.in_atomic_block
+        assert len(lock_calls) == len(validation_calls) + 1
+        validation_calls.append(True)
+        return validate_conversion_rule(*args, **kwargs)
+
+    monkeypatch.setattr(
+        Farm.objects, "select_for_update", track_select_for_update
+    )
+    monkeypatch.setattr(
+        views, "validate_conversion_rule", track_validate_conversion_rule
+    )
     existing = client.post(
         "/api/conversions",
         {"fromUnitId": kg["id"], "toUnitId": grams["id"], "factor": "1000"},
@@ -254,25 +279,70 @@ def test_conversion_api_enforces_symmetric_pair_uniqueness_atomically(
     )
     assert existing.status_code == second.status_code == 201
 
-    monkeypatch.setattr(
-        views, "validate_conversion_rule", lambda *args, **kwargs: None
-    )
-    raced_create = client.post(
+    duplicate_create = client.post(
         "/api/conversions",
         {"fromUnitId": grams["id"], "toUnitId": kg["id"], "factor": "0.001"},
         format="json",
     )
-    assert raced_create.status_code == 409
-    assert raced_create.data["field"] == "toUnitId"
+    assert duplicate_create.status_code == 409
+    assert duplicate_create.data["field"] == "toUnitId"
 
-    raced_update = client.put(
+    duplicate_update = client.put(
         f"/api/conversions/{second.data['id']}",
         {"fromUnitId": grams["id"], "toUnitId": kg["id"], "factor": "0.001"},
         format="json",
     )
-    assert raced_update.status_code == 409
-    assert raced_update.data["field"] == "toUnitId"
+    assert duplicate_update.status_code == 409
+    assert duplicate_update.data["field"] == "toUnitId"
+    assert len(lock_calls) == len(validation_calls) == 4
     assert client.get(f"/api/conversions/{second.data['id']}").data == second.data
+
+
+def test_legacy_opposite_conversion_rows_remain_unchanged(client):
+    from decimal import Decimal
+
+    from api.models import Unit, UnitConversion
+
+    kg_data = client.post(
+        "/api/units", {"name": "kg", "baseMeasure": "mass"}, format="json"
+    ).data
+    grams_data = client.post(
+        "/api/units", {"name": "g", "baseMeasure": "mass"}, format="json"
+    ).data
+    kg = Unit.objects.get(pk=kg_data["id"])
+    grams = Unit.objects.get(pk=grams_data["id"])
+
+    forward = UnitConversion.objects.create(
+        farm=kg.farm,
+        from_unit=kg,
+        to_unit=grams,
+        factor=Decimal("1000"),
+    )
+    reverse = UnitConversion.objects.create(
+        farm=kg.farm,
+        from_unit=grams,
+        to_unit=kg,
+        factor=Decimal("0.001"),
+    )
+
+    response = client.get("/api/conversions")
+    assert response.status_code == 200
+    assert {rule["id"] for rule in response.data} == {
+        str(forward.pk),
+        str(reverse.pk),
+    }
+
+    duplicate = client.post(
+        "/api/conversions",
+        {
+            "fromUnitId": kg_data["id"],
+            "toUnitId": grams_data["id"],
+            "factor": "1000",
+        },
+        format="json",
+    )
+    assert duplicate.status_code == 409
+    assert UnitConversion.objects.filter(farm=kg.farm).count() == 2
 
 
 def test_conversion_factor_respects_model_precision_on_create_and_update(client):

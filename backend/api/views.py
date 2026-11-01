@@ -4,7 +4,7 @@ from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, Paginator
 from django.core.validators import validate_email
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
@@ -801,17 +801,28 @@ def parse_conversion_factor(value):
 
 
 def save_conversion_rule(
-    conversion, farm, from_unit, to_unit, *, update_fields=None
+    conversion,
+    farm,
+    from_unit,
+    to_unit,
+    factor_value,
+    *,
+    existing_instance=None,
+    update_fields=None,
 ):
-    try:
-        with transaction.atomic():
-            conversion.save(update_fields=update_fields)
-    except IntegrityError:
-        if conversion_pair_query(
-            farm, from_unit, to_unit, existing_instance=conversion
-        ).exists():
-            raise_conversion_pair_conflict(from_unit, to_unit)
-        raise
+    with transaction.atomic():
+        Farm.objects.select_for_update().get(pk=farm.pk)
+        validate_conversion_rule(
+            farm,
+            from_unit,
+            to_unit,
+            existing_instance=existing_instance,
+        )
+        factor = parse_conversion_factor(factor_value)
+        conversion.from_unit = from_unit
+        conversion.to_unit = to_unit
+        conversion.factor = factor
+        conversion.save(update_fields=update_fields)
 
 
 class ConversionListView(APIView):
@@ -832,15 +843,18 @@ class ConversionListView(APIView):
         to_unit = unit_lookup(
             farm, request.data.get("toUnitId"), "toUnitId"
         )
-        validate_conversion_rule(farm, from_unit, to_unit)
-        factor = parse_conversion_factor(request.data.get("factor"))
         conversion = UnitConversion(
             farm=farm,
             from_unit=from_unit,
             to_unit=to_unit,
-            factor=factor,
         )
-        save_conversion_rule(conversion, farm, from_unit, to_unit)
+        save_conversion_rule(
+            conversion,
+            farm,
+            from_unit,
+            to_unit,
+            request.data.get("factor"),
+        )
         return Response(
             serialize_conversion(conversion),
             status=status.HTTP_201_CREATED,
@@ -872,21 +886,13 @@ class ConversionDetailView(APIView):
         to_unit = unit_lookup(
             farm, request.data.get("toUnitId"), "toUnitId"
         )
-        validate_conversion_rule(
-            farm,
-            from_unit,
-            to_unit,
-            existing_instance=conversion,
-        )
-        factor = parse_conversion_factor(request.data.get("factor"))
-        conversion.from_unit = from_unit
-        conversion.to_unit = to_unit
-        conversion.factor = factor
         save_conversion_rule(
             conversion,
             farm,
             from_unit,
             to_unit,
+            request.data.get("factor"),
+            existing_instance=conversion,
             update_fields=["from_unit", "to_unit", "factor"],
         )
         return Response(serialize_conversion(conversion))
