@@ -510,8 +510,41 @@ def test_conversions_convert_in_both_directions(client):
         format="json",
     )
     assert direct.status_code == 200
+    assert set(direct.data) == {
+        "fromUnitId",
+        "toUnitId",
+        "quantity",
+        "factor",
+        "converted",
+    }
     assert direct.data["factor"] == 1000
     assert direct.data["converted"] == 2000
+
+    identity = client.post(
+        "/api/conversions/convert",
+        {
+            "fromUnitId": kg["id"],
+            "toUnitId": kg["id"],
+            "quantity": "2",
+        },
+        format="json",
+    )
+    assert identity.status_code == 200
+    assert identity.data["factor"] == 1
+    assert identity.data["converted"] == 2
+
+    zero = client.post(
+        "/api/conversions/convert",
+        {
+            "fromUnitId": kg["id"],
+            "toUnitId": grams["id"],
+            "quantity": "0",
+        },
+        format="json",
+    )
+    assert zero.status_code == 200
+    assert zero.data["factor"] == 1000
+    assert zero.data["converted"] == 0
 
     inverse = client.post(
         "/api/conversions/convert",

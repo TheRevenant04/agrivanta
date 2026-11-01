@@ -87,6 +87,14 @@ from .serializers import (
     serialize_user,
     serialize_variety,
 )
+from .unit_conversion import (
+    ConversionRuleData,
+    MissingConversionRuleError,
+    UnitConversionError,
+    UnitData,
+    conversion_factor,
+    convert_quantity,
+)
 
 STANDARD_ACTIVITY_TEMPLATES = [
     ("Land preparation", ActivityCategory.LAND_PREPARATION),
@@ -1223,43 +1231,27 @@ class ConversionConvertView(APIView):
                 str(exc), status.HTTP_400_BAD_REQUEST, "quantity"
             )
 
-        if from_unit.pk == to_unit.pk:
-            return Response(
-                {
-                    "fromUnitId": str(from_unit.id),
-                    "toUnitId": str(to_unit.id),
-                    "quantity": as_number(quantity),
-                    "factor": 1,
-                    "converted": as_number(quantity),
-                }
+        source_data = _unit_data(from_unit)
+        target_data = _unit_data(to_unit)
+        is_identity = from_unit.pk == to_unit.pk
+        rules = (
+            []
+            if is_identity
+            else _conversion_rule_data(farm, from_unit, to_unit)
+        )
+        try:
+            factor = (
+                1
+                if is_identity
+                else conversion_factor(source_data, target_data, rules)
             )
-
-        if from_unit.base_measure != to_unit.base_measure:
-            raise ApiError(
-                f'Cannot convert "{from_unit.name}" '
-                f"({from_unit.base_measure}) to \"{to_unit.name}\" "
-                f"({to_unit.base_measure}): base measures do not match.",
-                status.HTTP_400_BAD_REQUEST,
+            converted = convert_quantity(
+                quantity, source_data, target_data, rules
             )
-
-        forward = UnitConversion.objects.filter(
-            farm=farm, from_unit=from_unit, to_unit=to_unit
-        ).first()
-        if forward is not None:
-            factor = forward.factor
-            converted = quantity * factor
-        else:
-            reverse = UnitConversion.objects.filter(
-                farm=farm, from_unit=to_unit, to_unit=from_unit
-            ).first()
-            if reverse is None:
-                raise ApiError(
-                    f'No rule exists for converting from '
-                    f'"{from_unit.name}" to "{to_unit.name}".',
-                    status.HTTP_404_NOT_FOUND,
-                )
-            factor = Decimal(1) / reverse.factor
-            converted = quantity / reverse.factor
+        except MissingConversionRuleError as exc:
+            raise ApiError(str(exc), status.HTTP_404_NOT_FOUND)
+        except UnitConversionError as exc:
+            raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST)
 
         return Response(
             {
@@ -2478,33 +2470,37 @@ class HarvestDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def _unit_data(unit):
+    return UnitData(unit.pk, unit.name, unit.base_measure)
+
+
+def _conversion_rule_data(farm, from_unit, to_unit):
+    rules = UnitConversion.objects.filter(farm=farm).filter(
+        Q(from_unit=from_unit, to_unit=to_unit)
+        | Q(from_unit=to_unit, to_unit=from_unit)
+    )
+    return [
+        ConversionRuleData(
+            rule.from_unit_id,
+            rule.to_unit_id,
+            rule.factor,
+        )
+        for rule in rules
+    ]
+
+
 def _convert_quantity_between_units(farm, quantity, from_unit, to_unit):
-    if from_unit.pk == to_unit.pk:
-        return quantity
-    if from_unit.base_measure != to_unit.base_measure:
-        raise ApiError(
-            f'Cannot convert "{from_unit.name}" '
-            f"({from_unit.base_measure}) to \"{to_unit.name}\" "
-            f"({to_unit.base_measure}): base measures do not match.",
-            status.HTTP_400_BAD_REQUEST,
-        )
-
-    forward = UnitConversion.objects.filter(
-        farm=farm, from_unit=from_unit, to_unit=to_unit
-    ).first()
-    if forward is not None:
-        return quantity * forward.factor
-
-    reverse = UnitConversion.objects.filter(
-        farm=farm, from_unit=to_unit, to_unit=from_unit
-    ).first()
-    if reverse is None:
-        raise ApiError(
-            f'No rule exists for converting from '
-            f'"{from_unit.name}" to "{to_unit.name}".',
-            status.HTTP_400_BAD_REQUEST,
-        )
-    return quantity / reverse.factor
+    source_data = _unit_data(from_unit)
+    target_data = _unit_data(to_unit)
+    rules = (
+        []
+        if from_unit.pk == to_unit.pk
+        else _conversion_rule_data(farm, from_unit, to_unit)
+    )
+    try:
+        return convert_quantity(quantity, source_data, target_data, rules)
+    except UnitConversionError as exc:
+        raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST)
 
 
 def aggregate_harvest_quantity_for_cycle(farm, cycle, through_date=None):
