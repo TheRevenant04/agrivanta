@@ -1,17 +1,17 @@
 # Agrivanta frontend
 
-Vite + React 18 + TypeScript scaffold for the Agrivanta web application.
+The Agrivanta frontend is a Vite + React 18 + TypeScript application. It
+includes authentication and protected routes, a shared application shell,
+farm and crop-cycle setup, activity planning, inventory, expenses, payments,
+harvests, sales, unit conversions, and a dashboard.
 
-This package proves the frontend toolchain (build, lint, formatting, and
-tests) works end to end. It ships a single typed **services layer**
-(`src/services/`) that is the only code allowed to talk to the backend, with
-two interchangeable implementations of the same contract — a **mock** (the
-default, needs no server) and an **HTTP** client — plus a React Router based
-login / register / logout flow and a route guard.
+All backend access goes through the typed services layer in `src/services/`.
+The app can use browser-based mock services or an HTTP client that calls the
+Django API.
 
 ## Environment configuration
 
-Copy [`frontend/.env.example`](.env.example) to `frontend/.env` and adjust as
+Copy [`.env.example`](.env.example) to `.env` and adjust as
 needed. Vite only exposes variables prefixed with `VITE_`.
 
 | Variable            | Default | Purpose                                                                            |
@@ -19,9 +19,9 @@ needed. Vite only exposes variables prefixed with `VITE_`.
 | `VITE_API_CLIENT`   | `mock`  | Selects the services implementation. Unset (or anything but `http`) uses the mock. |
 | `VITE_API_BASE_URL` | —       | Base URL prepended to every HTTP request; required when `VITE_API_CLIENT=http`.    |
 
-With the default configuration (`VITE_API_CLIENT` unset) the whole app runs
-with no backend: `npm run dev` boots straight to the login page and the mock
-implements login, register, logout, and `me`.
+With the default configuration (`VITE_API_CLIENT` unset), the app uses mock
+services and can run without a backend. The mock supports the frontend service
+contract with in-memory seed data.
 
 Seed credentials for the mock:
 
@@ -91,9 +91,8 @@ npm run test
 npm run build
 ```
 
-A green run ends with ESLint reporting nothing, Prettier reporting all files
-use its code style, Vitest reporting at least one passing test, and Vite
-emitting `dist/index.html` plus hashed assets under `dist/assets/`.
+The build type-checks TypeScript and emits `dist/index.html` plus hashed
+assets under `dist/assets/`.
 
 ## Testing
 
@@ -103,42 +102,14 @@ and `@testing-library/jest-dom` matchers (registered in
 `src/setupTests.ts`). `npm run test` performs a single run and never opens a
 watcher, so it is safe to use in CI.
 
-## Project layout
+## Application areas
 
-```text
-frontend/
-├── index.html          # Vite HTML entry point
-├── eslint.config.js    # ESLint flat config
-├── .prettierrc.json    # Prettier options
-├── .env.example        # Documented environment variables
-├── tsconfig.json       # TypeScript (strict) project config
-├── vite.config.ts      # Vite + Vitest configuration
-└── src/
-    ├── App.tsx         # Providers + router wiring
-    ├── App.test.tsx    # Mock-mode boot test (renders the login page)
-    ├── main.tsx        # React entry point
-    ├── setupTests.ts   # jest-dom matcher registration
-    ├── app/
-    │   ├── AppProviders.tsx   # Composes auth state + services layer
-    │   └── AppRoutes.tsx      # Route table and protected landing route
-    ├── auth/
-    │   ├── AuthProvider.tsx   # Session state, sign in/out, 401 handling
-    │   ├── AuthBootstrap.tsx  # Revalidates a stored token via me()
-    │   └── authContext.ts     # Context + useAuth hook
-    ├── components/
-    │   └── ProtectedRoute.tsx # Redirects unauthenticated visitors
-    ├── lib/
-    │   └── errors.ts          # Turns thrown values into messages
-    ├── pages/
-    │   ├── LoginPage.tsx
-    │   ├── RegisterPage.tsx
-    │   └── DashboardPage.tsx  # Protected landing route
-    └── services/
-        ├── types.ts           # AgrivantaServices contract and errors
-        ├── sessionStore.ts    # Refresh-surviving token storage
-        ├── mockServices.ts    # In-memory backend
-        ├── httpServices.ts    # fetch-based backend
-        ├── createServices.ts  # VITE_API_CLIENT factory
-        ├── servicesContext.ts # Context + useServices hook
-        └── ServicesProvider.tsx # Wires services + 401 handling
-```
+The router in `src/app/AppRoutes.tsx` provides authenticated screens for the
+dashboard, farm, fields, crops, varieties, units, conversions, crop cycles,
+activities and activity templates, inventory, expenses, payments, harvests,
+and sales. Login and registration are available outside the protected
+application shell.
+
+Frontend tests live alongside the components and pages they cover. Vitest is
+configured with jsdom and React Testing Library; `npm run test` performs one
+non-watch run.
