@@ -40,6 +40,10 @@ urlpatterns = [
         views.CropCycleReopenView.as_view(),
     ),
     path("activity-types", views.ActivityTypeListView.as_view()),
+    path(
+        "activity-types/<str:type_id>",
+        views.ActivityTypeDetailView.as_view(),
+    ),
     path("activities/cycles", views.ActivityCycleListView.as_view()),
     path("activities", views.ActivityListView.as_view()),
     path(

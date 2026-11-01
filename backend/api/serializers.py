@@ -141,6 +141,15 @@ def serialize_activity_type(activity_type):
         "name": activity_type.name,
         "category": activity_type.category,
         "standard": activity_type.standard,
+        "inputs": [
+            {
+                "itemName": item["itemName"],
+                "quantity": as_number(Decimal(str(item["quantity"]))),
+            }
+            for item in activity_type.default_inputs
+        ],
+        "labourHours": as_number(activity_type.default_labour_hours),
+        "equipment": activity_type.default_equipment,
     }
 
 
