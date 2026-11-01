@@ -100,8 +100,30 @@ def test_login_rejects_bad_credentials(db, anon, session):
 
 
 def test_unauthenticated_requests_are_rejected(db, anon):
-    assert anon.get("/api/farm").status_code == 401
     assert anon.get("/api/auth/me").status_code == 401
+    for method in ("get", "put", "patch", "post", "delete"):
+        caller = getattr(anon, method)
+        response = (
+            caller("/api/farm")
+            if method in {"get", "delete"}
+            else caller("/api/farm", {}, format="json")
+        )
+        assert response.status_code == 401
+    for method in ("get", "post"):
+        caller = getattr(anon, method)
+        response = caller("/api/fields") if method == "get" else caller(
+            "/api/fields", {}, format="json"
+        )
+        assert response.status_code == 401
+    for method in ("get", "put", "patch", "delete"):
+        caller = getattr(anon, method)
+        url = "/api/fields/00000000-0000-0000-0000-000000000000"
+        response = (
+            caller(url)
+            if method in {"get", "delete"}
+            else caller(url, {}, format="json")
+        )
+        assert response.status_code == 401
 
 
 def test_registration_bootstraps_one_farm_per_user(db, anon):

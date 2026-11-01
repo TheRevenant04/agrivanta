@@ -190,6 +190,29 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           description: No farm is configured for this account.
+    patch:
+      tags: [farm-setup]
+      operationId: partiallyUpdateFarm
+      summary: Partially update the farm profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FarmPatch'
+      responses:
+        '200':
+          description: Updated farm.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Farm'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No farm is configured for this account.
 
   /fields:
     get:
@@ -232,6 +255,21 @@ paths:
   /fields/{fieldId}:
     parameters:
       - $ref: '#/components/parameters/FieldId'
+    get:
+      tags: [farm-setup]
+      operationId: getField
+      summary: Retrieve a field
+      responses:
+        '200':
+          description: Field details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Field'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [farm-setup]
       operationId: updateField
@@ -251,6 +289,40 @@ paths:
                 $ref: '#/components/schemas/Field'
         '400':
           $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [farm-setup]
+      operationId: partiallyUpdateField
+      summary: Partially update a field
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FieldPatch'
+      responses:
+        '200':
+          description: Updated field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Field'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [farm-setup]
+      operationId: deleteField
+      summary: Delete a field
+      responses:
+        '204':
+          description: Field deleted.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1539,6 +1611,7 @@ components:
           description: Three-letter reporting currency code, e.g. `USD`.
           minLength: 3
           maxLength: 3
+          pattern: '^[A-Za-z]{3}$'
 
     FarmInput:
       type: object
@@ -1546,8 +1619,24 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
         reportingCurrency:
           type: string
+          minLength: 3
+          maxLength: 3
+          pattern: '^[A-Za-z]{3}$'
+
+    FarmPatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        reportingCurrency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: '^[A-Za-z]{3}$'
 
     Field:
       type: object
@@ -1561,8 +1650,14 @@ components:
           type: string
         area:
           type: number
+          description: Field area in acres, greater than zero, with at most four decimal places.
+          minimum: 0.0001
+          maximum: 9999999999.9999
+          multipleOf: 0.0001
         notes:
           type: string
+        polygon:
+          $ref: '#/components/schemas/Polygon'
 
     FieldInput:
       type: object
@@ -1570,10 +1665,57 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
         area:
           $ref: '#/components/schemas/FlexibleNumber'
+          description: Field area in acres, greater than zero, with at most four decimal places.
+          minimum: 0.0001
+          maximum: 9999999999.9999
+          multipleOf: 0.0001
         notes:
           type: string
+        polygon:
+          $ref: '#/components/schemas/Polygon'
+
+    FieldPatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        area:
+          $ref: '#/components/schemas/FlexibleNumber'
+          description: Field area in acres, greater than zero, with at most four decimal places.
+          minimum: 0.0001
+          maximum: 9999999999.9999
+          multipleOf: 0.0001
+        notes:
+          type: string
+        polygon:
+          $ref: '#/components/schemas/Polygon'
+
+    Polygon:
+      oneOf:
+        - type: object
+          required: [type, coordinates]
+          properties:
+            type:
+              type: string
+              const: Polygon
+            coordinates:
+              type: array
+              minItems: 1
+              description: Each linear ring must contain at least four positions and be closed.
+              items:
+                type: array
+                minItems: 4
+                items:
+                  type: array
+                  minItems: 2
+                  items:
+                    type: number
+        - type: "null"
+      description: Optional GeoJSON Polygon object, persisted and returned as supplied.
 
     Crop:
       type: object

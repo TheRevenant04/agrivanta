@@ -194,6 +194,7 @@ class Field(TimestampedModel):
     name = models.CharField(max_length=255)
     area = models.DecimalField(max_digits=14, decimal_places=4)
     notes = models.TextField(blank=True, default="")
+    polygon = models.JSONField(null=True, blank=True)
 
     class Meta:
         ordering = ["created_at", "id"]
