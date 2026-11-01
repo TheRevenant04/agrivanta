@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -61,6 +62,11 @@ class ExpenseStatus(models.TextChoices):
 class PaymentType(models.TextChoices):
     RECEIVED = "received", "received"
     PAID = "paid", "paid"
+
+
+class AllocationBasis(models.TextChoices):
+    PER_HECTARE = "per_hectare", "per hectare"
+    PER_CYCLE_SHARE = "per_cycle_share", "per cycle share"
 
 
 class UserManager(BaseUserManager):
@@ -124,6 +130,46 @@ class TimestampedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class Season(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="seasons"
+    )
+    name = models.CharField(max_length=255)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    year = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["start_date", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["farm", "name"],
+                name="uniq_season_farm_name",
+            )
+        ]
+
+
+class ReportingPeriod(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="reporting_periods"
+    )
+    name = models.CharField(max_length=255)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    year = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["start_date", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["farm", "name"],
+                name="uniq_report_period_farm_name",
+            )
+        ]
 
 
 class Field(TimestampedModel):
@@ -349,6 +395,13 @@ class Expense(TimestampedModel):
     farm = models.ForeignKey(
         Farm, on_delete=models.CASCADE, related_name="expenses"
     )
+    cycle = models.ForeignKey(
+        CropCycle,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="expenses",
+    )
     category = models.CharField(
         max_length=32, choices=ExpenseCategory.choices
     )
@@ -364,6 +417,108 @@ class Expense(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+
+
+class Budget(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="budgets"
+    )
+    cycle = models.ForeignKey(
+        CropCycle,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="budgets",
+    )
+    category = models.CharField(
+        max_length=32,
+        choices=ExpenseCategory.choices,
+        null=True,
+        blank=True,
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=4)
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="budget_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(period_start__isnull=True)
+                    | models.Q(period_end__isnull=True)
+                    | models.Q(period_end__gte=models.F("period_start"))
+                ),
+                name="budget_period_valid",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.amount is not None and self.amount <= 0:
+            errors["amount"] = "Amount must be greater than zero."
+        if (
+            self.period_start is not None
+            and self.period_end is not None
+            and self.period_end < self.period_start
+        ):
+            errors["period_end"] = (
+                "period_end must not be earlier than period_start."
+            )
+        if (
+            self.cycle_id is not None
+            and self.farm_id is not None
+            and self.cycle.farm_id != self.farm_id
+        ):
+            errors["cycle"] = "The crop cycle must belong to the same farm."
+        if errors:
+            raise ValidationError(errors)
+
+
+class AllocationRule(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="allocation_rules"
+    )
+    name = models.CharField(max_length=255)
+    basis = models.CharField(max_length=32, choices=AllocationBasis.choices)
+    parameters = models.JSONField(default=dict, blank=True)
+    active_from = models.DateField(null=True, blank=True)
+    active_to = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(active_from__isnull=True)
+                    | models.Q(active_to__isnull=True)
+                    | models.Q(active_to__gte=models.F("active_from"))
+                ),
+                name="allocation_rule_active_period_valid",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.active_from is not None
+            and self.active_to is not None
+            and self.active_to < self.active_from
+        ):
+            raise ValidationError(
+                {
+                    "active_to": (
+                        "active_to must not be earlier than active_from."
+                    )
+                }
+            )
 
 
 class Attachment(TimestampedModel):
@@ -439,3 +594,45 @@ class Payment(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+
+
+class ImportPreview(models.Model):
+    """Server-side state for a validated import preview.
+
+    The token is single-use: a successful commit records ``consumed_at`` so
+    replaying the same preview cannot create records twice.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="import_previews"
+    )
+    entity_type = models.CharField(max_length=32)
+    columns = models.JSONField(default=dict)
+    rows = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+
+
+class ImportCommit(models.Model):
+    """Minimal audit record for a confirmed import commit."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="import_commits"
+    )
+    actor = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="import_commits"
+    )
+    preview_token = models.UUIDField()
+    entity_type = models.CharField(max_length=32)
+    entity_counts = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "id"]

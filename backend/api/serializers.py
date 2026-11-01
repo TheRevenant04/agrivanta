@@ -30,6 +30,32 @@ def serialize_farm(farm):
     }
 
 
+def serialize_season(season):
+    payload = {
+        "id": as_id(season.id),
+        "farmId": as_id(season.farm_id),
+        "name": season.name,
+        "startDate": as_date(season.start_date),
+        "endDate": as_date(season.end_date),
+    }
+    if season.year is not None:
+        payload["year"] = season.year
+    return payload
+
+
+def serialize_reporting_period(period):
+    payload = {
+        "id": as_id(period.id),
+        "farmId": as_id(period.farm_id),
+        "name": period.name,
+        "startDate": as_date(period.start_date),
+        "endDate": as_date(period.end_date),
+    }
+    if period.year is not None:
+        payload["year"] = period.year
+    return payload
+
+
 def serialize_field(field):
     payload = {
         "id": as_id(field.id),
@@ -166,6 +192,9 @@ def serialize_attachment(attachment):
 def serialize_expense(expense):
     return {
         "id": as_id(expense.id),
+        "cycleId": (
+            as_id(expense.cycle_id) if expense.cycle_id else None
+        ),
         "category": expense.category,
         "amount": as_number(expense.amount),
         "date": as_date(expense.date),
@@ -176,6 +205,17 @@ def serialize_expense(expense):
             for attachment in expense.attachments.all()
         ],
         "notes": expense.notes or None,
+    }
+
+
+def serialize_budget(budget):
+    return {
+        "id": as_id(budget.id),
+        "cycleId": as_id(budget.cycle_id) if budget.cycle_id else None,
+        "category": budget.category,
+        "amount": as_number(budget.amount),
+        "periodStart": as_date(budget.period_start),
+        "periodEnd": as_date(budget.period_end),
     }
 
 

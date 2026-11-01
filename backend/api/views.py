@@ -11,6 +11,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .exceptions import ApiError
+from .import_service import (
+    SUPPORTED_ENTITY_TYPES,
+    ImportCommitError,
+    ImportFileError,
+    commit_import,
+    preview_import,
+)
 from .models import (
     Activity,
     ActivityCategory,
@@ -19,6 +26,7 @@ from .models import (
     ActivityType,
     Attachment,
     BaseMeasure,
+    Budget,
     Crop,
     CropCycle,
     CycleStatus,
@@ -33,7 +41,9 @@ from .models import (
     MovementType,
     Payment,
     PaymentType,
+    ReportingPeriod,
     Sale,
+    Season,
     StockMovement,
     Unit,
     UnitConversion,
@@ -49,6 +59,7 @@ from .serializers import (
     serialize_activity,
     serialize_activity_type,
     serialize_attachment,
+    serialize_budget,
     serialize_conversion,
     serialize_crop,
     serialize_cycle,
@@ -61,7 +72,9 @@ from .serializers import (
     serialize_inventory_item,
     serialize_movement,
     serialize_payment,
+    serialize_reporting_period,
     serialize_sale,
+    serialize_season,
     serialize_unit,
     serialize_user,
     serialize_variety,
@@ -147,6 +160,99 @@ def parse_body_decimal(
         )
     except ValueError as exc:
         raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, key)
+
+
+def parse_optional_body_date(data, key, invalid_message):
+    value = data.get(key)
+    if value in (None, ""):
+        return None
+    try:
+        return parse_date(value, key, invalid_message, invalid_message)
+    except ValueError as exc:
+        raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, key)
+
+
+def create_farm_for(request):
+    farm_id = request.data.get("farmId")
+    if farm_id in (None, ""):
+        return get_farm(request.user)
+    try:
+        farm = Farm.objects.get(pk=farm_id)
+    except (Farm.DoesNotExist, ValueError, ValidationError):
+        raise ApiError(
+            "The selected farm does not exist.",
+            status.HTTP_400_BAD_REQUEST,
+            "farmId",
+        )
+    if farm.owner_id != request.user.id:
+        raise ApiError(
+            "You do not have access to that farm.",
+            status.HTTP_403_FORBIDDEN,
+            "farmId",
+        )
+    return farm
+
+
+def parse_optional_year(data):
+    value = data.get("year")
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    if isinstance(value, bool):
+        raise ApiError(
+            "Year must be a whole number.",
+            status.HTTP_400_BAD_REQUEST,
+            "year",
+        )
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        raise ApiError(
+            "Year must be a whole number.",
+            status.HTTP_400_BAD_REQUEST,
+            "year",
+        )
+
+
+def parse_period_payload(data, noun):
+    name = require_text(data, "name", f"{noun.capitalize()} name is required.")
+    start_date = parse_body_date(
+        data,
+        "startDate",
+        "Start date is required.",
+        "Start date must be a valid calendar date.",
+    )
+    end_date = parse_body_date(
+        data,
+        "endDate",
+        "End date is required.",
+        "End date must be a valid calendar date.",
+    )
+    if end_date < start_date:
+        raise ApiError(
+            "End date cannot be before the start date.",
+            status.HTTP_400_BAD_REQUEST,
+            "endDate",
+        )
+    return {
+        "name": name,
+        "start_date": start_date,
+        "end_date": end_date,
+        "year": parse_optional_year(data),
+    }
+
+
+def ensure_unique_period_name(model, farm, name, noun, instance=None):
+    query = model.objects.filter(farm=farm, name__iexact=name)
+    if instance is not None:
+        query = query.exclude(pk=instance.pk)
+    if query.exists():
+        raise ApiError(
+            f'A {noun} named "{name}" already exists.',
+            status.HTTP_400_BAD_REQUEST,
+            "name",
+        )
 
 
 def seed_farm(farm):
@@ -277,6 +383,105 @@ class FarmView(APIView):
         farm.reporting_currency = currency.upper()
         farm.save(update_fields=["name", "reporting_currency"])
         return Response(serialize_farm(farm))
+
+
+class PeriodListView(APIView):
+    model = None
+    noun = None
+    serializer = None
+
+    def get(self, request):
+        farm = get_farm(request.user)
+        return Response(
+            [
+                self.serializer(period)
+                for period in self.model.objects.filter(farm=farm)
+            ]
+        )
+
+    def post(self, request):
+        farm = create_farm_for(request)
+        values = parse_period_payload(request.data, self.noun)
+        ensure_unique_period_name(
+            self.model, farm, values["name"], self.noun
+        )
+        period = self.model.objects.create(farm=farm, **values)
+        return Response(
+            self.serializer(period), status=status.HTTP_201_CREATED
+        )
+
+
+class PeriodDetailView(APIView):
+    model = None
+    noun = None
+    serializer = None
+    missing_message = None
+    pk_kwarg = "period_id"
+
+    def _object(self, farm, kwargs):
+        return scoped_get(
+            self.model,
+            farm,
+            kwargs[self.pk_kwarg],
+            self.missing_message,
+        )
+
+    def get(self, request, **kwargs):
+        farm = get_farm(request.user)
+        period = self._object(farm, kwargs)
+        return Response(self.serializer(period))
+
+    def put(self, request, **kwargs):
+        farm = get_farm(request.user)
+        period = self._object(farm, kwargs)
+        values = parse_period_payload(request.data, self.noun)
+        ensure_unique_period_name(
+            self.model,
+            farm,
+            values["name"],
+            self.noun,
+            instance=period,
+        )
+        period.name = values["name"]
+        period.start_date = values["start_date"]
+        period.end_date = values["end_date"]
+        period.year = values["year"]
+        period.save()
+        return Response(self.serializer(period))
+
+    def delete(self, request, **kwargs):
+        farm = get_farm(request.user)
+        period = self._object(farm, kwargs)
+        period.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SeasonListView(PeriodListView):
+    model = Season
+    noun = "season"
+    serializer = staticmethod(serialize_season)
+
+
+class SeasonDetailView(PeriodDetailView):
+    model = Season
+    noun = "season"
+    serializer = staticmethod(serialize_season)
+    missing_message = "That season no longer exists."
+    pk_kwarg = "season_id"
+
+
+class ReportingPeriodListView(PeriodListView):
+    model = ReportingPeriod
+    noun = "reporting period"
+    serializer = staticmethod(serialize_reporting_period)
+
+
+class ReportingPeriodDetailView(PeriodDetailView):
+    model = ReportingPeriod
+    noun = "reporting period"
+    serializer = staticmethod(serialize_reporting_period)
+    missing_message = "That reporting period no longer exists."
+    pk_kwarg = "period_id"
 
 
 class FieldListView(APIView):
@@ -1312,9 +1517,10 @@ class ExpenseListView(APIView):
 
     def post(self, request):
         farm = get_farm(request.user)
-        values = self._validate(request.data)
+        values = self._validate(request.data, farm)
         expense = Expense.objects.create(
             farm=farm,
+            cycle=values["cycle"],
             category=values["category"],
             amount=values["amount"],
             date=values["date"],
@@ -1327,7 +1533,7 @@ class ExpenseListView(APIView):
         )
 
     @staticmethod
-    def _validate(data):
+    def _validate(data, farm):
         category = str(data.get("category") or "").strip()
         if category not in ExpenseCategory.values:
             raise ApiError(
@@ -1359,11 +1565,23 @@ class ExpenseListView(APIView):
                 str(exc), status.HTTP_400_BAD_REQUEST, "date"
             )
         supplier = optional_text(data, "supplier")
+        cycle = None
+        cycle_id = data.get("cycleId")
+        if cycle_id not in (None, ""):
+            try:
+                cycle = CropCycle.objects.get(farm=farm, pk=cycle_id)
+            except (CropCycle.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "The selected crop cycle does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "cycleId",
+                )
         return {
             "category": category,
             "amount": amount,
             "date": expense_date,
             "supplier": supplier or None,
+            "cycle": cycle,
         }
 
 
@@ -1378,11 +1596,12 @@ class ExpenseDetailView(APIView):
                 "Cannot edit a posted expense.",
                 status.HTTP_400_BAD_REQUEST,
             )
-        values = ExpenseListView._validate(request.data)
+        values = ExpenseListView._validate(request.data, farm)
         expense.category = values["category"]
         expense.amount = values["amount"]
         expense.date = values["date"]
         expense.supplier = values["supplier"]
+        expense.cycle = values["cycle"]
         expense.save()
         return Response(serialize_expense(expense))
 
@@ -1435,6 +1654,189 @@ class ExpenseAttachmentView(APIView):
             serialize_attachment(attachment),
             status=status.HTTP_201_CREATED,
         )
+
+
+class ImportPreviewView(APIView):
+    def post(self, request):
+        farm = get_farm(request.user)
+        raw_type = request.data.get("entityType")
+        entity_type = (
+            str(raw_type).strip().lower() if raw_type is not None else ""
+        )
+        entity_type = {
+            "expense": "expenses",
+            "inventory-movements": "inventory_movements",
+            "inventorymovements": "inventory_movements",
+        }.get(entity_type, entity_type)
+        if not entity_type:
+            raise ApiError(
+                "Entity type is required.",
+                status.HTTP_400_BAD_REQUEST,
+                "entityType",
+            )
+        if entity_type not in SUPPORTED_ENTITY_TYPES:
+            raise ApiError(
+                "Unsupported import type. Use expenses or "
+                "inventory_movements.",
+                status.HTTP_400_BAD_REQUEST,
+                "entityType",
+            )
+        upload = request.FILES.get("file")
+        if upload is None or not getattr(upload, "name", ""):
+            raise ApiError(
+                "Import file is required.",
+                status.HTTP_400_BAD_REQUEST,
+                "file",
+            )
+        try:
+            payload = preview_import(farm, entity_type, upload)
+        except ImportFileError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "file"
+            )
+        return Response(payload)
+
+
+class ImportCommitView(APIView):
+    def post(self, request):
+        farm = get_farm(request.user)
+        token = request.data.get("token") or request.data.get(
+            "previewToken"
+        )
+        confirmed = request.data.get("confirmedRows")
+        if confirmed is None:
+            confirmed = request.data.get("confirmed")
+        try:
+            payload = commit_import(
+                farm,
+                request.user,
+                token,
+                confirmed,
+                request.data.get("corrections"),
+            )
+        except ImportCommitError as exc:
+            raise ApiError(str(exc), exc.status_code, exc.field)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+
+class BudgetListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        budgets = farm.budgets.all()
+        cycle_id = request.query_params.get("cycle")
+        if cycle_id:
+            budgets = budgets.filter(cycle_id=cycle_id)
+        category = request.query_params.get("category")
+        if category:
+            budgets = budgets.filter(category=category)
+        return Response([serialize_budget(budget) for budget in budgets])
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        values = self._validate(request.data, farm)
+        budget = Budget.objects.create(farm=farm, **values)
+        return Response(
+            serialize_budget(budget), status=status.HTTP_201_CREATED
+        )
+
+    @staticmethod
+    def _validate(data, farm):
+        try:
+            amount = parse_decimal(
+                data.get("amount"),
+                "amount",
+                "Amount is required.",
+                "Amount must be a number.",
+                positive_message="Amount must be greater than zero.",
+            )
+        except ValueError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "amount"
+            )
+
+        category = None
+        raw_category = data.get("category")
+        if raw_category not in (None, ""):
+            category = str(raw_category).strip()
+            if category not in ExpenseCategory.values:
+                raise ApiError(
+                    "Category must be one of: inputs, labour, equipment, "
+                    "overhead, other.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "category",
+                )
+
+        cycle = None
+        cycle_id = data.get("cycleId")
+        if cycle_id not in (None, ""):
+            try:
+                cycle = CropCycle.objects.get(farm=farm, pk=cycle_id)
+            except (CropCycle.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "The selected crop cycle does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "cycleId",
+                )
+
+        period_start = parse_optional_body_date(
+            data,
+            "periodStart",
+            "Period start must be a valid calendar date.",
+        )
+        period_end = parse_optional_body_date(
+            data,
+            "periodEnd",
+            "Period end must be a valid calendar date.",
+        )
+        if (
+            period_start is not None
+            and period_end is not None
+            and period_end < period_start
+        ):
+            raise ApiError(
+                "Period end cannot be before the period start.",
+                status.HTTP_400_BAD_REQUEST,
+                "periodEnd",
+            )
+
+        return {
+            "cycle": cycle,
+            "category": category,
+            "amount": amount,
+            "period_start": period_start,
+            "period_end": period_end,
+        }
+
+
+class BudgetDetailView(APIView):
+    def get(self, request, budget_id):
+        farm = get_farm(request.user)
+        budget = scoped_get(
+            Budget, farm, budget_id, "That budget no longer exists."
+        )
+        return Response(serialize_budget(budget))
+
+    def put(self, request, budget_id):
+        farm = get_farm(request.user)
+        budget = scoped_get(
+            Budget, farm, budget_id, "That budget no longer exists."
+        )
+        values = BudgetListView._validate(request.data, farm)
+        budget.cycle = values["cycle"]
+        budget.category = values["category"]
+        budget.amount = values["amount"]
+        budget.period_start = values["period_start"]
+        budget.period_end = values["period_end"]
+        budget.save()
+        return Response(serialize_budget(budget))
+
+    def delete(self, request, budget_id):
+        farm = get_farm(request.user)
+        budget = scoped_get(
+            Budget, farm, budget_id, "That budget no longer exists."
+        )
+        budget.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PaymentListView(APIView):
@@ -1534,6 +1936,178 @@ class HarvestCycleListView(APIView):
                 )
             ]
         )
+
+
+class HarvestCycleSummaryView(APIView):
+    def get(self, request, cycle_id):
+        farm = get_farm(request.user)
+        cycle = scoped_get(
+            CropCycle, farm, cycle_id, "That crop cycle no longer exists."
+        )
+        total, unit = aggregate_harvest_quantity_for_cycle(farm, cycle)
+        return Response(
+            {
+                "cycleId": str(cycle.id),
+                "totalHarvested": as_number(total),
+                "unitId": str(unit.id) if unit is not None else None,
+            }
+        )
+
+
+class HarvestDetailView(APIView):
+    def get(self, request, harvest_id):
+        farm = get_farm(request.user)
+        harvest = scoped_get(
+            Harvest, farm, harvest_id, "That harvest no longer exists."
+        )
+        return Response(serialize_harvest(harvest))
+
+    def patch(self, request, harvest_id):
+        farm = get_farm(request.user)
+        harvest = scoped_get(
+            Harvest, farm, harvest_id, "That harvest no longer exists."
+        )
+        if harvest.cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "This crop cycle is closed and can no longer be harvested.",
+                status.HTTP_400_BAD_REQUEST,
+                "cycleId",
+            )
+
+        data = request.data
+        if "cycleId" in data:
+            cycle_id = data.get("cycleId")
+            if cycle_id in (None, ""):
+                raise ApiError(
+                    "Select a crop cycle.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "cycleId",
+                )
+            try:
+                cycle = CropCycle.objects.get(farm=farm, pk=cycle_id)
+            except (CropCycle.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "That crop cycle no longer exists.",
+                    status.HTTP_404_NOT_FOUND,
+                    "cycleId",
+                )
+            if cycle.status == CycleStatus.CLOSED:
+                raise ApiError(
+                    "This crop cycle is closed and can no longer be harvested.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "cycleId",
+                )
+            harvest.cycle = cycle
+
+        if "quantity" in data:
+            try:
+                quantity = parse_decimal(
+                    data.get("quantity"),
+                    "quantity",
+                    "Quantity is required.",
+                    "Quantity must be a number.",
+                    positive_message="Quantity must be greater than zero.",
+                )
+            except ValueError as exc:
+                raise ApiError(
+                    str(exc), status.HTTP_400_BAD_REQUEST, "quantity"
+                )
+            harvest.quantity = quantity
+
+        if "unitId" in data:
+            unit_id = data.get("unitId")
+            if unit_id in (None, ""):
+                raise ApiError(
+                    "Select a unit.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "unitId",
+                )
+            try:
+                unit = Unit.objects.get(farm=farm, pk=unit_id)
+            except (Unit.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "That unit does not exist.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "unitId",
+                )
+            harvest.unit = unit
+
+        if "date" in data:
+            harvest_date = parse_body_date(
+                data,
+                "date",
+                "Date is required.",
+                "Date must be a valid calendar date.",
+            )
+            harvest.date = harvest_date
+
+        harvest.save()
+        return Response(serialize_harvest(harvest))
+
+    def put(self, request, harvest_id):
+        return self.patch(request, harvest_id)
+
+    def delete(self, request, harvest_id):
+        farm = get_farm(request.user)
+        harvest = scoped_get(
+            Harvest, farm, harvest_id, "That harvest no longer exists."
+        )
+        if harvest.cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "This crop cycle is closed and can no longer be harvested.",
+                status.HTTP_400_BAD_REQUEST,
+                "cycleId",
+            )
+        harvest.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _convert_quantity_between_units(farm, quantity, from_unit, to_unit):
+    if from_unit.pk == to_unit.pk:
+        return quantity
+    if from_unit.base_measure != to_unit.base_measure:
+        raise ApiError(
+            f'Cannot convert "{from_unit.name}" '
+            f"({from_unit.base_measure}) to \"{to_unit.name}\" "
+            f"({to_unit.base_measure}): base measures do not match.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    forward = UnitConversion.objects.filter(
+        farm=farm, from_unit=from_unit, to_unit=to_unit
+    ).first()
+    if forward is not None:
+        return quantity * forward.factor
+
+    reverse = UnitConversion.objects.filter(
+        farm=farm, from_unit=to_unit, to_unit=from_unit
+    ).first()
+    if reverse is None:
+        raise ApiError(
+            f'No rule exists for converting from '
+            f'"{from_unit.name}" to "{to_unit.name}".',
+            status.HTTP_400_BAD_REQUEST,
+        )
+    return quantity / reverse.factor
+
+
+def aggregate_harvest_quantity_for_cycle(farm, cycle):
+    harvests = list(
+        Harvest.objects.filter(farm=farm, cycle=cycle).select_related(
+            "unit"
+        )
+    )
+    if not harvests:
+        return Decimal(0), None
+
+    target_unit = harvests[0].unit
+    total = Decimal(0)
+    for harvest in harvests:
+        converted = _convert_quantity_between_units(
+            farm, harvest.quantity, harvest.unit, target_unit
+        )
+        total += converted
+    return total, target_unit
 
 
 class HarvestListView(APIView):
@@ -1730,3 +2304,47 @@ class SaleListView(APIView):
         return Response(
             serialize_sale(sale), status=status.HTTP_201_CREATED
         )
+
+
+class SaleDetailView(APIView):
+    def get(self, request, sale_id):
+        farm = get_farm(request.user)
+        sale = scoped_get(
+            Sale, farm, sale_id, "That sale no longer exists."
+        )
+        return Response(serialize_sale(sale))
+
+    def delete(self, request, sale_id):
+        farm = get_farm(request.user)
+        sale = scoped_get(
+            Sale, farm, sale_id, "That sale no longer exists."
+        )
+        sale.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProfitabilityReportView(APIView):
+    def get(self, request):
+        from .reporting import aggregate_profitability
+
+        farm = get_farm(request.user)
+        self._validate_farm_param(farm, request)
+        return Response(
+            aggregate_profitability(
+                farm, request.query_params.get("group_by")
+            )
+        )
+
+    @staticmethod
+    def _validate_farm_param(farm, request):
+        for key in ("farm", "farmId"):
+            value = request.query_params.get(key)
+            if value in (None, ""):
+                continue
+            if str(value) != str(farm.id):
+                raise ApiError(
+                    "That farm does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    key,
+                )
+
