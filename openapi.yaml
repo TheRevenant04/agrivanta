@@ -1218,6 +1218,9 @@ paths:
       tags: [activities]
       operationId: listActivities
       summary: List activities, optionally filtered by cycle
+      description: >
+        Owners and managers see all activities in their farm. Workers see only
+        activities assigned to their account.
       parameters:
         - name: cycle
           in: query
@@ -1257,16 +1260,42 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The user role cannot create activities.
         '404':
-          description: "The referenced activity type does not exist (`field: typeId`)."
+          description: A referenced crop cycle or activity type does not exist in this farm.
+        '409':
+          description: The selected crop cycle is closed.
 
   /activities/{activityId}:
     parameters:
       - $ref: '#/components/parameters/ActivityId'
+    get:
+      tags: [activities]
+      operationId: getActivity
+      summary: Retrieve an activity
+      description: >
+        Owners and managers can retrieve any activity in their farm. Workers
+        can retrieve only activities assigned to their account.
+      responses:
+        '200':
+          description: Activity details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [activities]
       operationId: updateActivity
-      summary: Update an activity's type, planned date, or description
+      summary: >
+        Update an activity's cycle, type, planned date, or description
+      description: >
+        Only owners and managers can update activity details. Both the current
+        and selected crop cycles must be open.
       requestBody:
         required: true
         content:
@@ -1284,8 +1313,70 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can edit activities.
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The current or selected crop cycle is closed.
+    delete:
+      tags: [activities]
+      operationId: deleteActivity
+      summary: Delete an activity
+      description: >
+        Only owners and managers can delete activities in an open crop cycle.
+      responses:
+        '204':
+          description: Activity deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can delete activities.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The activity's crop cycle is closed.
+
+  /activities/{activityId}/assignees:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+    put:
+      tags: [activities]
+      operationId: replaceActivityAssignees
+      summary: Replace the workers assigned to an activity
+      description: >
+        Only owners and managers can assign existing worker accounts belonging
+        to the activity's farm. An empty array removes all assignments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignedWorkerIds]
+              properties:
+                assignedWorkerIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Activity with its complete assignment set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Activity'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can manage activity assignments.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The activity's crop cycle is closed.
 
   /activities/{activityId}/status:
     parameters:
@@ -1295,12 +1386,16 @@ paths:
       operationId: updateActivityStatus
       summary: Move an activity to a new status
       description: >
+        Owners and managers can progress any activity in their farm. Workers
+        can progress only activities assigned to their account. The activity's
+        crop cycle must be open.
         Allowed transitions are planned → in_progress, in_progress →
         completed, and overdue → in_progress (an overdue activity can still
         be started); completed is terminal. The API rejects an illegal
         transition (e.g. completed → in_progress) with 409 on `status`, and
-        an unknown status value with 400 on `status`. `overdue` is produced
-        by a server-side job and is not settable by the client.
+        an unknown status value with 400 on `status`. Clients cannot set
+        `overdue` as a target status; this endpoint can only move an already
+        overdue activity back to `in_progress`.
       requestBody:
         required: true
         content:
@@ -1327,10 +1422,14 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The user's role cannot progress this activity.
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: "Illegal status transition, e.g. completed → in_progress (`field: status`)."
+          description: >
+            The crop cycle is closed or the requested status transition is
+            illegal (e.g. completed → in_progress).
           content:
             application/json:
               schema:
@@ -1343,6 +1442,9 @@ paths:
       tags: [activities]
       operationId: updateActivityResourceNeeds
       summary: Replace an activity's planned resource needs
+      description: >
+        Only owners and managers can change resource needs, and the activity's
+        crop cycle must be open.
       requestBody:
         required: true
         content:
@@ -1360,8 +1462,12 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Only farm owners and managers can change resource needs.
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The activity's crop cycle is closed.
 
   /inventory-items:
     get:
@@ -2497,7 +2603,15 @@ components:
 
     Activity:
       type: object
-      required: [id, cycleId, typeId, plannedDate, status, resourceNeeds]
+      required:
+        - id
+        - cycleId
+        - typeId
+        - assignedWorkerIds
+        - plannedDate
+        - status
+        - description
+        - resourceNeeds
       properties:
         id:
           type: string
@@ -2505,13 +2619,19 @@ components:
           type: string
         typeId:
           type: string
+        assignedWorkerIds:
+          description: IDs of worker accounts assigned to this activity.
+          type: array
+          items:
+            type: string
+            format: uuid
         plannedDate:
           type: string
           format: date
         status:
           $ref: '#/components/schemas/ActivityStatus'
         description:
-          type: string
+          type: [string, 'null']
         resourceNeeds:
           $ref: '#/components/schemas/ActivityResourceNeeds'
 

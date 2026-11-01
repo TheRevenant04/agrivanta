@@ -158,6 +158,9 @@ def serialize_activity(activity):
         "id": as_id(activity.id),
         "cycleId": as_id(activity.cycle_id),
         "typeId": as_id(activity.type_id),
+        "assignedWorkerIds": [
+            as_id(user.id) for user in activity.assignees.all()
+        ],
         "plannedDate": as_date(activity.planned_date),
         "status": activity.status,
         "description": activity.description or None,

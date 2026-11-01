@@ -55,6 +55,10 @@ urlpatterns = [
         views.ActivityStatusView.as_view(),
     ),
     path(
+        "activities/<str:activity_id>/assignees",
+        views.ActivityAssigneesView.as_view(),
+    ),
+    path(
         "activities/<str:activity_id>/resource-needs",
         views.ActivityResourceNeedsView.as_view(),
     ),
