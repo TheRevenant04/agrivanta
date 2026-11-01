@@ -5,12 +5,13 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, Paginator
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError, RestrictedError
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -47,6 +48,7 @@ from .models import (
     Payment,
     PaymentType,
     ReportingPeriod,
+    Role,
     Sale,
     Season,
     StockMovement,
@@ -122,6 +124,30 @@ def require_name(data, key, noun):
     return name
 
 
+def ensure_unique_farm_name(model, farm, name, noun, instance=None):
+    matches = model.objects.filter(farm=farm, name__iexact=name)
+    if instance is not None:
+        matches = matches.exclude(pk=instance.pk)
+    if matches.exists():
+        raise ApiError(
+            f'A {noun.lower()} named "{name}" already exists.',
+            status.HTTP_409_CONFLICT,
+            "name",
+        )
+
+
+def save_unique_farm_name(instance, noun):
+    try:
+        with transaction.atomic():
+            instance.save()
+    except IntegrityError:
+        raise ApiError(
+            f'A {noun.lower()} named "{instance.name}" already exists.',
+            status.HTTP_409_CONFLICT,
+            "name",
+        )
+
+
 def optional_text(data, key):
     value = data.get(key)
     if value is None:
@@ -136,6 +162,14 @@ def get_farm(user):
             "No farm is configured.", status.HTTP_404_NOT_FOUND
         )
     return farm
+
+
+def require_farm_setup_write(request):
+    if request.user.role not in (Role.OWNER, Role.MANAGER):
+        raise ApiError(
+            "Only farm owners and managers can change setup records.",
+            status.HTTP_403_FORBIDDEN,
+        )
 
 
 def scoped_get(model, farm, pk, message, field=None):
@@ -684,6 +718,8 @@ class FieldDetailView(APIView):
 
 
 class CropListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
@@ -691,47 +727,77 @@ class CropListView(APIView):
         )
 
     def post(self, request):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Crop name is required."
-        )
-        if Crop.objects.filter(farm=farm, name__iexact=name).exists():
-            raise ApiError(
-                f'A crop named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
-        crop = Crop.objects.create(farm=farm, name=name)
+        name = require_name(request.data, "name", "Crop")
+        ensure_unique_farm_name(Crop, farm, name, "Crop")
+        crop = Crop(farm=farm, name=name)
+        save_unique_farm_name(crop, "Crop")
         return Response(
             serialize_crop(crop), status=status.HTTP_201_CREATED
         )
 
 
 class CropDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, crop_id):
+        farm = get_farm(request.user)
+        crop = scoped_get(
+            Crop, farm, crop_id, "That crop no longer exists."
+        )
+        return Response(serialize_crop(crop))
+
     def put(self, request, crop_id):
         farm = get_farm(request.user)
         crop = scoped_get(
             Crop, farm, crop_id, "That crop no longer exists."
         )
-        name = require_text(
-            request.data, "name", "Crop name is required."
-        )
-        if (
-            Crop.objects.filter(farm=farm, name__iexact=name)
-            .exclude(pk=crop.pk)
-            .exists()
-        ):
-            raise ApiError(
-                f'A crop named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
+        require_farm_setup_write(request)
+        name = require_name(request.data, "name", "Crop")
+        ensure_unique_farm_name(Crop, farm, name, "Crop", crop)
         crop.name = name
-        crop.save(update_fields=["name"])
+        save_unique_farm_name(crop, "Crop")
         return Response(serialize_crop(crop))
+
+    def patch(self, request, crop_id):
+        farm = get_farm(request.user)
+        crop = scoped_get(
+            Crop, farm, crop_id, "That crop no longer exists."
+        )
+        require_farm_setup_write(request)
+        if "name" in request.data:
+            crop.name = require_name(request.data, "name", "Crop")
+            ensure_unique_farm_name(Crop, farm, crop.name, "Crop", crop)
+            save_unique_farm_name(crop, "Crop")
+        return Response(serialize_crop(crop))
+
+    def delete(self, request, crop_id):
+        farm = get_farm(request.user)
+        crop = scoped_get(
+            Crop, farm, crop_id, "That crop no longer exists."
+        )
+        require_farm_setup_write(request)
+        if crop.crop_cycles.exists() or crop.varieties.filter(
+            crop_cycles__isnull=False
+        ).exists():
+            raise ApiError(
+                "A crop referenced by a crop cycle cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            crop.delete()
+        except (ProtectedError, RestrictedError):
+            raise ApiError(
+                "A crop referenced by a crop cycle cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class VarietyListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
         farm = get_farm(request.user)
         varieties = farm.varieties.all()
@@ -743,14 +809,12 @@ class VarietyListView(APIView):
         )
 
     def post(self, request):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
         crop = self._crop(farm, request.data.get("cropId"))
-        name = require_text(
-            request.data, "name", "Variety name is required."
-        )
-        variety = Variety.objects.create(
-            farm=farm, crop=crop, name=name
-        )
+        name = require_name(request.data, "name", "Variety")
+        variety = Variety(farm=farm, crop=crop, name=name)
+        variety.save()
         return Response(
             serialize_variety(variety), status=status.HTTP_201_CREATED
         )
@@ -774,22 +838,71 @@ class VarietyListView(APIView):
 
 
 class VarietyDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, variety_id):
+        farm = get_farm(request.user)
+        variety = scoped_get(
+            Variety, farm, variety_id, "That variety no longer exists."
+        )
+        return Response(serialize_variety(variety))
+
     def put(self, request, variety_id):
         farm = get_farm(request.user)
         variety = scoped_get(
             Variety, farm, variety_id, "That variety no longer exists."
         )
+        require_farm_setup_write(request)
         crop = VarietyListView._crop(farm, request.data.get("cropId"))
-        name = require_text(
-            request.data, "name", "Variety name is required."
-        )
+        name = require_name(request.data, "name", "Variety")
         variety.crop = crop
         variety.name = name
         variety.save(update_fields=["crop", "name"])
         return Response(serialize_variety(variety))
 
+    def patch(self, request, variety_id):
+        farm = get_farm(request.user)
+        variety = scoped_get(
+            Variety, farm, variety_id, "That variety no longer exists."
+        )
+        require_farm_setup_write(request)
+        update_fields = []
+        if "cropId" in request.data:
+            variety.crop = VarietyListView._crop(
+                farm, request.data.get("cropId")
+            )
+            update_fields.append("crop")
+        if "name" in request.data:
+            variety.name = require_name(request.data, "name", "Variety")
+            update_fields.append("name")
+        if update_fields:
+            variety.save(update_fields=update_fields + ["updated_at"])
+        return Response(serialize_variety(variety))
+
+    def delete(self, request, variety_id):
+        farm = get_farm(request.user)
+        variety = scoped_get(
+            Variety, farm, variety_id, "That variety no longer exists."
+        )
+        require_farm_setup_write(request)
+        if variety.crop_cycles.exists():
+            raise ApiError(
+                "A variety referenced by a crop cycle cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            variety.delete()
+        except (ProtectedError, RestrictedError):
+            raise ApiError(
+                "A variety referenced by a crop cycle cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class UnitListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
@@ -797,20 +910,13 @@ class UnitListView(APIView):
         )
 
     def post(self, request):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Unit name is required."
-        )
+        name = require_name(request.data, "name", "Unit")
         base_measure = self._base_measure(request.data.get("baseMeasure"))
-        if Unit.objects.filter(farm=farm, name__iexact=name).exists():
-            raise ApiError(
-                f'A unit named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
-        unit = Unit.objects.create(
-            farm=farm, name=name, base_measure=base_measure
-        )
+        ensure_unique_farm_name(Unit, farm, name, "Unit")
+        unit = Unit(farm=farm, name=name, base_measure=base_measure)
+        save_unique_farm_name(unit, "Unit")
         return Response(
             serialize_unit(unit), status=status.HTTP_201_CREATED
         )
@@ -834,31 +940,67 @@ class UnitListView(APIView):
 
 
 class UnitDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, unit_id):
+        farm = get_farm(request.user)
+        unit = scoped_get(
+            Unit, farm, unit_id, "That unit no longer exists."
+        )
+        return Response(serialize_unit(unit))
+
     def put(self, request, unit_id):
         farm = get_farm(request.user)
         unit = scoped_get(
             Unit, farm, unit_id, "That unit no longer exists."
         )
-        name = require_text(
-            request.data, "name", "Unit name is required."
-        )
+        require_farm_setup_write(request)
+        name = require_name(request.data, "name", "Unit")
         base_measure = UnitListView._base_measure(
             request.data.get("baseMeasure")
         )
-        if (
-            Unit.objects.filter(farm=farm, name__iexact=name)
-            .exclude(pk=unit.pk)
-            .exists()
-        ):
-            raise ApiError(
-                f'A unit named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
+        ensure_unique_farm_name(Unit, farm, name, "Unit", unit)
         unit.name = name
         unit.base_measure = base_measure
-        unit.save(update_fields=["name", "base_measure"])
+        save_unique_farm_name(unit, "Unit")
         return Response(serialize_unit(unit))
+
+    def patch(self, request, unit_id):
+        farm = get_farm(request.user)
+        unit = scoped_get(
+            Unit, farm, unit_id, "That unit no longer exists."
+        )
+        require_farm_setup_write(request)
+        if "name" in request.data:
+            unit.name = require_name(request.data, "name", "Unit")
+            ensure_unique_farm_name(Unit, farm, unit.name, "Unit", unit)
+        if "baseMeasure" in request.data:
+            unit.base_measure = UnitListView._base_measure(
+                request.data.get("baseMeasure")
+            )
+        if "name" in request.data or "baseMeasure" in request.data:
+            save_unique_farm_name(unit, "Unit")
+        return Response(serialize_unit(unit))
+
+    def delete(self, request, unit_id):
+        farm = get_farm(request.user)
+        unit = scoped_get(
+            Unit, farm, unit_id, "That unit no longer exists."
+        )
+        require_farm_setup_write(request)
+        if unit.inventory_items.exists() or unit.harvests.exists():
+            raise ApiError(
+                "A unit referenced by inventory or harvest records cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            unit.delete()
+        except (ProtectedError, RestrictedError):
+            raise ApiError(
+                "A unit referenced by inventory or harvest records cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 def unit_lookup(farm, unit_id, field):
