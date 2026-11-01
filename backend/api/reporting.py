@@ -24,7 +24,7 @@ from .views import _convert_quantity_between_units, aggregate_harvest_quantity_f
 PROFITABILITY_GROUPINGS = ("crop_cycle", "field", "season", "farm")
 
 
-def report_crop_cycle(farm, cycle):
+def report_crop_cycle(farm, cycle, through_date=None):
     if cycle is None:
         raise ApiError("That crop cycle no longer exists.")
     # Check farm ownership - could be passed as id or instance
@@ -37,16 +37,20 @@ def report_crop_cycle(farm, cycle):
     except (CropCycle.DoesNotExist, ValueError, ValidationError):
         raise ApiError("That crop cycle no longer exists.")
 
+    harvests = Harvest.objects.filter(farm=farm, cycle=cycle)
+    if through_date is not None:
+        harvests = harvests.filter(date__lte=through_date)
     harvests = list(
-        Harvest.objects.filter(farm=farm, cycle=cycle)
-        .select_related("unit")
-        .order_by("created_at", "id")
+        harvests.select_related("unit").order_by("created_at", "id")
     )
 
+    sales = Sale.objects.filter(farm=farm, harvest__cycle=cycle)
+    if through_date is not None:
+        sales = sales.filter(date__lte=through_date)
     sales = list(
-        Sale.objects.filter(farm=farm, harvest__cycle=cycle)
-        .select_related("harvest", "harvest__unit")
-        .order_by("created_at", "id")
+        sales.select_related("harvest", "harvest__unit").order_by(
+            "created_at", "id"
+        )
     )
 
     if not harvests and not sales:
@@ -60,7 +64,9 @@ def report_crop_cycle(farm, cycle):
         }
 
     if harvests:
-        total_harvested, unit = aggregate_harvest_quantity_for_cycle(farm, cycle)
+        total_harvested, unit = aggregate_harvest_quantity_for_cycle(
+            farm, cycle, through_date
+        )
     else:
         total_harvested = Decimal(0)
         unit = None
@@ -302,4 +308,3 @@ def aggregate_profitability(farm, group_by=None):
     if grouping == "season":
         return _group_by_season(farm, cycles, figures, payloads)
     return _group_by_farm(farm, cycles, figures, payloads)
-
