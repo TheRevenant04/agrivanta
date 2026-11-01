@@ -223,3 +223,292 @@ def test_conversion_rejects_duplicate_pair(client):
     )
     duplicate = client.post("/api/conversions", payload, format="json")
     assert duplicate.status_code == 409
+
+
+def test_conversion_rule_api_supports_crud_and_validation(client, anon):
+    from rest_framework.test import APIClient
+
+    empty = client.get("/api/conversions")
+    assert empty.status_code == 200
+    assert empty.data == []
+
+    kg = client.post(
+        "/api/units", {"name": "kg", "baseMeasure": "mass"}, format="json"
+    ).data
+    grams = client.post(
+        "/api/units", {"name": "g", "baseMeasure": "mass"}, format="json"
+    ).data
+    litre = client.post(
+        "/api/units",
+        {"name": "L", "baseMeasure": "volume"},
+        format="json",
+    ).data
+
+    created = client.post(
+        "/api/conversions",
+        {"fromUnitId": kg["id"], "toUnitId": grams["id"], "factor": "1000"},
+        format="json",
+    )
+    assert created.status_code == 201
+    assert created.data["factor"] == 1000
+    conversion_id = created.data["id"]
+
+    unauthenticated = [
+        anon.get("/api/conversions"),
+        anon.post(
+            "/api/conversions",
+            {
+                "fromUnitId": kg["id"],
+                "toUnitId": grams["id"],
+                "factor": "1000",
+            },
+            format="json",
+        ),
+        anon.get(f"/api/conversions/{conversion_id}"),
+        anon.put(
+            f"/api/conversions/{conversion_id}",
+            {
+                "fromUnitId": kg["id"],
+                "toUnitId": grams["id"],
+                "factor": "2000",
+            },
+            format="json",
+        ),
+        anon.delete(f"/api/conversions/{conversion_id}"),
+    ]
+    assert [response.status_code for response in unauthenticated] == [
+        401,
+        401,
+        401,
+        401,
+        401,
+    ]
+
+    listed = client.get("/api/conversions")
+    assert listed.status_code == 200
+    assert len(listed.data) == 1
+    assert listed.data[0]["id"] == conversion_id
+    assert listed.data[0]["factor"] == 1000
+
+    detail = client.get(f"/api/conversions/{conversion_id}")
+    assert detail.status_code == 200
+    assert detail.data["toUnitId"] == grams["id"]
+    assert detail.data["factor"] == 1000
+
+    updated = client.put(
+        f"/api/conversions/{conversion_id}",
+        {"fromUnitId": kg["id"], "toUnitId": grams["id"], "factor": "2000"},
+        format="json",
+    )
+    assert updated.status_code == 200
+    assert updated.data["factor"] == 2000
+
+    ounce = client.post(
+        "/api/units",
+        {"name": "oz", "baseMeasure": "mass"},
+        format="json",
+    ).data
+    pound = client.post(
+        "/api/units", {"name": "lb", "baseMeasure": "mass"}, format="json"
+    ).data
+    invalid_factors = [
+        {},
+        {"factor": None},
+        {"factor": ""},
+        {"factor": "0"},
+        {"factor": "-1"},
+        {"factor": "NaN"},
+        {"factor": "Infinity"},
+        {"factor": "-Infinity"},
+        {"factor": "abc"},
+    ]
+    for factor_field in invalid_factors:
+        bad = client.post(
+            "/api/conversions",
+            {
+                "fromUnitId": kg["id"],
+                "toUnitId": ounce["id"],
+                **factor_field,
+            },
+            format="json",
+        )
+        assert bad.status_code == 400
+        assert bad.data["field"] == "factor"
+
+    invalid_base = client.post(
+        "/api/conversions",
+        {"fromUnitId": kg["id"], "toUnitId": litre["id"], "factor": "2"},
+        format="json",
+    )
+    assert invalid_base.status_code == 400
+    assert invalid_base.data["field"] == "toUnitId"
+
+    reverse = client.post(
+        "/api/conversions",
+        {"fromUnitId": grams["id"], "toUnitId": kg["id"], "factor": "0.001"},
+        format="json",
+    )
+    assert reverse.status_code == 409
+    assert reverse.data["field"] == "toUnitId"
+    assert [
+        rule["id"] for rule in client.get("/api/conversions").data
+    ] == [conversion_id]
+
+    second_rule = client.post(
+        "/api/conversions",
+        {
+            "fromUnitId": ounce["id"],
+            "toUnitId": pound["id"],
+            "factor": "16",
+        },
+        format="json",
+    )
+    assert second_rule.status_code == 201
+    duplicate_update = client.put(
+        f"/api/conversions/{second_rule.data['id']}",
+        {
+            "fromUnitId": grams["id"],
+            "toUnitId": kg["id"],
+            "factor": "0.001",
+        },
+        format="json",
+    )
+    assert duplicate_update.status_code == 409
+    assert duplicate_update.data["field"] == "toUnitId"
+    assert client.get(
+        f"/api/conversions/{second_rule.data['id']}"
+    ).data == second_rule.data
+
+    for factor_field in invalid_factors:
+        bad = client.put(
+            f"/api/conversions/{conversion_id}",
+            {
+                "fromUnitId": kg["id"],
+                "toUnitId": grams["id"],
+                **factor_field,
+            },
+            format="json",
+        )
+        assert bad.status_code == 400
+        assert bad.data["field"] == "factor"
+        assert client.get(
+            f"/api/conversions/{conversion_id}"
+        ).data == updated.data
+
+    invalid_update_base = client.put(
+        f"/api/conversions/{conversion_id}",
+        {
+            "fromUnitId": kg["id"],
+            "toUnitId": litre["id"],
+            "factor": "2000",
+        },
+        format="json",
+    )
+    assert invalid_update_base.status_code == 400
+    assert invalid_update_base.data["field"] == "toUnitId"
+
+    other = APIClient()
+    owner = other.post(
+        "/api/auth/register",
+        {
+            "name": "Other Owner",
+            "email": "other-owner@agrivanta.test",
+            "password": "password123",
+        },
+        format="json",
+    )
+    assert owner.status_code == 201
+    other.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {owner.data['token']}"
+    )
+    other_kg = other.post(
+        "/api/units",
+        {"name": "kg", "baseMeasure": "mass"},
+        format="json",
+    ).data
+
+    foreign = client.post(
+        "/api/conversions",
+        {
+            "fromUnitId": other_kg["id"],
+            "toUnitId": grams["id"],
+            "factor": "1000",
+        },
+        format="json",
+    )
+    assert foreign.status_code == 404
+    assert foreign.data["field"] == "fromUnitId"
+    foreign_update = client.put(
+        f"/api/conversions/{conversion_id}",
+        {
+            "fromUnitId": other_kg["id"],
+            "toUnitId": grams["id"],
+            "factor": "3000",
+        },
+        format="json",
+    )
+    assert foreign_update.status_code == 404
+    assert foreign_update.data["field"] == "fromUnitId"
+    assert client.get(f"/api/conversions/{conversion_id}").data == updated.data
+
+    other_grams = other.post(
+        "/api/units",
+        {"name": "g", "baseMeasure": "mass"},
+        format="json",
+    ).data
+    foreign_to_unit = client.post(
+        "/api/conversions",
+        {
+            "fromUnitId": kg["id"],
+            "toUnitId": other_grams["id"],
+            "factor": "1000",
+        },
+        format="json",
+    )
+    assert foreign_to_unit.status_code == 404
+    assert foreign_to_unit.data["field"] == "toUnitId"
+    foreign_to_unit_update = client.put(
+        f"/api/conversions/{conversion_id}",
+        {
+            "fromUnitId": kg["id"],
+            "toUnitId": other_grams["id"],
+            "factor": "3000",
+        },
+        format="json",
+    )
+    assert foreign_to_unit_update.status_code == 404
+    assert foreign_to_unit_update.data["field"] == "toUnitId"
+    assert client.get(f"/api/conversions/{conversion_id}").data == updated.data
+
+    other_conversion = other.post(
+        "/api/conversions",
+        {
+            "fromUnitId": other_kg["id"],
+            "toUnitId": other_grams["id"],
+            "factor": "1000",
+        },
+        format="json",
+    )
+    assert other_conversion.status_code == 201
+
+    own_rules = client.get("/api/conversions")
+    assert own_rules.status_code == 200
+    assert {rule["id"] for rule in own_rules.data} == {
+        conversion_id,
+        second_rule.data["id"],
+    }
+    assert (
+        client.get(f"/api/conversions/{other_conversion.data['id']}").status_code
+        == 404
+    )
+    assert (
+        other.get(f"/api/conversions/{conversion_id}").status_code == 404
+    )
+    assert [
+        rule["id"] for rule in other.get("/api/conversions").data
+    ] == [other_conversion.data["id"]]
+
+    deleted = client.delete(f"/api/conversions/{conversion_id}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/conversions/{conversion_id}").status_code == 404
+    assert len(client.get("/api/conversions").data) == 1

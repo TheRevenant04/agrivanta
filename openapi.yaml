@@ -472,10 +472,10 @@ paths:
     get:
       tags: [farm-setup]
       operationId: listConversions
-      summary: List the configured unit conversion rules
+      summary: List this farm's configured unit conversion rules
       responses:
         '200':
-          description: Conversion rules.
+          description: Farm-scoped conversion rules; an empty list is returned when none are configured.
           content:
             application/json:
               schema:
@@ -488,6 +488,11 @@ paths:
       tags: [farm-setup]
       operationId: createConversion
       summary: Create a conversion rule between two units
+      description: >
+        Both units must belong to the authenticated user's farm, share the
+        same base measure, and differ from one another. The finite conversion
+        factor must be greater than zero. A unit pair can have only one rule,
+        regardless of direction.
       requestBody:
         required: true
         content:
@@ -506,9 +511,69 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          description: "One of the units does not exist (`field: fromUnitId` or `field: toUnitId`)."
+          description: "A unit does not belong to this farm or does not exist (`field: fromUnitId` or `field: toUnitId`)."
         '409':
-          description: A rule for this unit pair already exists.
+          description: "A rule for this unit pair already exists (`field: toUnitId`)."
+
+  /conversions/{conversionId}:
+    parameters:
+      - $ref: '#/components/parameters/ConversionId'
+    get:
+      tags: [farm-setup]
+      operationId: getConversion
+      summary: Retrieve a conversion rule from this farm
+      responses:
+        '200':
+          description: Conversion rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitConversion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [farm-setup]
+      operationId: updateConversion
+      summary: Update a conversion rule
+      description: >
+        Both units must belong to the authenticated user's farm, share the
+        same base measure, and differ from one another. The finite conversion
+        factor must be greater than zero. A unit pair can have only one rule,
+        regardless of direction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionInput'
+      responses:
+        '200':
+          description: Updated conversion rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitConversion'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The rule or one of its units does not belong to this farm or does not exist.
+        '409':
+          description: "A rule for this unit pair already exists (`field: toUnitId`)."
+    delete:
+      tags: [farm-setup]
+      operationId: deleteConversion
+      summary: Delete a conversion rule
+      responses:
+        '204':
+          description: Conversion rule deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /conversions/convert:
     post:
@@ -1329,6 +1394,12 @@ components:
       required: true
       schema:
         type: string
+    ConversionId:
+      name: conversionId
+      in: path
+      required: true
+      schema:
+        type: string
     CycleId:
       name: cycleId
       in: path
@@ -1581,6 +1652,9 @@ components:
     ConversionInput:
       type: object
       required: [fromUnitId, toUnitId, factor]
+      description: >
+        A conversion rule for two different farm-owned units with the same
+        base measure and a finite factor greater than zero.
       properties:
         fromUnitId:
           type: string
