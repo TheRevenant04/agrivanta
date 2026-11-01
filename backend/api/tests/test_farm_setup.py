@@ -1,3 +1,19 @@
+from django.db import IntegrityError, transaction
+import pytest
+from rest_framework.test import APIClient
+
+from api.models import Farm, Field, User
+
+from .conftest import register
+
+
+def api_request(client, method, url, payload=None):
+    caller = getattr(client, method)
+    if method in {"get", "delete"}:
+        return caller(url)
+    return caller(url, payload or {}, format="json")
+
+
 def test_farm_can_be_read_and_updated(client):
     read = client.get("/api/farm")
     assert read.status_code == 200
@@ -23,6 +39,78 @@ def test_farm_can_be_read_and_updated(client):
     )
     assert invalid.status_code == 400
     assert invalid.data["field"] == "reportingCurrency"
+
+    for payload, field in (
+        ({"reportingCurrency": "USD"}, "name"),
+        ({"name": " ", "reportingCurrency": "USD"}, "name"),
+        ({"name": "Willow"}, "reportingCurrency"),
+        ({"name": "Willow", "reportingCurrency": "US1"}, "reportingCurrency"),
+        ({"name": "Willow", "reportingCurrency": "EURO"}, "reportingCurrency"),
+        ({"name": "Willow", "reportingCurrency": "éUR"}, "reportingCurrency"),
+    ):
+        response = client.put("/api/farm", payload, format="json")
+        assert response.status_code == 400
+        assert response.data["field"] == field
+
+
+def test_farm_patch_updates_only_supplied_valid_fields(client):
+    original = client.get("/api/farm").data
+
+    unchanged = client.patch("/api/farm", {}, format="json")
+    assert unchanged.status_code == 200
+    assert unchanged.data["name"] == original["name"]
+    assert unchanged.data["reportingCurrency"] == original["reportingCurrency"]
+
+    name = client.patch("/api/farm", {"name": "Willow Creek"}, format="json")
+    assert name.status_code == 200
+    assert name.data["name"] == "Willow Creek"
+    assert name.data["reportingCurrency"] == original["reportingCurrency"]
+
+    currency = client.patch(
+        "/api/farm", {"reportingCurrency": "eur"}, format="json"
+    )
+    assert currency.status_code == 200
+    assert currency.data["name"] == "Willow Creek"
+    assert currency.data["reportingCurrency"] == "EUR"
+
+    for payload, field in (
+        ({"name": ""}, "name"),
+        ({"name": None}, "name"),
+        ({"reportingCurrency": "EURO"}, "reportingCurrency"),
+        ({"reportingCurrency": None}, "reportingCurrency"),
+    ):
+        response = client.patch("/api/farm", payload, format="json")
+        assert response.status_code == 400
+        assert response.data["field"] == field
+
+    assert client.post("/api/farm", {}, format="json").status_code == 405
+    assert client.delete("/api/farm").status_code == 405
+
+
+def test_farm_name_length_is_limited_on_put_and_patch(client):
+    original = client.get("/api/farm").data["name"]
+    maximum_name = "F" * 255
+
+    updated = client.put(
+        "/api/farm",
+        {"name": maximum_name, "reportingCurrency": "USD"},
+        format="json",
+    )
+    assert updated.status_code == 200
+    assert updated.data["name"] == maximum_name
+
+    for method, payload in (
+        ("put", {"name": "F" * 256, "reportingCurrency": "USD"}),
+        ("patch", {"name": "F" * 256}),
+    ):
+        response = getattr(client, method)("/api/farm", payload, format="json")
+        assert response.status_code == 400
+        assert response.data["field"] == "name"
+        assert client.get("/api/farm").data["name"] == maximum_name
+
+    patched = client.patch("/api/farm", {"name": original}, format="json")
+    assert patched.status_code == 200
+    assert patched.data["name"] == original
 
 
 def test_fields_validate_area_and_can_be_updated(client):
@@ -59,6 +147,277 @@ def test_fields_validate_area_and_can_be_updated(client):
     listed = client.get("/api/fields")
     assert listed.status_code == 200
     assert len(listed.data) == 1
+
+
+@pytest.mark.parametrize(
+    "area",
+    [None, "nope", 0, "0.0000", -1, "1.00001", "10000000000"],
+)
+def test_field_creation_rejects_invalid_area_values(client, area):
+    response = client.post(
+        "/api/fields",
+        {"name": "North 40", "area": area},
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.data["field"] == "area"
+
+
+def test_field_creation_requires_name_and_area(client):
+    for payload, field in (
+        ({"area": 4}, "name"),
+        ({"name": "North 40"}, "area"),
+        ({"name": " ", "area": 4}, "name"),
+    ):
+        response = client.post("/api/fields", payload, format="json")
+        assert response.status_code == 400
+        assert response.data["field"] == field
+
+
+def test_field_name_length_is_limited_on_create_put_and_patch(client):
+    maximum_name = "F" * 255
+    created = client.post(
+        "/api/fields",
+        {"name": maximum_name, "area": 4},
+        format="json",
+    )
+    assert created.status_code == 201
+    field_url = f"/api/fields/{created.data['id']}"
+    assert created.data["name"] == maximum_name
+
+    invalid_create = client.post(
+        "/api/fields", {"name": "F" * 256, "area": 4}, format="json"
+    )
+    assert invalid_create.status_code == 400
+    assert invalid_create.data["field"] == "name"
+
+    for method, payload in (
+        ("put", {"name": "F" * 256, "area": 5}),
+        ("patch", {"name": "F" * 256}),
+    ):
+        response = getattr(client, method)(field_url, payload, format="json")
+        assert response.status_code == 400
+        assert response.data["field"] == "name"
+        assert client.get(field_url).data["name"] == maximum_name
+
+
+def test_fields_round_trip_polygon_and_support_full_crud(client):
+    polygon = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0, 0], [4, 0], [4, 4], [0, 0]],
+            [[1, 1], [2, 1], [2, 2], [1, 1]],
+        ],
+    }
+    created = client.post(
+        "/api/fields",
+        {
+            "name": "North 40",
+            "area": "12.3456",
+            "notes": "Loam",
+            "polygon": polygon,
+        },
+        format="json",
+    )
+    assert created.status_code == 201
+    assert created.data["area"] == 12.3456
+    assert created.data["polygon"] == polygon
+
+    field_id = created.data["id"]
+    retrieved = client.get(f"/api/fields/{field_id}")
+    assert retrieved.status_code == 200
+    assert retrieved.data["polygon"] == polygon
+
+    updated = client.put(
+        f"/api/fields/{field_id}",
+        {
+            "name": "South 12",
+            "area": "0.0001",
+            "polygon": polygon,
+        },
+        format="json",
+    )
+    assert updated.status_code == 200
+    assert updated.data["name"] == "South 12"
+    assert updated.data["area"] == 0.0001
+    assert updated.data["polygon"] == polygon
+    assert "notes" not in updated.data
+
+    patched = client.patch(
+        f"/api/fields/{field_id}",
+        {"notes": "Sandy"},
+        format="json",
+    )
+    assert patched.status_code == 200
+    assert patched.data["name"] == "South 12"
+    assert patched.data["area"] == 0.0001
+    assert patched.data["notes"] == "Sandy"
+    assert patched.data["polygon"] == polygon
+
+    cleared = client.patch(
+        f"/api/fields/{field_id}", {"polygon": None}, format="json"
+    )
+    assert cleared.status_code == 200
+    assert "polygon" not in cleared.data
+
+    deleted = client.delete(f"/api/fields/{field_id}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/fields/{field_id}").status_code == 404
+    assert client.get("/api/fields").data == []
+
+
+@pytest.mark.parametrize(
+    "polygon",
+    [
+        {"type": "MultiPolygon", "coordinates": []},
+        {"type": "Polygon"},
+        {"type": "Polygon", "coordinates": "not-an-array"},
+        {"type": "Polygon", "coordinates": []},
+        {"type": "Polygon", "coordinates": [[[]]]},
+        {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1]]],
+        },
+        {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1]]],
+        },
+        {
+            "type": "Polygon",
+            "coordinates": [
+                [[0, 0], [1, 0], [1, 1], [0, 0]],
+                [[2, 2], [3, 2], [3, 3], [2, 3, 5]],
+            ],
+        },
+        {
+            "type": "Polygon",
+            "coordinates": [
+                [[0, 0], [1, 0], [1, 1], [0, 0, 5]],
+            ],
+        },
+        {
+            "type": "Polygon",
+            "coordinates": [
+                [[0, 0], [1, 0], [1, "nan"], [0, 0]],
+            ],
+        },
+    ],
+)
+def test_field_creation_rejects_malformed_polygons(client, polygon):
+    response = client.post(
+        "/api/fields",
+        {"name": "North 40", "area": 10, "polygon": polygon},
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.data["field"] == "polygon"
+
+
+def test_field_put_and_patch_validate_required_and_supplied_values(client):
+    created = client.post(
+        "/api/fields",
+        {"name": "North 40", "area": 10},
+        format="json",
+    )
+    field_url = f"/api/fields/{created.data['id']}"
+
+    for payload in (
+        {"name": "South"},
+        {"area": 4},
+        {"name": "South", "area": "not-a-number"},
+        {"name": "South", "area": 0},
+        {"name": "South", "area": -1},
+        {"name": "South", "area": "1.12345"},
+    ):
+        invalid_put = client.put(field_url, payload, format="json")
+        assert invalid_put.status_code == 400
+        assert invalid_put.data["field"] in {"name", "area"}
+
+    for payload, field in (
+        ({"name": ""}, "name"),
+        ({"area": "not-a-number"}, "area"),
+        ({"area": 0}, "area"),
+        ({"area": -1}, "area"),
+        ({"area": "1.12345"}, "area"),
+        (
+            {"polygon": {"type": "Polygon", "coordinates": []}},
+            "polygon",
+        ),
+    ):
+        invalid_patch = client.patch(field_url, payload, format="json")
+        assert invalid_patch.status_code == 400
+        assert invalid_patch.data["field"] == field
+
+    assert client.patch(field_url, {}, format="json").status_code == 200
+    valid_area_patch = client.patch(
+        field_url, {"area": "3.1415"}, format="json"
+    )
+    assert valid_area_patch.status_code == 200
+    assert valid_area_patch.data["area"] == 3.1415
+
+
+def test_fields_are_scoped_to_the_authenticated_users_farm(client):
+    field = client.post(
+        "/api/fields",
+        {"name": "North 40", "area": 10},
+        format="json",
+    )
+    other_client = APIClient()
+    other_registration = register(
+        other_client, email="other@agrivanta.test"
+    )
+    assert other_registration.status_code == 201
+    other_client.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {other_registration.data['token']}"
+    )
+
+    assert other_client.get("/api/fields").data == []
+    field_url = f"/api/fields/{field.data['id']}"
+    for method, payload in (
+        ("get", None),
+        ("put", {"name": "Foreign", "area": 1}),
+        ("patch", {"name": "Foreign"}),
+        ("delete", None),
+    ):
+        response = api_request(other_client, method, field_url, payload)
+        assert response.status_code == 404
+
+    assert Field.objects.filter(pk=field.data["id"]).exists()
+    for method, payload in (
+        ("get", None),
+        ("put", {"name": "Missing", "area": 1}),
+        ("patch", {"name": "Missing"}),
+        ("delete", None),
+    ):
+        response = api_request(
+            client,
+            method,
+            "/api/fields/00000000-0000-0000-0000-000000000000",
+            payload,
+        )
+        assert response.status_code == 404
+
+
+def test_farm_has_one_to_one_owner_constraint_and_cascades_fields(client):
+    farm_id = client.get("/api/farm").data["id"]
+    owner = User.objects.get(email="owner@agrivanta.test")
+    field_response = client.post(
+        "/api/fields",
+        {"name": "North 40", "area": 10},
+        format="json",
+    )
+    assert field_response.status_code == 201
+    assert Farm.objects.filter(owner=owner).count() == 1
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Farm.objects.create(
+                owner=owner, name="Second farm", reporting_currency="USD"
+            )
+
+    owner.delete()
+    assert not Farm.objects.filter(pk=farm_id).exists()
+    assert not Field.objects.filter(pk=field_response.data["id"]).exists()
 
 
 def test_crops_reject_duplicate_names_case_insensitively(client):

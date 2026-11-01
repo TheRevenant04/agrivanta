@@ -69,6 +69,8 @@ def serialize_field(field):
     }
     if field.notes:
         payload["notes"] = field.notes
+    if field.polygon is not None:
+        payload["polygon"] = field.polygon
     return payload
 
 

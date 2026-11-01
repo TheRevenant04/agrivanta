@@ -111,6 +111,17 @@ def require_text(data, key, message):
     return value.strip()
 
 
+def require_name(data, key, noun):
+    name = require_text(data, key, f"{noun} name is required.")
+    if len(name) > 255:
+        raise ApiError(
+            f"{noun.capitalize()} name must be 255 characters or fewer.",
+            status.HTTP_400_BAD_REQUEST,
+            key,
+        )
+    return name
+
+
 def optional_text(data, key):
     value = data.get(key)
     if value is None:
@@ -166,6 +177,74 @@ def parse_body_decimal(
         )
     except ValueError as exc:
         raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, key)
+
+
+def parse_field_area(data):
+    area = parse_body_decimal(
+        data,
+        "area",
+        "Area is required.",
+        "Area must be a number.",
+        positive_message="Area must be greater than zero.",
+    )
+    try:
+        Field._meta.get_field("area").run_validators(area)
+    except ValidationError as exc:
+        raise ApiError(
+            "Area must fit within 10 integer digits and 4 decimal places.",
+            status.HTTP_400_BAD_REQUEST,
+            "area",
+        ) from exc
+    return area
+
+
+def parse_field_polygon(value):
+    if value is None:
+        return None
+
+    def invalid():
+        raise ApiError(
+            "Polygon must be a valid GeoJSON Polygon.",
+            status.HTTP_400_BAD_REQUEST,
+            "polygon",
+        )
+
+    if not isinstance(value, dict) or value.get("type") != "Polygon":
+        invalid()
+    coordinates = value.get("coordinates")
+    if not isinstance(coordinates, list) or not coordinates:
+        invalid()
+
+    position_dimensions = None
+    for ring in coordinates:
+        if not isinstance(ring, list) or len(ring) < 4:
+            invalid()
+        dimensions = None
+        for position in ring:
+            if not isinstance(position, list) or len(position) < 2:
+                invalid()
+            if dimensions is None:
+                dimensions = len(position)
+            if len(position) != dimensions:
+                invalid()
+            for coordinate in position:
+                if isinstance(coordinate, bool) or not isinstance(
+                    coordinate, (int, float)
+                ):
+                    invalid()
+                try:
+                    number = Decimal(str(coordinate))
+                except (ArithmeticError, ValueError):
+                    invalid()
+                if not number.is_finite():
+                    invalid()
+            if position_dimensions is None:
+                position_dimensions = dimensions
+            elif dimensions != position_dimensions:
+                invalid()
+        if ring[0] != ring[-1]:
+            invalid()
+    return value
 
 
 def parse_optional_body_date(data, key, invalid_message):
@@ -316,6 +395,13 @@ class RegisterView(APIView):
             )
 
         name = str(data.get("name") or "").strip()
+        farm_name = f"{name}'s Farm" if name else "My Farm"
+        if len(farm_name) > 255:
+            raise ApiError(
+                "Farm name must be 255 characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "name",
+            )
         try:
             validate_password(password, user=User(email=email, name=name))
         except ValidationError as exc:
@@ -331,7 +417,7 @@ class RegisterView(APIView):
             )
             farm = Farm.objects.create(
                 owner=user,
-                name=f"{name}'s Farm" if name else "My Farm",
+                name=farm_name,
                 reporting_currency="USD",
             )
             seed_farm(farm)
@@ -374,29 +460,50 @@ class MeView(APIView):
         return Response(serialize_user(request.user))
 
 
+def parse_reporting_currency(value):
+    if (
+        not isinstance(value, str)
+        or len(value.strip()) != 3
+        or not value.strip().isascii()
+        or not value.strip().isalpha()
+    ):
+        raise ApiError(
+            "Reporting currency must be a three-letter code such as USD.",
+            status.HTTP_400_BAD_REQUEST,
+            "reportingCurrency",
+        )
+    return value.strip()
+
+
 class FarmView(APIView):
     def get(self, request):
         return Response(serialize_farm(get_farm(request.user)))
 
     def put(self, request):
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Farm name is required."
+        name = require_name(request.data, "name", "Farm")
+        currency = parse_reporting_currency(
+            request.data.get("reportingCurrency")
         )
-        currency = request.data.get("reportingCurrency")
-        currency = str(currency).strip() if currency is not None else ""
-        if (
-            len(currency) != 3
-            or not currency.isalpha()
-        ):
-            raise ApiError(
-                "Reporting currency must be a three-letter code such as USD.",
-                status.HTTP_400_BAD_REQUEST,
-                "reportingCurrency",
-            )
         farm.name = name
         farm.reporting_currency = currency.upper()
         farm.save(update_fields=["name", "reporting_currency"])
+        return Response(serialize_farm(farm))
+
+    def patch(self, request):
+        farm = get_farm(request.user)
+        update_fields = []
+        if "name" in request.data:
+            farm.name = require_name(request.data, "name", "Farm")
+            update_fields.append("name")
+        if "reportingCurrency" in request.data:
+            currency = parse_reporting_currency(
+                request.data["reportingCurrency"]
+            )
+            farm.reporting_currency = currency.upper()
+            update_fields.append("reporting_currency")
+        if update_fields:
+            farm.save(update_fields=update_fields)
         return Response(serialize_farm(farm))
 
 
@@ -508,21 +615,15 @@ class FieldListView(APIView):
 
     def post(self, request):
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Field name is required."
-        )
-        area = parse_body_decimal(
-            request.data,
-            "area",
-            "Area must be a number.",
-            "Area must be a number.",
-            negative_message="Area cannot be negative.",
-        )
+        name = require_name(request.data, "name", "Field")
+        area = parse_field_area(request.data)
+        polygon = parse_field_polygon(request.data.get("polygon"))
         field = Field.objects.create(
             farm=farm,
             name=name,
             area=area,
             notes=optional_text(request.data, "notes"),
+            polygon=polygon,
         )
         return Response(
             serialize_field(field), status=status.HTTP_201_CREATED
@@ -530,26 +631,56 @@ class FieldListView(APIView):
 
 
 class FieldDetailView(APIView):
+    def get(self, request, field_id):
+        farm = get_farm(request.user)
+        field = scoped_get(
+            Field, farm, field_id, "That field no longer exists."
+        )
+        return Response(serialize_field(field))
+
     def put(self, request, field_id):
         farm = get_farm(request.user)
         field = scoped_get(
             Field, farm, field_id, "That field no longer exists."
         )
-        name = require_text(
-            request.data, "name", "Field name is required."
-        )
-        area = parse_body_decimal(
-            request.data,
-            "area",
-            "Area must be a number.",
-            "Area must be a number.",
-            negative_message="Area cannot be negative.",
-        )
+        name = require_name(request.data, "name", "Field")
+        area = parse_field_area(request.data)
         field.name = name
         field.area = area
         field.notes = optional_text(request.data, "notes")
+        field.polygon = parse_field_polygon(request.data.get("polygon"))
         field.save()
         return Response(serialize_field(field))
+
+    def patch(self, request, field_id):
+        farm = get_farm(request.user)
+        field = scoped_get(
+            Field, farm, field_id, "That field no longer exists."
+        )
+        update_fields = []
+        if "name" in request.data:
+            field.name = require_name(request.data, "name", "Field")
+            update_fields.append("name")
+        if "area" in request.data:
+            field.area = parse_field_area(request.data)
+            update_fields.append("area")
+        if "notes" in request.data:
+            field.notes = optional_text(request.data, "notes")
+            update_fields.append("notes")
+        if "polygon" in request.data:
+            field.polygon = parse_field_polygon(request.data["polygon"])
+            update_fields.append("polygon")
+        if update_fields:
+            field.save(update_fields=update_fields + ["updated_at"])
+        return Response(serialize_field(field))
+
+    def delete(self, request, field_id):
+        farm = get_farm(request.user)
+        field = scoped_get(
+            Field, farm, field_id, "That field no longer exists."
+        )
+        field.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CropListView(APIView):
