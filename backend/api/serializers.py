@@ -18,6 +18,10 @@ def as_date(value):
     return value.isoformat() if value else None
 
 
+def as_datetime(value):
+    return value.isoformat() if value else None
+
+
 def serialize_user(user):
     return {"id": as_id(user.id), "email": user.email, "role": user.role}
 
@@ -260,6 +264,17 @@ def serialize_sale(sale):
         "unitPrice": as_number(sale.unit_price),
         "date": as_date(sale.date),
         "revenue": as_number(sale.revenue),
+    }
+
+
+def serialize_notification(notification):
+    return {
+        "id": as_id(notification.id),
+        "type": notification.type,
+        "message": notification.message,
+        "read": notification.read,
+        "createdAt": as_datetime(notification.created_at),
+        "updatedAt": as_datetime(notification.updated_at),
     }
 
 
