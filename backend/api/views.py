@@ -1,4 +1,5 @@
 from decimal import Decimal
+from uuid import UUID
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
@@ -171,6 +172,53 @@ def get_farm(user):
             "No farm is configured.", status.HTTP_404_NOT_FOUND
         )
     return farm
+
+
+def get_activity_farm(user):
+    if user.role == Role.MANAGER:
+        memberships = user.member_farms.all()
+        if memberships.count() == 1:
+            return memberships.first()
+    return get_farm(user)
+
+
+def require_activity_manager(request):
+    if request.user.role not in (Role.OWNER, Role.MANAGER):
+        raise ApiError(
+            "Only farm owners and managers can manage activities.",
+            status.HTTP_403_FORBIDDEN,
+        )
+
+
+def activity_queryset_for(request):
+    if request.user.role == Role.WORKER:
+        return (
+            Activity.objects.filter(assignees=request.user)
+            .filter(
+                Q(farm__owner=request.user)
+                | Q(farm__members=request.user)
+            )
+            .distinct()
+        )
+    farm = get_activity_farm(request.user)
+    return farm.activities.all()
+
+
+def get_visible_activity(request, activity_id):
+    try:
+        return activity_queryset_for(request).get(pk=activity_id)
+    except (Activity.DoesNotExist, ValueError, ValidationError):
+        raise ApiError(
+            "That activity no longer exists.", status.HTTP_404_NOT_FOUND
+        )
+
+
+def ensure_activity_cycle_open(activity):
+    if activity.cycle.status == CycleStatus.CLOSED:
+        raise ApiError(
+            "Activities in a closed crop cycle cannot be changed.",
+            status.HTTP_409_CONFLICT,
+        )
 
 
 def require_farm_setup_write(request):
@@ -1825,34 +1873,45 @@ class ActivityTypeDetailView(APIView):
 
 class ActivityCycleListView(APIView):
     def get(self, request):
-        farm = get_farm(request.user)
-        return Response(
-            [
-                serialize_cycle_ref(cycle)
-                for cycle in farm.crop_cycles.select_related(
-                    "field", "crop"
-                )
-            ]
-        )
+        if request.user.role == Role.WORKER:
+            cycles = CropCycle.objects.filter(
+                activities__in=activity_queryset_for(request)
+            ).distinct()
+        else:
+            farm = get_activity_farm(request.user)
+            cycles = farm.crop_cycles.all()
+        return Response([
+            serialize_cycle_ref(cycle)
+            for cycle in cycles.select_related("field", "crop")
+        ])
 
 
 class ActivityListView(APIView):
     def get(self, request):
-        farm = get_farm(request.user)
-        activities = farm.activities.select_related(
+        activities = activity_queryset_for(request).select_related(
             "cycle", "type"
-        ).prefetch_related("input_needs")
+        ).prefetch_related("input_needs", "assignees")
         cycle_id = request.query_params.get("cycle")
         if cycle_id:
+            try:
+                cycle_id = UUID(cycle_id)
+            except (TypeError, ValueError):
+                return Response([])
             activities = activities.filter(cycle_id=cycle_id)
         return Response(
             [serialize_activity(activity) for activity in activities]
         )
 
     def post(self, request):
-        farm = get_farm(request.user)
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
         cycle = self._cycle(farm, request.data.get("cycleId"))
         activity_type = self._type(farm, request.data.get("typeId"))
+        if cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "Activities cannot be created in a closed crop cycle.",
+                status.HTTP_409_CONFLICT,
+            )
         planned_date = parse_body_date(
             request.data,
             "plannedDate",
@@ -1907,14 +1966,25 @@ class ActivityListView(APIView):
 
 
 class ActivityDetailView(APIView):
+    def get(self, request, activity_id):
+        activity = get_visible_activity(request, activity_id)
+        return Response(serialize_activity(activity))
+
     def put(self, request, activity_id):
-        farm = get_farm(request.user)
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
         activity = scoped_get(
             Activity, farm, activity_id, "That activity no longer exists."
         )
+        ensure_activity_cycle_open(activity)
         cycle = ActivityListView._cycle(
             farm, request.data.get("cycleId")
         )
+        if cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "Activities cannot be moved into a closed crop cycle.",
+                status.HTTP_409_CONFLICT,
+            )
         activity_type = ActivityListView._type(
             farm, request.data.get("typeId")
         )
@@ -1933,13 +2003,23 @@ class ActivityDetailView(APIView):
         activity.save()
         return Response(serialize_activity(activity))
 
-
-class ActivityStatusView(APIView):
-    def put(self, request, activity_id):
-        farm = get_farm(request.user)
+    def delete(self, request, activity_id):
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
         activity = scoped_get(
             Activity, farm, activity_id, "That activity no longer exists."
         )
+        ensure_activity_cycle_open(activity)
+        activity.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ActivityStatusView(APIView):
+    def put(self, request, activity_id):
+        if request.user.role != Role.WORKER:
+            require_activity_manager(request)
+        activity = get_visible_activity(request, activity_id)
+        ensure_activity_cycle_open(activity)
         raw = request.data.get("status")
         target = str(raw).strip() if raw is not None else ""
         if target not in ActivityStatus.values:
@@ -1965,12 +2045,65 @@ class ActivityStatusView(APIView):
         return "in progress" if value == ActivityStatus.IN_PROGRESS else value
 
 
-class ActivityResourceNeedsView(APIView):
+class ActivityAssigneesView(APIView):
     def put(self, request, activity_id):
-        farm = get_farm(request.user)
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
         activity = scoped_get(
             Activity, farm, activity_id, "That activity no longer exists."
         )
+        ensure_activity_cycle_open(activity)
+        if not isinstance(request.data, dict):
+            raise ApiError(
+                "assignedWorkerIds must be provided in an object.",
+                status.HTTP_400_BAD_REQUEST,
+                "assignedWorkerIds",
+            )
+        worker_ids = request.data.get("assignedWorkerIds")
+        if not isinstance(worker_ids, list):
+            raise ApiError(
+                "assignedWorkerIds must be an array.",
+                status.HTTP_400_BAD_REQUEST,
+                "assignedWorkerIds",
+            )
+        try:
+            worker_ids = [UUID(worker_id) for worker_id in worker_ids]
+        except (AttributeError, TypeError, ValueError):
+            raise ApiError(
+                "assignedWorkerIds must contain valid user IDs.",
+                status.HTTP_400_BAD_REQUEST,
+                "assignedWorkerIds",
+            )
+        worker_ids = set(worker_ids)
+        valid_ids = set(
+            User.objects.filter(
+                pk__in=worker_ids,
+                role=Role.WORKER,
+            )
+            .filter(Q(member_farms=farm) | Q(farm=farm))
+            .values_list("pk", flat=True)
+        )
+        if valid_ids != worker_ids:
+            raise ApiError(
+                "Each assigned user must be a worker belonging to this farm.",
+                status.HTTP_400_BAD_REQUEST,
+                "assignedWorkerIds",
+            )
+        activity.assignees.set(valid_ids)
+        activity = Activity.objects.prefetch_related("assignees").get(
+            pk=activity.pk
+        )
+        return Response(serialize_activity(activity))
+
+
+class ActivityResourceNeedsView(APIView):
+    def put(self, request, activity_id):
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
+        activity = scoped_get(
+            Activity, farm, activity_id, "That activity no longer exists."
+        )
+        ensure_activity_cycle_open(activity)
         data = request.data
         try:
             labour_hours = parse_decimal(

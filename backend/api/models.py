@@ -137,6 +137,9 @@ class Farm(models.Model):
     owner = models.OneToOneField(
         User, on_delete=models.CASCADE, related_name="farm"
     )
+    members = models.ManyToManyField(
+        User, blank=True, related_name="member_farms"
+    )
     name = models.CharField(max_length=255)
     reporting_currency = models.CharField(max_length=3)
 
@@ -356,6 +359,9 @@ class Activity(TimestampedModel):
     )
     type = models.ForeignKey(
         ActivityType, on_delete=models.PROTECT, related_name="activities"
+    )
+    assignees = models.ManyToManyField(
+        User, blank=True, related_name="assigned_activities"
     )
     planned_date = models.DateField()
     status = models.CharField(
