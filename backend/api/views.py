@@ -779,6 +779,10 @@ def conversion_pair_query(farm, from_unit, to_unit, existing_instance=None):
     return query
 
 
+def lock_conversion_farm(farm):
+    Farm.objects.select_for_update().get(pk=farm.pk)
+
+
 def parse_conversion_factor(value):
     try:
         factor = parse_decimal(
@@ -811,7 +815,7 @@ def save_conversion_rule(
     update_fields=None,
 ):
     with transaction.atomic():
-        Farm.objects.select_for_update().get(pk=farm.pk)
+        lock_conversion_farm(farm)
         validate_conversion_rule(
             farm,
             from_unit,
@@ -874,38 +878,44 @@ class ConversionDetailView(APIView):
 
     def put(self, request, conversion_id):
         farm = get_farm(request.user)
-        conversion = scoped_get(
-            UnitConversion,
-            farm,
-            conversion_id,
-            "That conversion rule no longer exists.",
-        )
         from_unit = unit_lookup(
             farm, request.data.get("fromUnitId"), "fromUnitId"
         )
         to_unit = unit_lookup(
             farm, request.data.get("toUnitId"), "toUnitId"
         )
-        save_conversion_rule(
-            conversion,
-            farm,
-            from_unit,
-            to_unit,
-            request.data.get("factor"),
-            existing_instance=conversion,
-            update_fields=["from_unit", "to_unit", "factor"],
-        )
+        with transaction.atomic():
+            lock_conversion_farm(farm)
+            conversion = scoped_get(
+                UnitConversion,
+                farm,
+                conversion_id,
+                "That conversion rule no longer exists.",
+            )
+            validate_conversion_rule(
+                farm,
+                from_unit,
+                to_unit,
+                existing_instance=conversion,
+            )
+            factor = parse_conversion_factor(request.data.get("factor"))
+            conversion.from_unit = from_unit
+            conversion.to_unit = to_unit
+            conversion.factor = factor
+            conversion.save(update_fields=["from_unit", "to_unit", "factor"])
         return Response(serialize_conversion(conversion))
 
     def delete(self, request, conversion_id):
         farm = get_farm(request.user)
-        conversion = scoped_get(
-            UnitConversion,
-            farm,
-            conversion_id,
-            "That conversion rule no longer exists.",
-        )
-        conversion.delete()
+        with transaction.atomic():
+            lock_conversion_farm(farm)
+            conversion = scoped_get(
+                UnitConversion,
+                farm,
+                conversion_id,
+                "That conversion rule no longer exists.",
+            )
+            conversion.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

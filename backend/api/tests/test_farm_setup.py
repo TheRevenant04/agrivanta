@@ -345,6 +345,74 @@ def test_legacy_opposite_conversion_rows_remain_unchanged(client):
     assert UnitConversion.objects.filter(farm=kg.farm).count() == 2
 
 
+def test_conversion_update_and_delete_recheck_under_farm_lock(
+    client, monkeypatch
+):
+    from django.db import connection
+
+    from api import views
+    from api.models import UnitConversion
+
+    kg = client.post(
+        "/api/units", {"name": "kg", "baseMeasure": "mass"}, format="json"
+    ).data
+    grams = client.post(
+        "/api/units", {"name": "g", "baseMeasure": "mass"}, format="json"
+    ).data
+    rule = client.post(
+        "/api/conversions",
+        {"fromUnitId": kg["id"], "toUnitId": grams["id"], "factor": "1000"},
+        format="json",
+    )
+    assert rule.status_code == 201
+
+    original_lock = views.lock_conversion_farm
+    original_scoped_get = views.scoped_get
+    operations = []
+
+    def track_lock(farm):
+        assert connection.in_atomic_block
+        original_lock(farm)
+        operations.append("lock")
+
+    def track_scoped_get(model, farm, pk, message, field=None):
+        if model is UnitConversion:
+            assert connection.in_atomic_block
+            assert operations[-1] == "lock"
+            operations.append("fetch")
+        return original_scoped_get(model, farm, pk, message, field)
+
+    monkeypatch.setattr(views, "lock_conversion_farm", track_lock)
+    monkeypatch.setattr(views, "scoped_get", track_scoped_get)
+
+    updated = client.put(
+        f"/api/conversions/{rule.data['id']}",
+        {"fromUnitId": kg["id"], "toUnitId": grams["id"], "factor": "2000"},
+        format="json",
+    )
+    assert updated.status_code == 200
+    assert operations == ["lock", "fetch"]
+
+    deleted = client.delete(f"/api/conversions/{rule.data['id']}")
+    assert deleted.status_code == 204
+    assert operations == ["lock", "fetch", "lock", "fetch"]
+
+    missing_update = client.put(
+        f"/api/conversions/{rule.data['id']}",
+        {"fromUnitId": kg["id"], "toUnitId": grams["id"], "factor": "3000"},
+        format="json",
+    )
+    assert missing_update.status_code == 404
+    assert operations == [
+        "lock",
+        "fetch",
+        "lock",
+        "fetch",
+        "lock",
+        "fetch",
+    ]
+
+
 def test_conversion_factor_respects_model_precision_on_create_and_update(client):
     kg = client.post(
         "/api/units", {"name": "kg", "baseMeasure": "mass"}, format="json"
