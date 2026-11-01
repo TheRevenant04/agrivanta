@@ -345,14 +345,21 @@ class InventoryItem(TimestampedModel):
     class Meta:
         ordering = ["created_at", "id"]
 
-    def current_quantity(self):
+    def current_quantity(self, as_of_date=None):
+        movements = self.movements.all()
+        if as_of_date is not None:
+            movements = (
+                movement
+                for movement in movements
+                if movement.date is not None and movement.date <= as_of_date
+            )
         total = sum(
             (
                 movement.quantity
                 if movement.type != MovementType.USAGE
                 else -movement.quantity
             )
-            for movement in self.movements.all()
+            for movement in movements
         )
         return total
 

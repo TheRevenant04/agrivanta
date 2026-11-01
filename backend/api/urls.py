@@ -108,4 +108,5 @@ urlpatterns = [
         "reports/profitability",
         views.ProfitabilityReportView.as_view(),
     ),
+    path("dashboard", views.DashboardView.as_view()),
 ]

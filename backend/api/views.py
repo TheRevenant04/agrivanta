@@ -2095,12 +2095,11 @@ def _convert_quantity_between_units(farm, quantity, from_unit, to_unit):
     return quantity / reverse.factor
 
 
-def aggregate_harvest_quantity_for_cycle(farm, cycle):
-    harvests = list(
-        Harvest.objects.filter(farm=farm, cycle=cycle).select_related(
-            "unit"
-        )
-    )
+def aggregate_harvest_quantity_for_cycle(farm, cycle, through_date=None):
+    harvests = Harvest.objects.filter(farm=farm, cycle=cycle)
+    if through_date is not None:
+        harvests = harvests.filter(date__lte=through_date)
+    harvests = list(harvests.select_related("unit"))
     if not harvests:
         return Decimal(0), None
 
@@ -2353,6 +2352,14 @@ class ProfitabilityReportView(APIView):
                 )
 
 
+class DashboardView(APIView):
+    def get(self, request):
+        from .dashboard import dashboard_for_request
+
+        farm = get_farm(request.user)
+        return Response(dashboard_for_request(farm, request.query_params))
+
+
 DEFAULT_NOTIFICATION_PAGE_SIZE = 20
 MAX_NOTIFICATION_PAGE_SIZE = 100
 
@@ -2483,4 +2490,3 @@ class NotificationUnreadCountView(APIView):
             user=request.user, read=False
         ).count()
         return Response({"unreadCount": count})
-
