@@ -87,6 +87,32 @@ def test_farm_patch_updates_only_supplied_valid_fields(client):
     assert client.delete("/api/farm").status_code == 405
 
 
+def test_farm_name_length_is_limited_on_put_and_patch(client):
+    original = client.get("/api/farm").data["name"]
+    maximum_name = "F" * 255
+
+    updated = client.put(
+        "/api/farm",
+        {"name": maximum_name, "reportingCurrency": "USD"},
+        format="json",
+    )
+    assert updated.status_code == 200
+    assert updated.data["name"] == maximum_name
+
+    for method, payload in (
+        ("put", {"name": "F" * 256, "reportingCurrency": "USD"}),
+        ("patch", {"name": "F" * 256}),
+    ):
+        response = getattr(client, method)("/api/farm", payload, format="json")
+        assert response.status_code == 400
+        assert response.data["field"] == "name"
+        assert client.get("/api/farm").data["name"] == maximum_name
+
+    patched = client.patch("/api/farm", {"name": original}, format="json")
+    assert patched.status_code == 200
+    assert patched.data["name"] == original
+
+
 def test_fields_validate_area_and_can_be_updated(client):
     invalid = client.post(
         "/api/fields", {"name": "North 40", "area": "nope"}, format="json"
@@ -146,6 +172,33 @@ def test_field_creation_requires_name_and_area(client):
         response = client.post("/api/fields", payload, format="json")
         assert response.status_code == 400
         assert response.data["field"] == field
+
+
+def test_field_name_length_is_limited_on_create_put_and_patch(client):
+    maximum_name = "F" * 255
+    created = client.post(
+        "/api/fields",
+        {"name": maximum_name, "area": 4},
+        format="json",
+    )
+    assert created.status_code == 201
+    field_url = f"/api/fields/{created.data['id']}"
+    assert created.data["name"] == maximum_name
+
+    invalid_create = client.post(
+        "/api/fields", {"name": "F" * 256, "area": 4}, format="json"
+    )
+    assert invalid_create.status_code == 400
+    assert invalid_create.data["field"] == "name"
+
+    for method, payload in (
+        ("put", {"name": "F" * 256, "area": 5}),
+        ("patch", {"name": "F" * 256}),
+    ):
+        response = getattr(client, method)(field_url, payload, format="json")
+        assert response.status_code == 400
+        assert response.data["field"] == "name"
+        assert client.get(field_url).data["name"] == maximum_name
 
 
 def test_fields_round_trip_polygon_and_support_full_crud(client):

@@ -49,6 +49,26 @@ def test_register_rejects_malformed_email(db, anon):
     assert response.data["detail"]
 
 
+def test_register_rejects_names_that_make_farm_name_too_long(db, anon):
+    accepted = register(
+        anon,
+        name="A" * 248,
+        email="max-name@agrivanta.test",
+    )
+    assert accepted.status_code == 201
+    farm = User.objects.get(email="max-name@agrivanta.test").farm
+    assert len(farm.name) == 255
+
+    rejected = register(
+        anon,
+        name="A" * 249,
+        email="too-long-name@agrivanta.test",
+    )
+    assert rejected.status_code == 400
+    assert rejected.data["field"] == "name"
+    assert not User.objects.filter(email="too-long-name@agrivanta.test").exists()
+
+
 def test_register_rejects_password_that_fails_configured_validators(db, anon):
     response = register(anon, password="123")
 

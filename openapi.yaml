@@ -1585,6 +1585,8 @@ components:
       properties:
         name:
           type: string
+          maxLength: 248
+          description: The generated farm name appends "'s Farm" to this value.
         email:
           type: string
           format: email
@@ -1606,6 +1608,7 @@ components:
           type: string
         name:
           type: string
+          maxLength: 255
         reportingCurrency:
           type: string
           description: Three-letter reporting currency code, e.g. `USD`.
@@ -1620,6 +1623,7 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 255
         reportingCurrency:
           type: string
           minLength: 3
@@ -1632,6 +1636,7 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 255
         reportingCurrency:
           type: string
           minLength: 3
@@ -1648,6 +1653,7 @@ components:
           type: string
         name:
           type: string
+          maxLength: 255
         area:
           type: number
           description: Field area in acres, greater than zero, with at most four decimal places.
@@ -1666,6 +1672,7 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 255
         area:
           $ref: '#/components/schemas/FlexibleNumber'
           description: Field area in acres, greater than zero, with at most four decimal places.
@@ -1683,6 +1690,7 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 255
         area:
           $ref: '#/components/schemas/FlexibleNumber'
           description: Field area in acres, greater than zero, with at most four decimal places.

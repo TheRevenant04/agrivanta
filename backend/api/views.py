@@ -111,6 +111,17 @@ def require_text(data, key, message):
     return value.strip()
 
 
+def require_name(data, key, noun):
+    name = require_text(data, key, f"{noun} name is required.")
+    if len(name) > 255:
+        raise ApiError(
+            f"{noun.capitalize()} name must be 255 characters or fewer.",
+            status.HTTP_400_BAD_REQUEST,
+            key,
+        )
+    return name
+
+
 def optional_text(data, key):
     value = data.get(key)
     if value is None:
@@ -384,6 +395,13 @@ class RegisterView(APIView):
             )
 
         name = str(data.get("name") or "").strip()
+        farm_name = f"{name}'s Farm" if name else "My Farm"
+        if len(farm_name) > 255:
+            raise ApiError(
+                "Farm name must be 255 characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "name",
+            )
         try:
             validate_password(password, user=User(email=email, name=name))
         except ValidationError as exc:
@@ -399,7 +417,7 @@ class RegisterView(APIView):
             )
             farm = Farm.objects.create(
                 owner=user,
-                name=f"{name}'s Farm" if name else "My Farm",
+                name=farm_name,
                 reporting_currency="USD",
             )
             seed_farm(farm)
@@ -463,9 +481,7 @@ class FarmView(APIView):
 
     def put(self, request):
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Farm name is required."
-        )
+        name = require_name(request.data, "name", "Farm")
         currency = parse_reporting_currency(
             request.data.get("reportingCurrency")
         )
@@ -478,9 +494,7 @@ class FarmView(APIView):
         farm = get_farm(request.user)
         update_fields = []
         if "name" in request.data:
-            farm.name = require_text(
-                request.data, "name", "Farm name is required."
-            )
+            farm.name = require_name(request.data, "name", "Farm")
             update_fields.append("name")
         if "reportingCurrency" in request.data:
             currency = parse_reporting_currency(
@@ -601,9 +615,7 @@ class FieldListView(APIView):
 
     def post(self, request):
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Field name is required."
-        )
+        name = require_name(request.data, "name", "Field")
         area = parse_field_area(request.data)
         polygon = parse_field_polygon(request.data.get("polygon"))
         field = Field.objects.create(
@@ -631,9 +643,7 @@ class FieldDetailView(APIView):
         field = scoped_get(
             Field, farm, field_id, "That field no longer exists."
         )
-        name = require_text(
-            request.data, "name", "Field name is required."
-        )
+        name = require_name(request.data, "name", "Field")
         area = parse_field_area(request.data)
         field.name = name
         field.area = area
@@ -649,9 +659,7 @@ class FieldDetailView(APIView):
         )
         update_fields = []
         if "name" in request.data:
-            field.name = require_text(
-                request.data, "name", "Field name is required."
-            )
+            field.name = require_name(request.data, "name", "Field")
             update_fields.append("name")
         if "area" in request.data:
             field.area = parse_field_area(request.data)
