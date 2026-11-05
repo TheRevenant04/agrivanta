@@ -32,41 +32,38 @@ def test_database_schema_integrity():
         
         # Should have at least one migration
         assert migration_count > 0, "No migrations found in database for 'api' app"
-        
-        # Get list of tables using SQLite-compatible query
-        cursor.execute("""
-            SELECT name FROM sqlite_master 
-            WHERE type='table' AND name LIKE 'api_%'
-            ORDER BY name
-        """)
-        api_tables = [row[0] for row in cursor.fetchall()]
-        
-        # Expected core API tables
-        expected_tables = [
-            'api_activity',
-            'api_activitytype',
-            'api_crop',
-            'api_customer',
-            'api_expense',
-            'api_farm',
-            'api_field',
-            'api_inventoryitem',
-            'api_reportingperiod',
-            'api_season',
-            'api_stockmovement',
-            'api_supplier',
-            'api_variety',
-        ]
-        
-        # Verify expected tables exist
-        for expected_table in expected_tables:
-            assert expected_table in api_tables, \
-                f"Expected table '{expected_table}' not found in database. Found: {api_tables}"
-        
-        print(f"\n✓ Schema integrity verified:")
-        print(f"  - {migration_count} migrations applied for 'api' app")
-        print(f"  - {len(api_tables)} API tables present in database")
-        print(f"  - All {len(expected_tables)} core tables exist")
+    
+    # Use database-agnostic Django introspection to get table names
+    # This works with PostgreSQL, SQLite, MySQL, and other backends
+    api_tables = connection.introspection.table_names()
+    api_tables = [t for t in api_tables if t.startswith('api_')]
+    
+    # Expected core API tables
+    expected_tables = [
+        'api_activity',
+        'api_activitytype',
+        'api_crop',
+        'api_customer',
+        'api_expense',
+        'api_farm',
+        'api_field',
+        'api_inventoryitem',
+        'api_reportingperiod',
+        'api_season',
+        'api_stockmovement',
+        'api_supplier',
+        'api_variety',
+    ]
+    
+    # Verify expected tables exist
+    for expected_table in expected_tables:
+        assert expected_table in api_tables, \
+            f"Expected table '{expected_table}' not found in database. Found: {api_tables}"
+    
+    print(f"\n✓ Schema integrity verified:")
+    print(f"  - {migration_count} migrations applied for 'api' app")
+    print(f"  - {len(api_tables)} API tables present in database")
+    print(f"  - All {len(expected_tables)} core tables exist")
 
 
 @pytest.mark.django_db
@@ -149,38 +146,37 @@ def test_database_backup_restore_validation():
         # 1. Verify migrations applied
         cursor.execute("SELECT COUNT(*) FROM django_migrations WHERE app = 'api'")
         assert cursor.fetchone()[0] > 0, "Migrations not applied"
-        
-        # 2. Verify core API tables exist (SQLite-compatible)
-        cursor.execute("""
-            SELECT COUNT(*) FROM sqlite_master 
-            WHERE type='table' AND name LIKE 'api_%'
-        """)
-        assert cursor.fetchone()[0] > 10, "Not enough API tables found"
-        
-        # 3. Verify all expected API tables are queryable
-        tables_to_check = [
-            'api_farm',
-            'api_field',
-            'api_crop',
-            'api_variety',
-            'api_activity',
-            'api_activitytype',
-            'api_inventoryitem',
-            'api_stockmovement',
-            'api_expense',
-            'api_supplier',
-            'api_customer',
-            'api_season',
-            'api_reportingperiod',
-        ]
-        
+    
+    # 2. Verify core API tables exist using database-agnostic introspection
+    all_tables = connection.introspection.table_names()
+    api_tables = [t for t in all_tables if t.startswith('api_')]
+    assert len(api_tables) > 10, f"Not enough API tables found: {len(api_tables)}"
+    
+    # 3. Verify all expected API tables are queryable
+    tables_to_check = [
+        'api_farm',
+        'api_field',
+        'api_crop',
+        'api_variety',
+        'api_activity',
+        'api_activitytype',
+        'api_inventoryitem',
+        'api_stockmovement',
+        'api_expense',
+        'api_supplier',
+        'api_customer',
+        'api_season',
+        'api_reportingperiod',
+    ]
+    
+    with connection.cursor() as cursor:
         for table_name in tables_to_check:
             cursor.execute(f"SELECT COUNT(*) FROM \"{table_name}\"")
             count = cursor.fetchone()[0]
             assert isinstance(count, int), f"Invalid count for {table_name}"
             assert count >= 0, f"Negative count for {table_name}"
-        
-        print("\n✓ Database backup/restore validation passed")
-        print(f"  - {len(tables_to_check)} core tables verified and accessible")
-        print("  - Schema integrity confirmed")
-        print("  - Ready for production restore testing")
+    
+    print("\n✓ Database backup/restore validation passed")
+    print(f"  - {len(tables_to_check)} core tables verified and accessible")
+    print("  - Schema integrity confirmed")
+    print("  - Ready for production restore testing")

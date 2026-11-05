@@ -30,6 +30,39 @@ This document describes the PostgreSQL backup and restore procedures for Agrivan
 
 ### Backup Script
 
+#### Password Configuration
+
+PostgreSQL commands require database credentials. Choose one of these methods:
+
+**Option 1: .pgpass file (recommended for automation)**
+
+Create `~/.pgpass` with database credentials:
+```
+hostname:port:database:username:password
+localhost:5432:agrivanta:postgres:your_password
+```
+
+Make it secure:
+```bash
+chmod 600 ~/.pgpass
+```
+
+**Option 2: Environment variable**
+
+```bash
+export PGPASSWORD="your_password"
+pg_dump --host="$DB_HOST" --username="$DB_USER" --dbname="$DB_NAME" | gzip > backup.sql.gz
+```
+
+**Option 3: Prompt for password**
+
+Add `-W` flag to prompt interactively (not suitable for automated jobs):
+```bash
+pg_dump -W --host="$DB_HOST" --username="$DB_USER" --dbname="$DB_NAME"
+```
+
+#### Backup Script with Password Handling
+
 Create `/usr/local/bin/backup-postgresql.sh`:
 
 ```bash
@@ -45,6 +78,9 @@ RETENTION_DAYS=30
 DATE=$(date +%Y-%m-%d)
 
 mkdir -p "$BACKUP_DIR"
+
+# Ensure .pgpass is configured (or use PGPASSWORD environment variable)
+# See Password Configuration section above
 
 # Create backup
 pg_dump --host="$DB_HOST" --username="$DB_USER" --dbname="$DB_NAME" \
