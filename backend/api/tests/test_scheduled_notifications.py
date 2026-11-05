@@ -3,6 +3,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.utils import timezone
+from django.test import TestCase
+from django.test.utils import override_settings
 from api.models import (
     Activity,
     ActivityStatus,
@@ -654,3 +656,284 @@ class TestBudgetOverruns:
             user=owner, type=NotificationType.ALERT
         )
         assert notifications.count() == 2
+
+
+class TestDeduplicationFixes:
+    """Test fixes for insufficient deduplication logic (Issue 2)."""
+
+    def test_multiple_overdue_activities_same_type(self, db, crop_cycle):
+        """Two overdue activities of same type create separate notifications."""
+        cycle, farm, owner = crop_cycle
+        activity_type = ActivityType.objects.create(
+            farm=farm, name="Planting", category="planting", standard=False
+        )
+        overdue_date = date.today() - timedelta(days=5)
+
+        activity1 = Activity.objects.create(
+            farm=farm,
+            cycle=cycle,
+            type=activity_type,
+            planned_date=overdue_date,
+            status=ActivityStatus.PLANNED,
+        )
+        activity2 = Activity.objects.create(
+            farm=farm,
+            cycle=cycle,
+            type=activity_type,
+            planned_date=overdue_date,
+            status=ActivityStatus.PLANNED,
+        )
+
+        check_overdue_activities()
+
+        notifications = Notification.objects.filter(
+            user=owner, type=NotificationType.ALERT
+        )
+        assert notifications.count() == 2
+        assert all("overdue" in n.message.lower() for n in notifications)
+        assert all("Planting" in n.message for n in notifications)
+        messages = [n.message for n in notifications]
+        assert messages[0] != messages[1]
+
+    def test_multiple_low_stock_items_overlapping_names(self, db, farm_with_owner):
+        """Items with overlapping names create separate notifications."""
+        farm, owner = farm_with_owner
+        unit = Unit.objects.create(
+            farm=farm, name="kg", base_measure="mass"
+        )
+        item1 = InventoryItem.objects.create(
+            farm=farm,
+            name="Fertilizer",
+            unit=unit,
+            reorder_level=Decimal("100"),
+        )
+        item2 = InventoryItem.objects.create(
+            farm=farm,
+            name="Fertilizer Premium",
+            unit=unit,
+            reorder_level=Decimal("50"),
+        )
+        StockMovement.objects.create(
+            farm=farm,
+            item=item1,
+            type=MovementType.PURCHASE,
+            quantity=Decimal("30"),
+            date=date.today(),
+        )
+        StockMovement.objects.create(
+            farm=farm,
+            item=item2,
+            type=MovementType.PURCHASE,
+            quantity=Decimal("20"),
+            date=date.today(),
+        )
+
+        check_low_stock()
+
+        notifications = Notification.objects.filter(
+            user=owner, type=NotificationType.WARNING
+        )
+        assert notifications.count() == 2
+        assert all("below reorder level" in n.message.lower() for n in notifications)
+        messages = [n.message for n in notifications]
+        assert messages[0] != messages[1]
+
+    def test_multiple_budgets_same_category_different_cycles(self, db, farm_with_owner, field_and_crop):
+        """Two budgets with same category but different cycles create separate notifications."""
+        farm, owner = farm_with_owner
+        field, crop, variety, _, _ = field_and_crop
+        cycle1 = CropCycle.objects.create(
+            farm=farm,
+            field=field,
+            crop=crop,
+            variety=variety,
+            cycle_type="annual",
+            start_date=date.today() - timedelta(days=60),
+        )
+        cycle2 = CropCycle.objects.create(
+            farm=farm,
+            field=field,
+            crop=crop,
+            variety=variety,
+            cycle_type="annual",
+            start_date=date.today() - timedelta(days=30),
+        )
+
+        budget1 = Budget.objects.create(
+            farm=farm,
+            cycle=cycle1,
+            category=ExpenseCategory.INPUTS,
+            amount=Decimal("200"),
+            period_start=date.today() - timedelta(days=90),
+            period_end=date.today() + timedelta(days=30),
+        )
+        budget2 = Budget.objects.create(
+            farm=farm,
+            cycle=cycle2,
+            category=ExpenseCategory.INPUTS,
+            amount=Decimal("250"),
+            period_start=date.today() - timedelta(days=60),
+            period_end=date.today() + timedelta(days=30),
+        )
+        Expense.objects.create(
+            farm=farm,
+            cycle=cycle1,
+            category=ExpenseCategory.INPUTS,
+            amount=Decimal("300"),
+            date=date.today() - timedelta(days=45),
+            status=ExpenseStatus.POSTED,
+        )
+        Expense.objects.create(
+            farm=farm,
+            cycle=cycle2,
+            category=ExpenseCategory.INPUTS,
+            amount=Decimal("300"),
+            date=date.today() - timedelta(days=15),
+            status=ExpenseStatus.POSTED,
+        )
+
+        check_budget_overruns()
+
+        notifications = Notification.objects.filter(
+            user=owner, type=NotificationType.ALERT
+        )
+        assert notifications.count() == 2
+
+
+class TestMultiFarmIsolation:
+    """Test fixes for multi-farm budget filtering (Issue 1)."""
+
+    def test_budget_only_counts_same_farm_expenses(self, db):
+        """Budget calculations only include expenses from the same farm."""
+        owner1 = User.objects.create_user(
+            email="farm1@test.com", password="testpass123"
+        )
+        owner2 = User.objects.create_user(
+            email="farm2@test.com", password="testpass123"
+        )
+        farm1 = Farm.objects.create(
+            owner=owner1, name="Farm 1", reporting_currency="USD"
+        )
+        farm2 = Farm.objects.create(
+            owner=owner2, name="Farm 2", reporting_currency="USD"
+        )
+
+        field1 = Field.objects.create(
+            farm=farm1, name="Field 1", area=Decimal("10")
+        )
+        field2 = Field.objects.create(
+            farm=farm2, name="Field 2", area=Decimal("10")
+        )
+        crop1 = Crop.objects.create(farm=farm1, name="Wheat")
+        crop2 = Crop.objects.create(farm=farm2, name="Corn")
+        variety1 = Variety.objects.create(crop=crop1, farm=farm1, name="Winter Wheat")
+        variety2 = Variety.objects.create(crop=crop2, farm=farm2, name="Sweet Corn")
+
+        cycle1 = CropCycle.objects.create(
+            farm=farm1,
+            field=field1,
+            crop=crop1,
+            variety=variety1,
+            cycle_type="annual",
+            start_date=date.today() - timedelta(days=30),
+        )
+        cycle2 = CropCycle.objects.create(
+            farm=farm2,
+            field=field2,
+            crop=crop2,
+            variety=variety2,
+            cycle_type="annual",
+            start_date=date.today() - timedelta(days=30),
+        )
+
+        budget1 = Budget.objects.create(
+            farm=farm1,
+            cycle=cycle1,
+            category=ExpenseCategory.INPUTS,
+            amount=Decimal("500"),
+            period_start=date.today() - timedelta(days=30),
+            period_end=date.today() + timedelta(days=30),
+        )
+
+        Expense.objects.create(
+            farm=farm1,
+            cycle=cycle1,
+            category=ExpenseCategory.INPUTS,
+            amount=Decimal("100"),
+            date=date.today(),
+            status=ExpenseStatus.POSTED,
+        )
+        Expense.objects.create(
+            farm=farm2,
+            cycle=cycle2,
+            category=ExpenseCategory.INPUTS,
+            amount=Decimal("700"),
+            date=date.today(),
+            status=ExpenseStatus.POSTED,
+        )
+
+        check_budget_overruns()
+
+        farm1_notifications = Notification.objects.filter(
+            user=owner1, type=NotificationType.ALERT
+        )
+        farm2_notifications = Notification.objects.filter(
+            user=owner2, type=NotificationType.ALERT
+        )
+        assert farm1_notifications.count() == 0
+        assert farm2_notifications.count() == 0
+
+
+class TestN1QueryFixes:
+    """Test fixes for N+1 query problems (Issues 3 and 4)."""
+
+    def test_overdue_activities_with_select_related(self, db, crop_cycle):
+        """check_overdue_activities successfully loads with select_related."""
+        cycle, farm, owner = crop_cycle
+        activity_type = ActivityType.objects.create(
+            farm=farm, name="Planting", category="planting", standard=False
+        )
+        overdue_date = date.today() - timedelta(days=5)
+        Activity.objects.create(
+            farm=farm,
+            cycle=cycle,
+            type=activity_type,
+            planned_date=overdue_date,
+            status=ActivityStatus.PLANNED,
+        )
+
+        check_overdue_activities()
+
+        notification = Notification.objects.filter(
+            user=owner, type=NotificationType.ALERT
+        ).first()
+        assert notification is not None
+        assert "overdue" in notification.message.lower()
+
+    def test_low_stock_with_prefetch_related(self, db, farm_with_owner):
+        """check_low_stock successfully loads with prefetch_related."""
+        farm, owner = farm_with_owner
+        unit = Unit.objects.create(
+            farm=farm, name="kg", base_measure="mass"
+        )
+        item = InventoryItem.objects.create(
+            farm=farm,
+            name="Fertilizer",
+            unit=unit,
+            reorder_level=Decimal("100"),
+        )
+        StockMovement.objects.create(
+            farm=farm,
+            item=item,
+            type=MovementType.PURCHASE,
+            quantity=Decimal("50"),
+            date=date.today(),
+        )
+
+        check_low_stock()
+
+        notification = Notification.objects.filter(
+            user=owner, type=NotificationType.WARNING
+        ).first()
+        assert notification is not None
+        assert "below reorder level" in notification.message.lower()

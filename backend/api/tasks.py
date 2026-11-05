@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from decimal import Decimal
 
@@ -19,6 +20,8 @@ from api.models import (
     User,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @app.task
 def check_overdue_activities():
@@ -29,14 +32,18 @@ def check_overdue_activities():
     - Status is PLANNED or IN_PROGRESS
     - planned_date is before today
     """
-    today = date.today()
-    overdue_activities = Activity.objects.filter(
-        Q(status=ActivityStatus.PLANNED) | Q(status=ActivityStatus.IN_PROGRESS),
-        planned_date__lt=today,
-    )
+    try:
+        today = date.today()
+        overdue_activities = Activity.objects.filter(
+            Q(status=ActivityStatus.PLANNED)
+            | Q(status=ActivityStatus.IN_PROGRESS),
+            planned_date__lt=today,
+        ).select_related("farm", "farm__owner")
 
-    for activity in overdue_activities:
-        _create_overdue_activity_notification(activity)
+        for activity in overdue_activities:
+            _create_overdue_activity_notification(activity)
+    except Exception as e:
+        logger.error(f"Error checking overdue activities: {e}", exc_info=True)
 
 
 @app.task
@@ -47,13 +54,16 @@ def check_low_stock():
     Compares current quantity (from stock movements) against reorder_level.
     Creates one notification per item per farm owner.
     """
-    farms = Farm.objects.all()
+    try:
+        farms = Farm.objects.prefetch_related("inventory_items").all()
 
-    for farm in farms:
-        for item in farm.inventory_items.all():
-            current_qty = item.current_quantity()
-            if current_qty < item.reorder_level:
-                _create_low_stock_notification(farm, item)
+        for farm in farms:
+            for item in farm.inventory_items.all():
+                current_qty = item.current_quantity()
+                if current_qty < item.reorder_level:
+                    _create_low_stock_notification(farm, item)
+    except Exception as e:
+        logger.error(f"Error checking low stock: {e}", exc_info=True)
 
 
 @app.task
@@ -64,19 +74,23 @@ def check_budget_overruns():
     Compares budget amount against actual spend (posted expenses) for the scope.
     Scope is determined by: cycle (if set) + category (if set) + period.
     """
-    budgets = Budget.objects.all()
+    try:
+        budgets = Budget.objects.all()
 
-    for budget in budgets:
-        actual_spend = _calculate_actual_spend(budget)
-        if actual_spend > budget.amount:
-            _create_budget_overrun_notification(budget)
+        for budget in budgets:
+            actual_spend = _calculate_actual_spend(budget)
+            if actual_spend > budget.amount:
+                _create_budget_overrun_notification(budget)
+    except Exception as e:
+        logger.error(f"Error checking budget overruns: {e}", exc_info=True)
 
 
 def _create_overdue_activity_notification(activity):
     """
     Create a notification for an overdue activity.
 
-    Deduplication: check if a notification already exists for this activity.
+    Deduplication: check if a notification already exists for this specific activity.
+    Uses activity ID in deduplication key to allow multiple activities of same type.
     Notify the farm owner.
     """
     farm = activity.farm
@@ -85,12 +99,12 @@ def _create_overdue_activity_notification(activity):
     existing = Notification.objects.filter(
         user=user,
         type=NotificationType.ALERT,
-        message__startswith=f"Activity '{activity.type.name}'",
+        message__contains=f"Activity (ID: {activity.id})",
     ).exists()
 
     if not existing:
         message = (
-            f"Activity '{activity.type.name}' scheduled for "
+            f"Activity (ID: {activity.id}) '{activity.type.name}' scheduled for "
             f"{activity.planned_date} is overdue."
         )
         Notification.objects.create(
@@ -105,20 +119,21 @@ def _create_low_stock_notification(farm, item):
     """
     Create a notification for low stock item.
 
-    Deduplication: check if a notification already exists for this item.
+    Deduplication: check if a notification already exists for this specific item.
+    Uses item ID in deduplication key to allow multiple items with overlapping names.
     Notify the farm owner.
     """
     user = farm.owner
     existing = Notification.objects.filter(
         user=user,
         type=NotificationType.WARNING,
-        message__contains=f"{item.name}",
+        message__contains=f"Item (ID: {item.id})",
     ).exists()
 
     if not existing:
         current_qty = item.current_quantity()
         message = (
-            f"Inventory '{item.name}' is below reorder level. "
+            f"Inventory Item (ID: {item.id}) '{item.name}' is below reorder level. "
             f"Current: {current_qty}, Reorder Level: {item.reorder_level}."
         )
         Notification.objects.create(
@@ -132,7 +147,8 @@ def _create_budget_overrun_notification(budget):
     """
     Create a notification for a budget overrun.
 
-    Deduplication: check if a notification already exists for this budget.
+    Deduplication: check if a notification already exists for this specific budget.
+    Uses budget ID in deduplication key to allow multiple budgets with same category.
     Notify the farm owner.
     """
     farm = budget.farm
@@ -143,12 +159,12 @@ def _create_budget_overrun_notification(budget):
     existing = Notification.objects.filter(
         user=user,
         type=NotificationType.ALERT,
-        message__startswith=f"Budget for {category_str}",
+        message__contains=f"Budget (ID: {budget.id})",
     ).exists()
 
     if not existing:
         message = (
-            f"Budget for {category_str} has been exceeded. "
+            f"Budget (ID: {budget.id}) for {category_str} has been exceeded. "
             f"Budget: {budget.amount}, Actual: {actual_spend}."
         )
         Notification.objects.create(
@@ -162,10 +178,12 @@ def _calculate_actual_spend(budget):
     """
     Calculate actual spend for a budget scope.
 
-    Scope is determined by: cycle (if set) + category (if set) + period.
+    Scope is determined by: farm + cycle (if set) + category (if set) + period.
     Only includes POSTED expenses.
     """
-    expenses = Expense.objects.filter(status=ExpenseStatus.POSTED)
+    expenses = Expense.objects.filter(
+        status=ExpenseStatus.POSTED, farm=budget.farm
+    )
 
     if budget.cycle:
         expenses = expenses.filter(cycle=budget.cycle)
