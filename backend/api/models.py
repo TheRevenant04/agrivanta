@@ -6,6 +6,8 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.functions import Lower
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils import timezone
 
 
@@ -523,6 +525,45 @@ class Customer(TimestampedModel):
         ordering = ["created_at", "id"]
 
 
+class ExpenseCategoryRecord(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="expense_categories"
+    )
+    name = models.CharField(max_length=255)
+    is_default = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                "farm",
+                Lower("name"),
+                name="expense_category_farm_name_unique",
+            ),
+        ]
+
+
+def ensure_default_expense_categories(farm):
+    existing = {
+        name.lower()
+        for name in farm.expense_categories.values_list("name", flat=True)
+    }
+    missing = [
+        ExpenseCategoryRecord(farm=farm, name=name, is_default=True)
+        for name in ExpenseCategory.values
+        if name not in existing
+    ]
+    if missing:
+        ExpenseCategoryRecord.objects.bulk_create(missing)
+
+
+@receiver(post_save, sender=Farm)
+def seed_default_expense_categories(sender, instance, created, **kwargs):
+    if created:
+        ensure_default_expense_categories(instance)
+
+
 class Expense(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
@@ -535,12 +576,27 @@ class Expense(TimestampedModel):
         on_delete=models.SET_NULL,
         related_name="expenses",
     )
-    category = models.CharField(
-        max_length=32, choices=ExpenseCategory.choices
-    )
+    category = models.CharField(max_length=255)
     amount = models.DecimalField(max_digits=14, decimal_places=4)
     date = models.DateField()
+    category_record = models.ForeignKey(
+        ExpenseCategoryRecord,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="expenses",
+    )
     supplier = models.CharField(max_length=255, blank=True, null=True)
+    supplier_record = models.ForeignKey(
+        Supplier,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="expenses",
+    )
+    attachment_reference = models.CharField(
+        max_length=500, blank=True, default=""
+    )
     status = models.CharField(
         max_length=20,
         choices=ExpenseStatus.choices,
@@ -550,6 +606,16 @@ class Expense(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+
+    def save(self, *args, **kwargs):
+        if self.category_record_id is None and self.category:
+            ensure_default_expense_categories(self.farm)
+            self.category_record = ExpenseCategoryRecord.objects.filter(
+                farm=self.farm, name__iexact=self.category
+            ).first()
+        if self.category_record_id is not None:
+            self.category = self.category_record.name
+        super().save(*args, **kwargs)
 
 
 class Budget(TimestampedModel):

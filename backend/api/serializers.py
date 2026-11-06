@@ -217,6 +217,14 @@ def serialize_attachment(attachment):
     return payload
 
 
+def serialize_expense_category(category):
+    return {
+        "id": as_id(category.id),
+        "name": category.name,
+        "isDefault": category.is_default,
+    }
+
+
 def serialize_expense(expense):
     return {
         "id": as_id(expense.id),
@@ -224,9 +232,24 @@ def serialize_expense(expense):
             as_id(expense.cycle_id) if expense.cycle_id else None
         ),
         "category": expense.category,
+        "categoryId": (
+            as_id(expense.category_record_id)
+            if expense.category_record_id
+            else None
+        ),
         "amount": as_number(expense.amount),
         "date": as_date(expense.date),
-        "supplier": expense.supplier or None,
+        "supplier": (
+            expense.supplier_record.name
+            if expense.supplier_record_id
+            else expense.supplier or None
+        ),
+        "supplierId": (
+            as_id(expense.supplier_record_id)
+            if expense.supplier_record_id
+            else None
+        ),
+        "attachmentReference": expense.attachment_reference or None,
         "status": expense.status,
         "attachments": [
             serialize_attachment(attachment)
