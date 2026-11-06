@@ -1,4 +1,8 @@
+from decimal import Decimal
+
 from rest_framework.test import APIClient
+
+from api.models import EquipmentUsage
 
 from .conftest import register
 
@@ -73,6 +77,31 @@ def test_equipment_supports_farm_scoped_crud(client):
     assert client.get(EQUIPMENT).data == []
 
 
+def test_equipment_name_length_on_create_and_update(client):
+    max_name = "a" * 255
+    too_long = "b" * 256
+
+    created = client.post(EQUIPMENT, {"name": max_name}, format="json")
+    assert created.status_code == 201
+    assert created.data["name"] == max_name
+
+    rejected = client.post(EQUIPMENT, {"name": too_long}, format="json")
+    assert rejected.status_code == 400
+    assert rejected.data["field"] == "name"
+    assert len(client.get(EQUIPMENT).data) == 1
+
+    url = f"{EQUIPMENT}/{created.data['id']}"
+    updated_name = "c" * 255
+    updated = client.put(url, {"name": updated_name}, format="json")
+    assert updated.status_code == 200
+    assert updated.data["name"] == updated_name
+
+    rejected = client.put(url, {"name": too_long}, format="json")
+    assert rejected.status_code == 400
+    assert rejected.data["field"] == "name"
+    assert client.get(url).data["name"] == updated_name
+
+
 def test_equipment_usage_cost_modes_and_crud(client, cycle):
     activity = create_activity(client, cycle)
     equipment = create_equipment(client)
@@ -142,6 +171,43 @@ def test_equipment_usage_requires_exactly_one_cost_source(client, cycle):
         )
         assert response.status_code == 400
         assert "exactly one" in response.data["detail"]
+
+
+def test_equipment_usage_cost_basis_precision_and_reload_consistency(
+    client, cycle
+):
+    activity = create_activity(client, cycle)
+    equipment = create_equipment(client)
+    base = {
+        "equipmentId": equipment["id"],
+        "activityId": activity["id"],
+        "hours": "1.2345",
+        "costPerHour": "2.3456",
+        "date": "2026-03-10",
+    }
+
+    over_precision_cases = (
+        ("hours", "1.23456", "hours"),
+        ("costPerHour", "2.34567", "costPerHour"),
+        ("totalCost", "12.34567", "totalCost"),
+    )
+    for key, value, field in over_precision_cases:
+        payload = {**base, key: value}
+        if key == "totalCost":
+            payload.pop("costPerHour")
+        response = client.post(EQUIPMENT_USAGES, payload, format="json")
+        assert response.status_code == 400
+        assert response.data["field"] == field
+
+    created = client.post(EQUIPMENT_USAGES, base, format="json")
+    assert created.status_code == 201, created.data
+
+    persisted = EquipmentUsage.objects.get(pk=created.data["id"])
+    assert persisted.cost == persisted.hours * persisted.cost_per_hour
+    reloaded = client.get(f"{EQUIPMENT_USAGES}/{created.data['id']}")
+    assert reloaded.status_code == 200
+    assert reloaded.data == created.data
+    assert Decimal(str(reloaded.data["cost"])) == persisted.cost
 
 
 def test_equipment_usage_rejects_missing_references_and_invalid_hours(

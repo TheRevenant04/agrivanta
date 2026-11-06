@@ -2437,9 +2437,7 @@ class EquipmentListView(APIView):
 
     @staticmethod
     def _save(farm, equipment, data):
-        name = require_text(
-            data, "name", "Equipment name is required."
-        )
+        name = require_name(data, "name", "Equipment")
         if equipment is None:
             return Equipment.objects.create(farm=farm, name=name)
         equipment.name = name
@@ -2484,6 +2482,18 @@ class EquipmentDetailView(APIView):
 
 
 class EquipmentUsageListView(APIView):
+    @staticmethod
+    def _validate_source_precision(value, api_field, model_field, label):
+        try:
+            EquipmentUsage._meta.get_field(model_field).run_validators(value)
+        except ValidationError as exc:
+            raise ApiError(
+                f"{label} must have at most four decimal places and fit "
+                "within 14 digits.",
+                status.HTTP_400_BAD_REQUEST,
+                api_field,
+            ) from exc
+
     def get(self, request):
         farm = get_farm(request.user)
         usages = farm.equipment_usages.select_related(
@@ -2546,6 +2556,9 @@ class EquipmentUsageListView(APIView):
             )
         except ValueError as exc:
             raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, "hours")
+        EquipmentUsageListView._validate_source_precision(
+            hours, "hours", "hours", "Hours"
+        )
 
         cost_per_hour_keys = ("costPerHour", "cost_per_hour")
         total_cost_keys = ("totalCost", "total_cost")
@@ -2578,6 +2591,12 @@ class EquipmentUsageListView(APIView):
                     "Cost per hour must be a number.",
                     negative_message="Cost per hour cannot be negative.",
                 )
+                EquipmentUsageListView._validate_source_precision(
+                    cost_per_hour,
+                    "costPerHour",
+                    "cost_per_hour",
+                    "Cost per hour",
+                )
             except ValueError as exc:
                 raise ApiError(
                     str(exc), status.HTTP_400_BAD_REQUEST, "costPerHour"
@@ -2595,6 +2614,9 @@ class EquipmentUsageListView(APIView):
                     "Total cost is required.",
                     "Total cost must be a number.",
                     negative_message="Total cost cannot be negative.",
+                )
+                EquipmentUsageListView._validate_source_precision(
+                    total_cost, "totalCost", "total_cost", "Total cost"
                 )
             except ValueError as exc:
                 raise ApiError(
