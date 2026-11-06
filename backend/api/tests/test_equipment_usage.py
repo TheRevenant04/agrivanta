@@ -77,6 +77,31 @@ def test_equipment_supports_farm_scoped_crud(client):
     assert client.get(EQUIPMENT).data == []
 
 
+def test_equipment_name_length_on_create_and_update(client):
+    max_name = "a" * 255
+    too_long = "b" * 256
+
+    created = client.post(EQUIPMENT, {"name": max_name}, format="json")
+    assert created.status_code == 201
+    assert created.data["name"] == max_name
+
+    rejected = client.post(EQUIPMENT, {"name": too_long}, format="json")
+    assert rejected.status_code == 400
+    assert rejected.data["field"] == "name"
+    assert len(client.get(EQUIPMENT).data) == 1
+
+    url = f"{EQUIPMENT}/{created.data['id']}"
+    updated_name = "c" * 255
+    updated = client.put(url, {"name": updated_name}, format="json")
+    assert updated.status_code == 200
+    assert updated.data["name"] == updated_name
+
+    rejected = client.put(url, {"name": too_long}, format="json")
+    assert rejected.status_code == 400
+    assert rejected.data["field"] == "name"
+    assert client.get(url).data["name"] == updated_name
+
+
 def test_equipment_usage_cost_modes_and_crud(client, cycle):
     activity = create_activity(client, cycle)
     equipment = create_equipment(client)

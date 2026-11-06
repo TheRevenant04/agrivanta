@@ -2414,9 +2414,7 @@ class EquipmentListView(APIView):
 
     @staticmethod
     def _save(farm, equipment, data):
-        name = require_text(
-            data, "name", "Equipment name is required."
-        )
+        name = require_name(data, "name", "Equipment")
         if equipment is None:
             return Equipment.objects.create(farm=farm, name=name)
         equipment.name = name
