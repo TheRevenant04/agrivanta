@@ -188,6 +188,10 @@ urlpatterns = [
         views.ProfitabilityReportView.as_view(),
     ),
     path(
+        "reports/budget-vs-actual",
+        views.BudgetVsActualReportView.as_view(),
+    ),
+    path(
         "reports/activity-status",
         views.ActivityStatusReportView.as_view(),
     ),
