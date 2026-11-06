@@ -51,6 +51,8 @@ from .models import (
     Notification,
     Payment,
     PaymentType,
+    RecurringExpenseFrequency,
+    RecurringExpenseTemplate,
     ReportingPeriod,
     Role,
     Sale,
@@ -86,6 +88,7 @@ from .serializers import (
     serialize_movement,
     serialize_notification,
     serialize_payment,
+    serialize_recurring_expense_template,
     serialize_reporting_period,
     serialize_sale,
     serialize_season,
@@ -2580,6 +2583,158 @@ class ExpenseDetailView(APIView):
                 status.HTTP_400_BAD_REQUEST,
             )
         expense.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RecurringExpenseTemplateListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        templates = farm.recurring_expense_templates.select_related("category")
+        return Response(
+            [
+                serialize_recurring_expense_template(template)
+                for template in templates
+            ]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        requested_farm_id = request.data.get("farmId")
+        if (
+            requested_farm_id not in (None, "")
+            and str(requested_farm_id) != str(farm.id)
+        ):
+            raise ApiError(
+                "You do not have access to that farm.",
+                status.HTTP_403_FORBIDDEN,
+                "farmId",
+            )
+        values = self._validate(request.data, farm)
+        template = RecurringExpenseTemplate.objects.create(
+            farm=farm,
+            **values,
+        )
+        return Response(
+            serialize_recurring_expense_template(template),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _validate(data, farm, existing=None):
+        values = {}
+        partial = existing is not None
+
+        if not partial or "categoryId" in data:
+            category_id = data.get("categoryId")
+            if category_id in (None, ""):
+                raise ApiError(
+                    "Category is required.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "categoryId",
+                )
+            values["category"] = scoped_get(
+                ExpenseCategoryRecord,
+                farm,
+                category_id,
+                "The selected expense category does not exist.",
+                "categoryId",
+            )
+
+        if not partial or "amount" in data:
+            amount = parse_body_decimal(
+                data,
+                "amount",
+                "Amount is required.",
+                "Amount must be a number.",
+                positive_message="Amount must be greater than zero.",
+            )
+            try:
+                RecurringExpenseTemplate._meta.get_field(
+                    "amount"
+                ).run_validators(amount)
+            except ValidationError as exc:
+                raise ApiError(
+                    "Amount must fit within 10 integer digits and 4 decimal places.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "amount",
+                ) from exc
+            values["amount"] = amount
+
+        if not partial or "frequency" in data:
+            frequency = data.get("frequency")
+            if frequency not in RecurringExpenseFrequency.values:
+                raise ApiError(
+                    "Frequency must be daily, weekly, monthly, or yearly.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "frequency",
+                )
+            values["frequency"] = frequency
+
+        if not partial or "nextDueDate" in data:
+            values["next_due_date"] = parse_body_date(
+                data,
+                "nextDueDate",
+                "Next due date is required.",
+                "Next due date must be a valid calendar date.",
+            )
+
+        if "paused" in data:
+            if not isinstance(data["paused"], bool):
+                raise ApiError(
+                    "Paused must be a boolean.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "paused",
+                )
+            values["paused"] = data["paused"]
+        elif not partial:
+            values["paused"] = False
+
+        return values
+
+
+class RecurringExpenseTemplateDetailView(APIView):
+    def get(self, request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        return Response(serialize_recurring_expense_template(template))
+
+    def put(self, request, template_id):
+        return self._update(request, template_id)
+
+    def patch(self, request, template_id):
+        return self._update(request, template_id)
+
+    @staticmethod
+    def _update(request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        values = RecurringExpenseTemplateListView._validate(
+            request.data, farm, existing=template
+        )
+        for field, value in values.items():
+            setattr(template, field, value)
+        template.save()
+        return Response(serialize_recurring_expense_template(template))
+
+    def delete(self, request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        template.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

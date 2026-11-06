@@ -92,6 +92,14 @@ urlpatterns = [
         "expenses/<str:expense_id>/attachments",
         views.ExpenseAttachmentView.as_view(),
     ),
+    path(
+        "recurring-expense-templates",
+        views.RecurringExpenseTemplateListView.as_view(),
+    ),
+    path(
+        "recurring-expense-templates/<str:template_id>",
+        views.RecurringExpenseTemplateDetailView.as_view(),
+    ),
     path("imports/preview", views.ImportPreviewView.as_view()),
     path("imports/commit", views.ImportCommitView.as_view()),
     path("notifications", views.NotificationListView.as_view()),

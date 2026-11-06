@@ -3,6 +3,7 @@ from pathlib import Path
 
 import sentry_sdk
 import structlog
+from celery.schedules import crontab
 from sentry_sdk.integrations.django import DjangoIntegration
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -138,6 +139,12 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
+CELERY_BEAT_SCHEDULE = {
+    "process-recurring-expense-reminders-daily": {
+        "task": "api.tasks.process_recurring_expense_reminders",
+        "schedule": crontab(hour=0, minute=0),
+    }
+}
 
 structlog.configure(
     processors=[

@@ -1,7 +1,9 @@
 import logging
-from datetime import date
+from calendar import monthrange
+from datetime import date, timedelta
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -17,6 +19,8 @@ from api.models import (
     InventoryItem,
     Notification,
     NotificationType,
+    RecurringExpenseFrequency,
+    RecurringExpenseTemplate,
     User,
 )
 
@@ -83,6 +87,76 @@ def check_budget_overruns():
                 _create_budget_overrun_notification(budget)
     except Exception as e:
         logger.error(f"Error checking budget overruns: {e}", exc_info=True)
+
+
+def advance_recurring_expense_date(current_date, frequency):
+    if frequency == RecurringExpenseFrequency.DAILY:
+        return current_date + timedelta(days=1)
+    if frequency == RecurringExpenseFrequency.WEEKLY:
+        return current_date + timedelta(days=7)
+    if frequency == RecurringExpenseFrequency.MONTHLY:
+        month_index = current_date.month % 12 + 1
+        year = current_date.year + (current_date.month // 12)
+        day = min(current_date.day, monthrange(year, month_index)[1])
+        return date(year, month_index, day)
+    if frequency == RecurringExpenseFrequency.YEARLY:
+        year = current_date.year + 1
+        day = min(current_date.day, monthrange(year, current_date.month)[1])
+        return date(year, current_date.month, day)
+    raise ValueError(f"Unsupported recurring expense frequency: {frequency}")
+
+
+@app.task(
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def process_recurring_expense_reminders():
+    today = timezone.localdate()
+    due_template_ids = RecurringExpenseTemplate.objects.filter(
+        paused=False,
+        next_due_date__lte=today,
+    ).values_list("pk", flat=True)
+    created_count = 0
+
+    for template_id in due_template_ids:
+        with transaction.atomic():
+            try:
+                template = (
+                    RecurringExpenseTemplate.objects.select_for_update()
+                    .select_related("farm", "farm__owner", "category")
+                    .get(pk=template_id)
+                )
+            except RecurringExpenseTemplate.DoesNotExist:
+                continue
+            if template.paused or template.next_due_date > timezone.localdate():
+                continue
+
+            occurrence_date = template.next_due_date
+            message = (
+                f"Recurring expense template {template.id} "
+                f"({template.category.name}, {template.amount}) for farm "
+                f"{template.farm.name} ({template.farm_id}) is due on "
+                f"{occurrence_date}."
+            )
+            _, created = Notification.objects.get_or_create(
+                recurring_expense_template=template,
+                occurrence_date=occurrence_date,
+                defaults={
+                    "user": template.farm.owner,
+                    "farm": template.farm,
+                    "type": NotificationType.INFO,
+                    "message": message,
+                },
+            )
+            if created:
+                template.next_due_date = advance_recurring_expense_date(
+                    occurrence_date, template.frequency
+                )
+                template.save(update_fields=["next_due_date", "updated_at"])
+                created_count += 1
+
+    return created_count
 
 
 def _create_overdue_activity_notification(activity):

@@ -560,6 +560,64 @@ class Expense(TimestampedModel):
         super().save(*args, **kwargs)
 
 
+class RecurringExpenseFrequency(models.TextChoices):
+    DAILY = "daily", "daily"
+    WEEKLY = "weekly", "weekly"
+    MONTHLY = "monthly", "monthly"
+    YEARLY = "yearly", "yearly"
+
+
+class RecurringExpenseTemplate(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm,
+        on_delete=models.CASCADE,
+        related_name="recurring_expense_templates",
+    )
+    category = models.ForeignKey(
+        ExpenseCategoryRecord,
+        on_delete=models.PROTECT,
+        related_name="recurring_expense_templates",
+    )
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        validators=[MinValueValidator(0.0001)],
+    )
+    frequency = models.CharField(
+        max_length=10,
+        choices=RecurringExpenseFrequency.choices,
+    )
+    next_due_date = models.DateField()
+    paused = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["next_due_date", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="recurring_expense_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    frequency__in=RecurringExpenseFrequency.values
+                ),
+                name="recurring_expense_frequency_valid",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.category_id
+            and self.farm_id
+            and self.category.farm_id != self.farm_id
+        ):
+            raise ValidationError(
+                {"category": "The category must belong to this farm."}
+            )
+
+
 class Budget(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
@@ -786,6 +844,21 @@ class Notification(TimestampedModel):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="notifications"
     )
+    farm = models.ForeignKey(
+        Farm,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="notifications",
+    )
+    recurring_expense_template = models.ForeignKey(
+        RecurringExpenseTemplate,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="notifications",
+    )
+    occurrence_date = models.DateField(null=True, blank=True)
     type = models.CharField(
         max_length=20,
         choices=NotificationType.choices,
@@ -801,6 +874,16 @@ class Notification(TimestampedModel):
                 fields=["user", "read", "-created_at"],
                 name="notif_user_read_created_idx",
             )
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recurring_expense_template", "occurrence_date"],
+                condition=models.Q(
+                    recurring_expense_template__isnull=False,
+                    occurrence_date__isnull=False,
+                ),
+                name="uniq_recurring_expense_reminder",
+            ),
         ]
 
     def __str__(self):
