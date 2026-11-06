@@ -54,6 +54,16 @@ def _cost(data, *, amount="75.00", category=ExpenseCategory.INPUTS):
     )
 
 
+def _shared_overhead(data, *, amount="40.00"):
+    return Expense.objects.create(
+        farm=data["farm"],
+        category=ExpenseCategory.OVERHEAD,
+        amount=amount,
+        date="2026-03-15",
+        status=ExpenseStatus.POSTED,
+    )
+
+
 def _sale(data, *, revenue="300.00"):
     customer = Customer.objects.create(farm=data["farm"], name="Buyer")
     harvest = Harvest.objects.create(
@@ -200,6 +210,30 @@ def test_field_profitability_success_and_missing_cost_records(farm_cycle):
         farm_cycle["cycle"].id
     )
     json.dumps(result)
+
+
+@pytest.mark.parametrize("has_direct_cost", [False, True])
+@pytest.mark.parametrize("tool", ["cycle_costs", "field_profitability"])
+def test_unallocated_shared_overhead_refuses_partial_results(
+    farm_cycle, has_direct_cost, tool
+):
+    if has_direct_cost:
+        _cost(farm_cycle)
+    _shared_overhead(farm_cycle)
+
+    if tool == "cycle_costs":
+        result = crop_cycle_costs(
+            farm_cycle["owner"], farm_cycle["cycle"].id, **_period()
+        )
+    else:
+        result = field_profitability(
+            farm_cycle["owner"], farm_cycle["field"].id, **_period()
+        )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "calculation_error"
+    assert "no allocation rule" in result["error"]["message"].lower()
+    assert "data" not in result
 
 
 def test_inventory_position_success_and_missing_records(farm_cycle):

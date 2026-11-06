@@ -226,7 +226,9 @@ def _cost_inputs(farm, cycles, start, end):
                 "Multiple allocation rules apply to a shared expense."
             )
         if not applicable:
-            continue
+            raise ValueError(
+                "No allocation rule applies to a shared expense."
+            )
         targets = [
             cycle
             for cycle in all_cycles
@@ -234,7 +236,9 @@ def _cost_inputs(farm, cycles, start, end):
             and (cycle.end_date is None or cycle.end_date >= expense.date)
         ]
         if not targets:
-            continue
+            raise ValueError(
+                "No crop cycles are eligible for a shared expense."
+            )
         try:
             shares = allocate_shared_cost(
                 expense.amount,
