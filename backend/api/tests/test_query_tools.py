@@ -212,6 +212,29 @@ def test_field_profitability_success_and_missing_cost_records(farm_cycle):
     json.dumps(result)
 
 
+def test_field_profitability_requires_sales_evidence_but_accepts_recorded_zero(
+    farm_cycle,
+):
+    _cost(farm_cycle)
+
+    missing = field_profitability(
+        farm_cycle["owner"], farm_cycle["field"].id, **_period()
+    )
+
+    assert missing["status"] == "missing_data"
+    assert "no sale records" in missing["error"]["message"].lower()
+    assert "data" not in missing
+
+    _sale(farm_cycle, revenue="0.00")
+    recorded_zero = field_profitability(
+        farm_cycle["owner"], farm_cycle["field"].id, **_period()
+    )
+
+    assert recorded_zero["status"] == "ok"
+    assert recorded_zero["data"]["revenue"] == 0.0
+    assert recorded_zero["data"]["directCosts"] == 75.0
+
+
 @pytest.mark.parametrize("has_direct_cost", [False, True])
 @pytest.mark.parametrize("tool", ["cycle_costs", "field_profitability"])
 def test_unallocated_shared_overhead_refuses_partial_results(

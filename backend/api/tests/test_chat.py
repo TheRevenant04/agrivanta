@@ -102,7 +102,9 @@ def test_chat_streams_multi_tool_answer_with_exact_evidence(
     period = {"start_date": "2026-03-01", "end_date": "2026-03-31"}
     expected_costs = crop_cycle_costs(user, cycle_model.id, **period)
     expected_profitability = field_profitability(user, field_model.id, **period)
-    answer = "Actual recorded costs are 75 and actual revenue is 300."
+    answer = (
+        "Actual recorded costs and revenue are available in the evidence."
+    )
     fake = _fake_client(
         {
             "tool_calls": [
@@ -136,16 +138,7 @@ def test_chat_streams_multi_tool_answer_with_exact_evidence(
     final = events[-1]
     assert final["answer"] == answer
     assert "actual" in final["answer"].lower()
-    answer_figures = {
-        float(value)
-        for value in re.findall(
-            r"(?<![\w.])[-+]?\d+(?:\.\d+)?", final["answer"]
-        )
-    }
-    assert answer_figures == {75.0, 300.0}
-    assert answer_figures <= {
-        figure["value"] for figure in final["evidence"]["figures"]
-    }
+    assert not re.search(r"\d", final["answer"])
     evidence = final["evidence"]
     results = {item["tool"]: item["result"] for item in evidence["toolResults"]}
     assert results == {
@@ -221,6 +214,41 @@ def test_chat_missing_data_returns_explicit_limitation_without_figures(
         final["evidence"]["toolResults"][0]["result"]["status"]
         == "missing_data"
     )
+    assert fake.stream_messages == []
+
+
+def test_chat_missing_sales_returns_explicit_limitation(
+    client, cycle, monkeypatch
+):
+    user, _, cycle_model = _create_cycle_data(cycle)
+    Sale.objects.filter(farm=user.farm).delete()
+    fake = _fake_client(
+        {
+            "tool_calls": [
+                {
+                    "name": "field_profitability",
+                    "arguments": {
+                        "field_id": str(cycle_model.field_id),
+                    },
+                }
+            ]
+        },
+        "This should not be used.",
+    )
+    monkeypatch.setattr("api.chat.get_llm_client", lambda: fake)
+
+    response = client.post(
+        CHAT,
+        {"question": "What is the profitability for this field?"},
+        format="json",
+    )
+    final = _stream_events(response)[-1]
+
+    assert final["evidence"]["toolResults"][0]["result"]["status"] == (
+        "missing_data"
+    )
+    assert "no sale records" in final["answer"].lower()
+    assert final["evidence"]["figures"] == []
     assert fake.stream_messages == []
 
 
@@ -310,32 +338,43 @@ def test_chat_invalid_inputs_are_named_instead_of_guessed(
     assert fake.stream_messages == []
 
 
-def test_chat_rejects_numeric_claims_outside_tool_evidence(
-    client, cycle, monkeypatch
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Actual revenue is 75 and actual costs are 300.",
+        "Actual revenue is three hundred and costs are seventy-five.",
+        "The actuals are 300kg and 75%.",
+        "Estimated revenue is 300 and assumed costs are 75.",
+    ],
+)
+def test_chat_rejects_numeric_or_speculative_claims(
+    client, cycle, monkeypatch, answer
 ):
-    user, _, cycle_model = _create_cycle_data(cycle)
+    user, data, cycle_model = _create_cycle_data(cycle)
+    field_model = user.farm.fields.get(pk=data["field"]["id"])
     fake = _fake_client(
         {
             "tool_calls": [
                 {
-                    "name": "crop_cycle_costs",
-                    "arguments": {"crop_cycle_id": str(cycle_model.id)},
+                    "name": "field_profitability",
+                    "arguments": {"field_id": str(field_model.id)},
                 }
             ]
         },
-        "Actual recorded costs are 75 and 999.",
+        answer,
     )
     monkeypatch.setattr("api.chat.get_llm_client", lambda: fake)
 
     response = client.post(
         CHAT,
-        {"question": "What were the actual costs?"},
+        {"question": "What are the actual costs and revenue?"},
         format="json",
     )
     final = _stream_events(response)[-1]
 
-    assert "not supported" in final["answer"].lower()
-    assert "999" not in final["answer"]
+    assert final["answer"] != answer
+    assert "can't include numeric claims" in final["answer"].lower()
+    assert not re.search(r"\d", final["answer"])
     assert final["evidence"]["figures"]
     assert fake.stream_messages
 

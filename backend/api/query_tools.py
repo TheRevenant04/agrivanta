@@ -262,6 +262,7 @@ def _cost_inputs(farm, cycles, start, end):
 def _cycle_figures(farm, cycles, start, end):
     direct, overheads, recorded = _cost_inputs(farm, cycles, start, end)
     revenue_by_cycle = {cycle.id: Decimal(0) for cycle in cycles}
+    revenue_recorded = {cycle.id: False for cycle in cycles}
     sales = _date_filter(
         Sale.objects.filter(
             farm=farm,
@@ -272,6 +273,7 @@ def _cycle_figures(farm, cycles, start, end):
     )
     for cycle_id, revenue in sales.values_list("harvest__cycle_id", "revenue"):
         revenue_by_cycle[cycle_id] += revenue
+        revenue_recorded[cycle_id] = True
 
     figures = {}
     for cycle in cycles:
@@ -285,7 +287,7 @@ def _cycle_figures(farm, cycles, start, end):
             )
         except ProfitabilityError as exc:
             raise ValueError(str(exc)) from exc
-    return figures, recorded
+    return figures, recorded, revenue_recorded
 
 
 def _figures_payload(figures):
@@ -334,7 +336,7 @@ def crop_cycle_costs(
         return _error("not_found", "That crop cycle does not exist.")
     evidence = _evidence(period, cycles=[cycle], farm=farm)
     try:
-        figures, recorded = _cycle_figures(farm, [cycle], start, end)
+        figures, recorded, _ = _cycle_figures(farm, [cycle], start, end)
     except ValueError as exc:
         return _error("calculation_error", str(exc), evidence)
     if not recorded[cycle.id]:
@@ -387,14 +389,22 @@ def field_profitability(
             evidence,
         )
     try:
-        figures, recorded = _cycle_figures(farm, cycles, start, end)
+        figures, cost_recorded, revenue_recorded = _cycle_figures(
+            farm, cycles, start, end
+        )
     except ValueError as exc:
         return _error("calculation_error", str(exc), evidence)
-    if not all(recorded[cycle.id] for cycle in cycles):
-        return _missing(
-            "One or more crop cycles have no posted cost records for this period.",
-            evidence,
+    missing_records = []
+    if not all(cost_recorded[cycle.id] for cycle in cycles):
+        missing_records.append(
+            "One or more crop cycles have no posted cost records for this period"
         )
+    if not all(revenue_recorded[cycle.id] for cycle in cycles):
+        missing_records.append(
+            "One or more crop cycles have no sale records for this period"
+        )
+    if missing_records:
+        return _missing("; ".join(missing_records) + ".", evidence)
 
     cycle_data = []
     totals = {

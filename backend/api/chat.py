@@ -5,7 +5,6 @@ import re
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from api.models import Farm, Role
@@ -500,12 +499,13 @@ def prepare_chat(user: Any, question: str) -> ChatExecution:
                 "Answer the farm question using only the supplied read-only "
                 "query results. Do not introduce figures, periods, crop "
                 "cycles, or claims absent from those results. Keep the answer "
-                "concise. Label each reported recorded figure as an Actual. "
-                "Do not provide estimates or assumptions; if a requested "
-                "value is unavailable, state that it is missing. Do not "
-                "repeat record IDs or dates. Exact figures, periods, crop "
-                "cycles, and calculation basis are also provided separately "
-                "in the final evidence event."
+                "concise and qualitative: do not include digits or number "
+                "words. Label recorded observations as Actuals. Do not "
+                "provide estimates or assumptions; if a requested value is "
+                "unavailable, state that it is missing. Do not repeat record "
+                "IDs or dates. Exact figures, periods, crop cycles, and "
+                "calculation basis are provided separately in the final "
+                "evidence event."
             ),
         ),
         LLMMessage(role="user", content=question),
@@ -522,36 +522,35 @@ def _ndjson(event: dict[str, Any]) -> bytes:
 
 
 _NUMBER_PATTERN = re.compile(
-    r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?(?!\w)"
+    r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?"
+)
+_NUMBER_WORD_PATTERN = re.compile(
+    r"\b(?:"
+    r"zero|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|"
+    r"eighty|ninety|hundred|thousand|million|billion|trillion|"
+    r"first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|"
+    r"tenth|dozen|score|couple|few|several|many|half|quarter|"
+    r"twice|thrice|single|double|triple|pair|pairs|handful|numerous"
+    r")\b",
+    re.IGNORECASE,
+)
+_UNSUPPORTED_BASIS_PATTERN = re.compile(
+    r"\b(?:estim\w*|assum\w*|project\w*|forecast\w*|hypothetical\w*)\b",
+    re.IGNORECASE,
 )
 
 
-def _answer_is_evidence_grounded(answer: str, evidence: dict[str, Any]) -> bool:
-    figures = evidence.get("figures", [])
-    supported = set()
-    for figure in figures:
-        try:
-            supported.add(Decimal(str(figure["value"])))
-        except (KeyError, InvalidOperation, TypeError, ValueError):
-            continue
-
-    sentences = re.split(r"(?<=[.!?;])\s+|\n+", answer)
-    for sentence in sentences:
-        claims = _NUMBER_PATTERN.findall(sentence)
-        if not claims:
-            continue
-        if not re.search(r"\bactuals?\b", sentence, re.IGNORECASE):
-            return False
-        if re.search(r"\b(?:estimates?|assumptions?)\b", sentence, re.IGNORECASE):
-            return False
-        for claim in claims:
-            normalized = claim.rstrip("%").replace(",", "")
-            try:
-                if Decimal(normalized) not in supported:
-                    return False
-            except InvalidOperation:
-                return False
-    return True
+def _answer_is_qualitative_only(answer: str) -> bool:
+    return not any(
+        pattern.search(answer)
+        for pattern in (
+            _NUMBER_PATTERN,
+            _NUMBER_WORD_PATTERN,
+            _UNSUPPORTED_BASIS_PATTERN,
+        )
+    )
 
 
 def stream_chat(execution: ChatExecution) -> Iterator[bytes]:
@@ -584,15 +583,14 @@ def stream_chat(execution: ChatExecution) -> Iterator[bytes]:
                     )
                 completed = True
                 answer = event.response.text
-                if _answer_is_evidence_grounded(answer, execution.evidence):
+                if _answer_is_qualitative_only(answer):
                     for text in pending_tokens:
                         yield _ndjson({"type": "token", "text": text})
                 else:
                     answer = (
-                        "I can't provide the generated answer because it "
-                        "contained a numeric claim that is not supported by "
-                        "the farm query results. No estimates or assumptions "
-                        "are reported."
+                        "I can't include numeric claims in generated prose; "
+                        "recorded figures are provided separately in the "
+                        "evidence. No estimates or assumptions are reported."
                     )
                     yield _ndjson({"type": "token", "text": answer})
                 yield _ndjson(
