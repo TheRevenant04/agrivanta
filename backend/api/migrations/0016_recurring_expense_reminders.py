@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0014_expense_categories_and_links'),
+        ('api', '0015_expense_categories_and_links'),
     ]
 
     operations = [
