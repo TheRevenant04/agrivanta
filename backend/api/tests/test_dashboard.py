@@ -218,6 +218,7 @@ def test_dashboard_aggregates_cycle_costs_sales_units_activities_and_stock(
         item=low_equal,
         type="purchase",
         quantity=Decimal("5"),
+        date=date(2026, 10, 1),
     )
     InventoryItem.objects.create(
         farm=farm,
@@ -236,6 +237,7 @@ def test_dashboard_aggregates_cycle_costs_sales_units_activities_and_stock(
         item=above_reorder,
         type="purchase",
         quantity=Decimal("6"),
+        date=date(2026, 10, 1),
     )
 
     response = client.get(DASHBOARD)
@@ -337,12 +339,12 @@ def test_date_range_and_reporting_period_narrow_dashboard(
     assert current_response.data["lowStockItemCount"] == 0
 
 
-def test_historical_low_stock_requires_dated_movements(client, setup):
+def test_historical_low_stock_uses_required_movement_dates(client, setup):
     data = setup()
     farm = Farm.objects.get(owner__email="owner@agrivanta.test")
     item = InventoryItem.objects.create(
         farm=farm,
-        name="Undated movement",
+        name="Dated movement",
         unit_id=data["unit"]["id"],
         reorder_level=Decimal("5"),
     )
@@ -350,7 +352,15 @@ def test_historical_low_stock_requires_dated_movements(client, setup):
         farm=farm,
         item=item,
         type="purchase",
+        quantity=Decimal("4"),
+        date=date(2026, 10, 15),
+    )
+    StockMovement.objects.create(
+        farm=farm,
+        item=item,
+        type="purchase",
         quantity=Decimal("10"),
+        date=date(2026, 11, 1),
     )
 
     response = client.get(
@@ -358,9 +368,8 @@ def test_historical_low_stock_requires_dated_movements(client, setup):
         {"startDate": "2026-10-01", "endDate": "2026-10-31"},
     )
 
-    assert response.status_code == 400
-    assert response.data["field"] == "stockMovements"
-    assert "no date" in response.data["detail"]
+    assert response.status_code == 200, response.data
+    assert response.data["lowStockItemCount"] == 1
 
 
 def test_dashboard_is_farm_scoped(client, setup, fixed_today):

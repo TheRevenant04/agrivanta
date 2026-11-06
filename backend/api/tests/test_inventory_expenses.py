@@ -43,7 +43,12 @@ def test_stock_movements_track_current_quantity(client, setup):
 
     adjustment = client.post(
         f"/api/inventory-items/{item['id']}/movements",
-        {"itemId": item["id"], "type": "adjustment", "quantity": "-2"},
+        {
+            "itemId": item["id"],
+            "type": "adjustment",
+            "quantity": "-2",
+            "date": "2026-03-04",
+        },
         format="json",
     )
     assert adjustment.status_code == 201
@@ -70,7 +75,12 @@ def test_usage_cannot_drive_stock_negative(client, setup):
 
     response = client.post(
         f"/api/inventory-items/{item['id']}/movements",
-        {"itemId": item["id"], "type": "usage", "quantity": "1"},
+        {
+            "itemId": item["id"],
+            "type": "usage",
+            "quantity": "1",
+            "date": "2026-03-01",
+        },
         format="json",
     )
     assert response.status_code == 400
