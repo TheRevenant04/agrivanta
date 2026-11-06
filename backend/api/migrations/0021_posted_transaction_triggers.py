@@ -176,7 +176,7 @@ def drop_triggers(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0018_posted_transaction_immutability"),
+        ("api", "0020_posted_transaction_immutability"),
     ]
 
     operations = [migrations.RunPython(create_triggers, drop_triggers)]

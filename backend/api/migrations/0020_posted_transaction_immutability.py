@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0017_equipment_equipmentusage'),
+        ('api', '0019_merge_supplier_and_recurring_expense'),
     ]
 
     operations = [
