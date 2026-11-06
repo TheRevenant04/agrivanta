@@ -229,6 +229,43 @@ def test_reference_optional_and_duplicable(client):
     assert first.data["id"] != second.data["id"]
 
 
+@pytest.mark.parametrize("method", ["post", "put", "patch"])
+@pytest.mark.parametrize("reference_length", [255, 256])
+def test_reference_length_is_validated_on_create_and_update(
+    client, method, reference_length
+):
+    reference = "R" * reference_length
+    if method == "post":
+        response = post(client, reference=reference)
+        payment_id = response.data.get("id")
+    else:
+        created = post(client)
+        payment_id = created.data["id"]
+        data = (
+            {"reference": reference}
+            if method == "patch"
+            else payload(reference=reference)
+        )
+        response = getattr(client, method)(
+            f"{PAYMENTS}/{payment_id}", data, format="json"
+        )
+
+    if reference_length > 255:
+        expected_status = 400
+    elif method == "post":
+        expected_status = 201
+    else:
+        expected_status = 200
+    assert response.status_code == expected_status
+    if expected_status != 400:
+        assert response.data["reference"] == reference
+        assert Payment.objects.get(pk=payment_id).reference == reference
+    else:
+        assert response.data["field"] == "reference"
+        if method != "post":
+            assert Payment.objects.get(pk=payment_id).reference is None
+
+
 def test_identical_submissions_create_distinct_records(client):
     first = post(client)
     second = post(client)

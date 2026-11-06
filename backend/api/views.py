@@ -3182,13 +3182,22 @@ def validate_payment(data, farm):
             "linkedExpenseId",
         )
 
+    reference = optional_text(data, "reference")
+    reference_max_length = Payment._meta.get_field("reference").max_length
+    if len(reference) > reference_max_length:
+        raise ApiError(
+            f"Reference must be {reference_max_length} characters or fewer.",
+            status.HTTP_400_BAD_REQUEST,
+            "reference",
+        )
+
     return {
         "type": payment_type,
         "amount": amount,
         "date": payment_date,
         "linked_expense": linked_expense,
         "linked_sale": linked_sale,
-        "reference": optional_text(data, "reference") or None,
+        "reference": reference or None,
     }
 
 class HarvestCycleListView(APIView):
