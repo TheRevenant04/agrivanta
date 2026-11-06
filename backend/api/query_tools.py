@@ -241,7 +241,7 @@ def _cost_inputs(farm, cycles, start, end):
             )
         try:
             shares = allocate_shared_cost(
-                expense.amount,
+                abs(expense.amount),
                 [
                     {"id": cycle.id, "area": cycle.field.area}
                     for cycle in targets
@@ -250,9 +250,10 @@ def _cost_inputs(farm, cycles, start, end):
             )
         except AllocationError as exc:
             raise ValueError(f"Cannot allocate shared cost: {exc}") from exc
+        sign = -1 if expense.amount < 0 else 1
         for share in shares:
             if share["id"] in cycle_ids:
-                overheads[share["id"]].append(share["amount"])
+                overheads[share["id"]].append(sign * share["amount"])
                 recorded[share["id"]] = True
 
     return direct, overheads, recorded

@@ -685,6 +685,80 @@ def seed_default_expense_categories(sender, instance, created, **kwargs):
         ensure_default_expense_categories(instance)
 
 
+class ImmutableTransactionError(Exception):
+    """Raised when a posted transaction or reversal would be changed."""
+
+
+def protect_posted_set_null(collector, field, sub_objs, using):
+    """SET_NULL for drafts; posted records keep their links intact."""
+    if sub_objs.filter(
+        models.Q(status=ExpenseStatus.POSTED)
+        | models.Q(reversal_of__isnull=False)
+    ).exists():
+        raise models.ProtectedError(
+            "Posted expenses cannot be unlinked.", sub_objs
+        )
+    models.SET_NULL(collector, field, sub_objs, using)
+
+
+class ExpenseQuerySet(models.QuerySet):
+    def _locked(self):
+        return self.filter(
+            models.Q(status=ExpenseStatus.POSTED)
+            | models.Q(reversal_of__isnull=False)
+        )
+
+    def update(self, **kwargs):
+        if self._locked().exists():
+            raise ImmutableTransactionError(
+                "Posted expenses and reversals cannot be updated."
+            )
+        return super().update(**kwargs)
+
+    def delete(self):
+        if self._locked().exists():
+            raise ImmutableTransactionError(
+                "Posted expenses and reversals cannot be deleted."
+            )
+        return super().delete()
+
+    def mark_reversed(self, when):
+        """Reversal-only write: stamp ``reversed_at`` on an original."""
+        return self.filter(
+            status=ExpenseStatus.POSTED,
+            reversal_of__isnull=True,
+            reversed_at__isnull=True,
+        )._unguarded_update(reversed_at=when)
+
+    def _unguarded_update(self, **kwargs):
+        return super().update(**kwargs)
+
+
+class PaymentQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if self.exists():
+            raise ImmutableTransactionError(
+                "Payments cannot be updated once recorded."
+            )
+        return super().update(**kwargs)
+
+    def delete(self):
+        if self.exists():
+            raise ImmutableTransactionError(
+                "Payments cannot be deleted once recorded."
+            )
+        return super().delete()
+
+    def mark_reversed(self, when):
+        """Reversal-only write: stamp ``reversed_at`` on an original."""
+        return self.filter(
+            reversal_of__isnull=True, reversed_at__isnull=True
+        )._unguarded_update(reversed_at=when)
+
+    def _unguarded_update(self, **kwargs):
+        return super().update(**kwargs)
+
+
 class Expense(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
@@ -694,7 +768,7 @@ class Expense(TimestampedModel):
         CropCycle,
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=protect_posted_set_null,
         related_name="expenses",
     )
     category = models.CharField(max_length=255)
@@ -712,7 +786,7 @@ class Expense(TimestampedModel):
         Supplier,
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=protect_posted_set_null,
         related_name="expenses",
     )
     attachment_reference = models.CharField(
@@ -724,11 +798,68 @@ class Expense(TimestampedModel):
         default=ExpenseStatus.DRAFT,
     )
     notes = models.TextField(blank=True, null=True)
+    reversal_of = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.PROTECT,
+        related_name="reversal",
+    )
+    reversed_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    objects = ExpenseQuerySet.as_manager()
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reversal_of__isnull=True)
+                    | models.Q(
+                        status=ExpenseStatus.POSTED,
+                        reversed_at__isnull=True,
+                    )
+                ),
+                name="expense_reversal_is_posted_and_final",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reversed_at__isnull=True)
+                    | models.Q(status=ExpenseStatus.POSTED)
+                ),
+                name="expense_reversed_requires_posted",
+            ),
+        ]
+
+    @property
+    def is_reversal(self):
+        return self.reversal_of_id is not None
+
+    def _is_locked_in_database(self):
+        return (
+            not self._state.adding
+            and type(self)
+            ._base_manager.filter(pk=self.pk)
+            .filter(
+                models.Q(status=ExpenseStatus.POSTED)
+                | models.Q(reversal_of__isnull=False)
+            )
+            .exists()
+        )
+
+    def delete(self, *args, **kwargs):
+        if self._is_locked_in_database():
+            raise ImmutableTransactionError(
+                "Posted expenses and reversals cannot be deleted."
+            )
+        return super().delete(*args, **kwargs)
 
     def save(self, *args, **kwargs):
+        if self._is_locked_in_database():
+            raise ImmutableTransactionError(
+                "Posted expenses and reversals cannot be updated."
+            )
         if self.category_record_id is None and self.category:
             ensure_default_expense_categories(self.farm)
             self.category_record = ExpenseCategoryRecord.objects.filter(
@@ -898,22 +1029,58 @@ class Payment(TimestampedModel):
     date = models.DateField()
     linked_expense = models.ForeignKey(
         Expense,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="payments",
         null=True,
         blank=True,
     )
     linked_sale = models.ForeignKey(
         Sale,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="payments",
         null=True,
         blank=True,
     )
     reference = models.CharField(max_length=255, blank=True, null=True)
+    reversal_of = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.PROTECT,
+        related_name="reversal",
+    )
+    reversed_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    objects = PaymentQuerySet.as_manager()
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reversal_of__isnull=True)
+                    | models.Q(reversed_at__isnull=True)
+                ),
+                name="payment_reversal_is_final",
+            ),
+        ]
+
+    @property
+    def is_reversal(self):
+        return self.reversal_of_id is not None
+
+    def delete(self, *args, **kwargs):
+        raise ImmutableTransactionError(
+            "Payments cannot be deleted once recorded."
+        )
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ImmutableTransactionError(
+                "Payments cannot be updated once recorded."
+            )
+        super().save(*args, **kwargs)
 
 
 class ImportPreview(models.Model):

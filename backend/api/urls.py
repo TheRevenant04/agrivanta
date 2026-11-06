@@ -111,6 +111,10 @@ urlpatterns = [
         views.ExpensePostView.as_view(),
     ),
     path(
+        "expenses/<str:expense_id>/reverse",
+        views.ExpenseReverseView.as_view(),
+    ),
+    path(
         "expenses/<str:expense_id>/attachments",
         views.ExpenseAttachmentView.as_view(),
     ),
@@ -137,6 +141,10 @@ urlpatterns = [
     path(
         "payments/<str:payment_id>",
         views.PaymentDetailView.as_view(),
+    ),
+    path(
+        "payments/<str:payment_id>/reverse",
+        views.PaymentReverseView.as_view(),
     ),
     path("budgets", views.BudgetListView.as_view()),
     path("budgets/<str:budget_id>", views.BudgetDetailView.as_view()),
