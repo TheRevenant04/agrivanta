@@ -20,7 +20,6 @@ from .models import (
     InventoryItem,
     ReportingPeriod,
     Sale,
-    StockMovement,
 )
 from .reporting import report_crop_cycle
 from .serializers import as_number
@@ -302,21 +301,12 @@ def _activity_counts(farm, cycles, start_date, end_date, today):
 
 
 def _low_stock_count(farm, as_of_date=None):
-    if as_of_date is not None and StockMovement.objects.filter(
-        farm=farm,
-        date__isnull=True,
-    ).exists():
-        raise ApiError(
-            "Cannot calculate historical low-stock count because a stock "
-            "movement has no date.",
-            status.HTTP_400_BAD_REQUEST,
-            "stockMovements",
-        )
     items = InventoryItem.objects.filter(farm=farm).prefetch_related(
         "movements"
     )
     return sum(
-        item.current_quantity(as_of_date) <= item.reorder_level
+        item.reorder_level is not None
+        and item.current_quantity(as_of_date) <= item.reorder_level
         for item in items
     )
 
