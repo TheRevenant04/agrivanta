@@ -151,6 +151,8 @@ def test_expense_with_supplier_attachment_and_posted_status(client):
         ({"amount": "0"}, "amount"),
         ({"amount": "-5"}, "amount"),
         ({"status": "pending"}, "status"),
+        ({"status": ""}, "status"),
+        ({"status": "  "}, "status"),
     ],
 )
 def test_invalid_expense_input_rejected(client, overrides, field):

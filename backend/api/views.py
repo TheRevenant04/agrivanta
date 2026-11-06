@@ -2487,8 +2487,9 @@ class ExpenseListView(APIView):
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, "date"
             )
+        raw_status = data.get("status")
         expense_status = str(
-            data.get("status") or default_status
+            default_status if raw_status is None else raw_status
         ).strip()
         if expense_status not in ExpenseStatus.values:
             raise ApiError(
