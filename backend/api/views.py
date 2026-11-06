@@ -2516,6 +2516,19 @@ class ExpenseListView(APIView):
                 "supplierId",
             )
             supplier_text = None
+        attachment_reference = optional_text(
+            data, "attachmentReference"
+        )
+        attachment_max_length = Expense._meta.get_field(
+            "attachment_reference"
+        ).max_length
+        if len(attachment_reference) > attachment_max_length:
+            raise ApiError(
+                "Attachment reference must be "
+                f"{attachment_max_length} characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "attachmentReference",
+            )
         cycle = None
         cycle_id = data.get("cycleId")
         if cycle_id not in (None, ""):
@@ -2534,10 +2547,7 @@ class ExpenseListView(APIView):
             "date": expense_date,
             "supplier": supplier_text or None,
             "supplier_record": supplier_record,
-            "attachment_reference": optional_text(
-                data, "attachmentReference"
-            )
-            or "",
+            "attachment_reference": attachment_reference or "",
             "status": expense_status,
             "cycle": cycle,
         }
