@@ -40,7 +40,9 @@ from .models import (
     Customer,
     Expense,
     ExpenseCategory,
+    ExpenseCategoryRecord,
     ExpenseStatus,
+    ensure_default_expense_categories,
     Farm,
     Field,
     Harvest,
@@ -53,6 +55,7 @@ from .models import (
     Role,
     Sale,
     Season,
+    Supplier,
     StockMovement,
     Unit,
     UnitConversion,
@@ -75,6 +78,7 @@ from .serializers import (
     serialize_cycle_ref,
     serialize_customer,
     serialize_expense,
+    serialize_expense_category,
     serialize_farm,
     serialize_field,
     serialize_harvest,
@@ -2360,44 +2364,100 @@ class StockMovementListView(APIView):
         )
 
 
+class ExpenseCategoryListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        ensure_default_expense_categories(farm)
+        return Response(
+            [
+                serialize_expense_category(category)
+                for category in farm.expense_categories.all()
+            ]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        ensure_default_expense_categories(farm)
+        name = require_text(
+            request.data, "name", "Category name is required."
+        )
+        if farm.expense_categories.filter(name__iexact=name).exists():
+            raise ApiError(
+                "A category with that name already exists.",
+                status.HTTP_400_BAD_REQUEST,
+                "name",
+            )
+        category = ExpenseCategoryRecord.objects.create(
+            farm=farm, name=name
+        )
+        return Response(
+            serialize_expense_category(category),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ExpenseCategoryDetailView(APIView):
+    def get(self, request, category_id):
+        farm = get_farm(request.user)
+        ensure_default_expense_categories(farm)
+        category = scoped_get(
+            ExpenseCategoryRecord,
+            farm,
+            category_id,
+            "That expense category no longer exists.",
+        )
+        return Response(serialize_expense_category(category))
+
+
 class ExpenseListView(APIView):
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
             [
                 serialize_expense(expense)
-                for expense in farm.expenses.prefetch_related(
-                    "attachments"
-                )
+                for expense in farm.expenses.select_related(
+                    "category_record", "supplier_record"
+                ).prefetch_related("attachments")
             ]
         )
 
     def post(self, request):
         farm = get_farm(request.user)
         values = self._validate(request.data, farm)
-        expense = Expense.objects.create(
-            farm=farm,
-            cycle=values["cycle"],
-            category=values["category"],
-            amount=values["amount"],
-            date=values["date"],
-            supplier=values["supplier"],
-            status=ExpenseStatus.DRAFT,
-        )
+        expense = Expense.objects.create(farm=farm, **values)
         return Response(
             serialize_expense(expense),
             status=status.HTTP_201_CREATED,
         )
 
     @staticmethod
-    def _validate(data, farm):
-        category = str(data.get("category") or "").strip()
-        if category not in ExpenseCategory.values:
+    def _validate(data, farm, default_status=ExpenseStatus.DRAFT):
+        ensure_default_expense_categories(farm)
+        category_id = data.get("categoryId")
+        category_name = str(data.get("category") or "").strip()
+        if category_id not in (None, ""):
+            category = scoped_get(
+                ExpenseCategoryRecord,
+                farm,
+                category_id,
+                "The selected expense category does not exist.",
+                "categoryId",
+            )
+        elif category_name:
+            category = farm.expense_categories.filter(
+                name__iexact=category_name
+            ).first()
+            if category is None:
+                raise ApiError(
+                    "The selected expense category does not exist.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "category",
+                )
+        else:
             raise ApiError(
-                "Category must be one of: inputs, labour, equipment, "
-                "overhead, other.",
+                "Category is required.",
                 status.HTTP_400_BAD_REQUEST,
-                "category",
+                "categoryId",
             )
         try:
             amount = parse_decimal(
@@ -2410,6 +2470,12 @@ class ExpenseListView(APIView):
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, "amount"
             )
+        if amount <= 0:
+            raise ApiError(
+                "Amount must be greater than zero.",
+                status.HTTP_400_BAD_REQUEST,
+                "amount",
+            )
         try:
             expense_date = parse_date(
                 data.get("date"),
@@ -2421,7 +2487,27 @@ class ExpenseListView(APIView):
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, "date"
             )
-        supplier = optional_text(data, "supplier")
+        expense_status = str(
+            data.get("status") or default_status
+        ).strip()
+        if expense_status not in ExpenseStatus.values:
+            raise ApiError(
+                "Status must be draft or posted.",
+                status.HTTP_400_BAD_REQUEST,
+                "status",
+            )
+        supplier_record = None
+        supplier_text = optional_text(data, "supplier")
+        supplier_id = data.get("supplierId")
+        if supplier_id not in (None, ""):
+            supplier_record = scoped_get(
+                Supplier,
+                farm,
+                supplier_id,
+                "The selected supplier does not exist.",
+                "supplierId",
+            )
+            supplier_text = None
         cycle = None
         cycle_id = data.get("cycleId")
         if cycle_id not in (None, ""):
@@ -2434,15 +2520,29 @@ class ExpenseListView(APIView):
                     "cycleId",
                 )
         return {
-            "category": category,
+            "category_record": category,
+            "category": category.name,
             "amount": amount,
             "date": expense_date,
-            "supplier": supplier or None,
+            "supplier": supplier_text or None,
+            "supplier_record": supplier_record,
+            "attachment_reference": optional_text(
+                data, "attachmentReference"
+            )
+            or "",
+            "status": expense_status,
             "cycle": cycle,
         }
 
 
 class ExpenseDetailView(APIView):
+    def get(self, request, expense_id):
+        farm = get_farm(request.user)
+        expense = scoped_get(
+            Expense, farm, expense_id, "That expense no longer exists."
+        )
+        return Response(serialize_expense(expense))
+
     def put(self, request, expense_id):
         farm = get_farm(request.user)
         expense = scoped_get(
@@ -2453,12 +2553,11 @@ class ExpenseDetailView(APIView):
                 "Cannot edit a posted expense.",
                 status.HTTP_400_BAD_REQUEST,
             )
-        values = ExpenseListView._validate(request.data, farm)
-        expense.category = values["category"]
-        expense.amount = values["amount"]
-        expense.date = values["date"]
-        expense.supplier = values["supplier"]
-        expense.cycle = values["cycle"]
+        values = ExpenseListView._validate(
+            request.data, farm, default_status=expense.status
+        )
+        for field, value in values.items():
+            setattr(expense, field, value)
         expense.save()
         return Response(serialize_expense(expense))
 
