@@ -42,25 +42,35 @@ from .models import (
     ExpenseCategory,
     ExpenseCategoryRecord,
     ExpenseStatus,
+    Equipment,
+    EquipmentUsage,
     ensure_default_expense_categories,
     Farm,
     Field,
     Harvest,
     InventoryItem,
+    LabourRecord,
     MovementType,
     Notification,
     Payment,
     PaymentType,
+    PlannedEquipment,
+    PlannedInput,
+    PlannedLabour,
+    RecurringExpenseFrequency,
+    RecurringExpenseTemplate,
     ReportingPeriod,
     Role,
     Sale,
     Season,
     Supplier,
     StockMovement,
+    Supplier,
     Unit,
     UnitConversion,
     User,
     Variety,
+    Worker,
 )
 from .serializers import (
     as_date,
@@ -78,21 +88,28 @@ from .serializers import (
     serialize_cycle_ref,
     serialize_customer,
     serialize_expense,
+    serialize_equipment,
+    serialize_equipment_usage,
     serialize_expense_category,
     serialize_farm,
     serialize_field,
     serialize_harvest,
     serialize_inventory_item,
+    serialize_labour_record,
     serialize_movement,
     serialize_notification,
     serialize_payment,
+    serialize_recurring_expense_template,
     serialize_reporting_period,
     serialize_sale,
     serialize_season,
+    serialize_supplier,
     serialize_unit,
     serialize_user,
     serialize_variety,
+    serialize_worker,
 )
+from .transactions import ReversalError, reverse_expense, reverse_payment
 from .unit_conversion import (
     ConversionRuleData,
     MissingConversionRuleError,
@@ -111,6 +128,18 @@ STANDARD_ACTIVITY_TEMPLATES = (
 )
 
 DEFAULT_CUSTOMER_NAMES = ["Greenfield Grain Co.", "Harbour Mill"]
+
+COUNTERPARTY_OPTIONAL_FIELDS = (
+    ("contactName", "contact_name"),
+    ("email", "email"),
+    ("phone", "phone"),
+    ("address", "address"),
+    ("notes", "notes"),
+)
+COUNTERPARTY_MAX_LENGTHS = {
+    api_field: Supplier._meta.get_field(model_field).max_length
+    for api_field, model_field in COUNTERPARTY_OPTIONAL_FIELDS
+}
 
 ACTIVITY_TRANSITIONS = {
     ActivityStatus.PLANNED: [ActivityStatus.IN_PROGRESS],
@@ -167,6 +196,17 @@ def optional_text(data, key):
     if value is None:
         return ""
     return str(value).strip()
+
+
+def validate_counterparty_length(value, api_field):
+    max_length = COUNTERPARTY_MAX_LENGTHS[api_field]
+    if max_length and len(value) > max_length:
+        raise ApiError(
+            f"Ensure this field has no more than {max_length} characters.",
+            status.HTTP_400_BAD_REQUEST,
+            api_field,
+        )
+    return value
 
 
 def get_farm(user):
@@ -1899,7 +1939,7 @@ class ActivityListView(APIView):
     def get(self, request):
         activities = activity_queryset_for(request).select_related(
             "cycle", "type"
-        ).prefetch_related("input_needs", "assignees")
+        ).prefetch_related("input_needs", "labour_records", "assignees")
         cycle_id = request.query_params.get("cycle")
         if cycle_id:
             try:
@@ -2184,6 +2224,594 @@ class ActivityResourceNeedsView(APIView):
         return Response(serialize_activity(activity))
 
 
+PLANNED_LINE_TYPES = {
+    "planned-inputs": (PlannedInput, "item", "itemId", "quantity"),
+    "planned-labour": (PlannedLabour, None, None, "hours"),
+    "planned-equipment": (PlannedEquipment, "equipment", "equipmentId", "hours"),
+}
+
+
+class PlannedLineView(APIView):
+    def _activity(self, request, activity_id, write=False):
+        if write:
+            require_activity_manager(request)
+        activity = get_visible_activity(request, activity_id)
+        if write:
+            ensure_activity_cycle_open(activity)
+        return activity
+
+    def _line(self, model, activity, line_id):
+        try:
+            return model.objects.get(activity=activity, pk=line_id)
+        except (model.DoesNotExist, ValueError, ValidationError):
+            raise ApiError("That planned line does not exist.", status.HTTP_404_NOT_FOUND)
+
+    def _serialize(self, line, reference, api_reference, amount):
+        data = {
+            "id": str(line.pk),
+            "activityId": str(line.activity_id),
+            amount: as_number(getattr(line, amount)),
+        }
+        if reference:
+            data[api_reference] = str(getattr(line, f"{reference}_id"))
+        return data
+
+    def get(self, request, activity_id, kind, line_id=None):
+        model, reference, api_reference, amount = PLANNED_LINE_TYPES[kind]
+        activity = self._activity(request, activity_id)
+        if line_id is not None:
+            line = self._line(model, activity, line_id)
+            return Response(self._serialize(line, reference, api_reference, amount))
+        return Response([
+            self._serialize(line, reference, api_reference, amount)
+            for line in model.objects.filter(activity=activity)
+        ])
+
+    def _save(self, request, activity_id, kind, line_id=None, partial=False):
+        model, reference, api_reference, amount = PLANNED_LINE_TYPES[kind]
+        activity = self._activity(request, activity_id, write=True)
+        line = (
+            self._line(model, activity, line_id)
+            if line_id is not None else model(activity=activity)
+        )
+        data = request.data
+        if not isinstance(data, dict):
+            raise ApiError("Expected an object.", status.HTTP_400_BAD_REQUEST)
+        if reference and (not partial or api_reference in data):
+            reference_model = InventoryItem if reference == "item" else Equipment
+            value = data.get(api_reference)
+            if value is not None and not isinstance(value, str):
+                raise ApiError("Invalid reference.", status.HTTP_400_BAD_REQUEST, api_reference)
+            target = scoped_get(
+                reference_model, activity.farm, value,
+                "The selected resource does not exist.", api_reference,
+            )
+            setattr(line, reference, target)
+        if not partial or amount in data:
+            value = parse_body_decimal(
+                data, amount, f"{amount} is required.", f"{amount} must be a number.",
+                positive_message=f"{amount} must be greater than zero.",
+            )
+            try:
+                model._meta.get_field(amount).run_validators(value)
+            except ValidationError as exc:
+                raise ApiError(
+                    f"{amount} must fit within 10 integer digits and 4 decimal places.",
+                    status.HTTP_400_BAD_REQUEST, amount,
+                ) from exc
+            setattr(line, amount, value)
+        if reference:
+            duplicates = model.objects.filter(
+                activity=activity, **{reference: getattr(line, reference)}
+            ).exclude(pk=line.pk)
+            if duplicates.exists():
+                raise ApiError("Resource is already planned.", status.HTTP_409_CONFLICT, api_reference)
+        try:
+            with transaction.atomic():
+                line.save()
+        except IntegrityError as exc:
+            raise ApiError("Resource is already planned.", status.HTTP_409_CONFLICT, api_reference) from exc
+        return Response(
+            self._serialize(line, reference, api_reference, amount),
+            status=status.HTTP_201_CREATED if line_id is None else status.HTTP_200_OK,
+        )
+
+    def post(self, request, activity_id, kind, line_id=None):
+        if line_id is not None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return self._save(request, activity_id, kind)
+
+    def put(self, request, activity_id, kind, line_id=None):
+        if line_id is None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return self._save(request, activity_id, kind, line_id)
+
+    def patch(self, request, activity_id, kind, line_id=None):
+        if line_id is None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return self._save(request, activity_id, kind, line_id, partial=True)
+
+    def delete(self, request, activity_id, kind, line_id=None):
+        if line_id is None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        model = PLANNED_LINE_TYPES[kind][0]
+        activity = self._activity(request, activity_id, write=True)
+        self._line(model, activity, line_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkerListView(APIView):
+    def get(self, request):
+        farm = get_inventory_farm(request)
+        return Response(
+            [
+                serialize_worker(worker)
+                for worker in farm.workers.select_related("user")
+            ]
+        )
+
+    def post(self, request):
+        farm = get_inventory_farm(request)
+        worker = self._save(farm, None, request.data)
+        return Response(
+            serialize_worker(worker), status=status.HTTP_201_CREATED
+        )
+
+    @staticmethod
+    def _save(farm, worker, data):
+        name = require_name(data, "name", "Worker")
+        user = None
+        user_id = data.get("userId")
+        if user_id not in (None, ""):
+            try:
+                user = User.objects.get(pk=user_id)
+            except (User.DoesNotExist, ValueError, ValidationError):
+                raise ApiError(
+                    "The selected user does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "userId",
+                )
+        if worker is None:
+            return Worker.objects.create(farm=farm, name=name, user=user)
+        worker.name = name
+        worker.user = user
+        worker.save()
+        return worker
+
+
+class WorkerDetailView(APIView):
+    def get(self, request, worker_id):
+        farm = get_inventory_farm(request)
+        worker = scoped_get(
+            Worker, farm, worker_id, "That worker no longer exists."
+        )
+        return Response(serialize_worker(worker))
+
+    def put(self, request, worker_id):
+        farm = get_inventory_farm(request)
+        worker = scoped_get(
+            Worker, farm, worker_id, "That worker no longer exists."
+        )
+        worker = WorkerListView._save(farm, worker, request.data)
+        return Response(serialize_worker(worker))
+
+    def delete(self, request, worker_id):
+        farm = get_inventory_farm(request)
+        worker = scoped_get(
+            Worker, farm, worker_id, "That worker no longer exists."
+        )
+        if worker.labour_records.exists():
+            raise ApiError(
+                "A worker with labour records cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        worker.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LabourRecordListView(APIView):
+    def get(self, request):
+        farm = get_inventory_farm(request)
+        records = farm.labour_records.select_related("worker", "activity")
+        activity_id = request.query_params.get(
+            "activityId", request.query_params.get("activity")
+        )
+        if activity_id is not None:
+            try:
+                activity_id = Activity._meta.pk.to_python(activity_id)
+            except (AttributeError, TypeError, ValueError, ValidationError):
+                raise ApiError(
+                    "The activity filter must be a valid activity ID.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "activityId",
+                )
+            records = records.filter(activity_id=activity_id)
+        return Response(
+            [serialize_labour_record(record) for record in records]
+        )
+
+    def post(self, request):
+        farm = get_inventory_farm(request)
+        record = self._save(farm, None, request.data)
+        return Response(
+            serialize_labour_record(record), status=status.HTTP_201_CREATED
+        )
+
+    @staticmethod
+    def _save(farm, record, data):
+        worker_id = data.get("workerId")
+        try:
+            worker = Worker.objects.get(farm=farm, pk=worker_id)
+        except (Worker.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "The selected worker does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "workerId",
+            )
+
+        activity_id = data.get("activityId")
+        try:
+            activity = Activity.objects.get(farm=farm, pk=activity_id)
+        except (Activity.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "The selected activity does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "activityId",
+            )
+
+        try:
+            hours = parse_decimal(
+                data.get("hours"),
+                "hours",
+                "Hours are required.",
+                "Hours must be a number.",
+                positive_message="Hours must be greater than zero.",
+            )
+        except ValueError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "hours"
+            )
+        try:
+            hourly_cost = parse_decimal(
+                data.get("hourlyCost", data.get("hourly_cost")),
+                "hourly_cost",
+                "Hourly cost is required.",
+                "Hourly cost must be a number.",
+                positive_message="Hourly cost must be greater than zero.",
+            )
+        except ValueError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "hourly_cost"
+            )
+        record_date = parse_body_date(
+            data,
+            "date",
+            "Date is required.",
+            "Date must be a valid calendar date.",
+        )
+        if record is None:
+            return LabourRecord.objects.create(
+                farm=farm,
+                worker=worker,
+                activity=activity,
+                hours=hours,
+                hourly_cost=hourly_cost,
+                date=record_date,
+            )
+        record.worker = worker
+        record.activity = activity
+        record.hours = hours
+        record.hourly_cost = hourly_cost
+        record.date = record_date
+        record.save()
+        return record
+
+
+class LabourRecordDetailView(APIView):
+    def get(self, request, record_id):
+        farm = get_inventory_farm(request)
+        record = scoped_get(
+            LabourRecord,
+            farm,
+            record_id,
+            "That labour record no longer exists.",
+        )
+        return Response(serialize_labour_record(record))
+
+    def put(self, request, record_id):
+        farm = get_inventory_farm(request)
+        record = scoped_get(
+            LabourRecord,
+            farm,
+            record_id,
+            "That labour record no longer exists.",
+        )
+        record = LabourRecordListView._save(farm, record, request.data)
+        return Response(serialize_labour_record(record))
+
+    def delete(self, request, record_id):
+        farm = get_inventory_farm(request)
+        record = scoped_get(
+            LabourRecord,
+            farm,
+            record_id,
+            "That labour record no longer exists.",
+        )
+        record.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class EquipmentListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        return Response(
+            [
+                serialize_equipment(equipment)
+                for equipment in farm.equipment.all()
+            ]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        equipment = self._save(farm, None, request.data)
+        return Response(
+            serialize_equipment(equipment), status=status.HTTP_201_CREATED
+        )
+
+    @staticmethod
+    def _save(farm, equipment, data):
+        name = require_name(data, "name", "Equipment")
+        if equipment is None:
+            return Equipment.objects.create(farm=farm, name=name)
+        equipment.name = name
+        equipment.save()
+        return equipment
+
+
+class EquipmentDetailView(APIView):
+    def get(self, request, equipment_id):
+        farm = get_farm(request.user)
+        equipment = scoped_get(
+            Equipment,
+            farm,
+            equipment_id,
+            "That equipment no longer exists.",
+        )
+        return Response(serialize_equipment(equipment))
+
+    def put(self, request, equipment_id):
+        farm = get_farm(request.user)
+        equipment = scoped_get(
+            Equipment,
+            farm,
+            equipment_id,
+            "That equipment no longer exists.",
+        )
+        equipment = EquipmentListView._save(farm, equipment, request.data)
+        return Response(serialize_equipment(equipment))
+
+    def delete(self, request, equipment_id):
+        farm = get_farm(request.user)
+        equipment = scoped_get(
+            Equipment, farm, equipment_id, "That equipment no longer exists."
+        )
+        if equipment.usages.exists():
+            raise ApiError(
+                "Equipment with usage records cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            equipment.delete()
+        except ProtectedError as exc:
+            raise ApiError(
+                "Equipment referenced by planned lines cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            ) from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class EquipmentUsageListView(APIView):
+    @staticmethod
+    def _validate_source_precision(value, api_field, model_field, label):
+        try:
+            EquipmentUsage._meta.get_field(model_field).run_validators(value)
+        except ValidationError as exc:
+            raise ApiError(
+                f"{label} must have at most four decimal places and fit "
+                "within 14 digits.",
+                status.HTTP_400_BAD_REQUEST,
+                api_field,
+            ) from exc
+
+    def get(self, request):
+        farm = get_farm(request.user)
+        usages = farm.equipment_usages.select_related(
+            "equipment", "activity"
+        )
+        activity_id = request.query_params.get(
+            "activityId", request.query_params.get("activity")
+        )
+        if activity_id is not None:
+            try:
+                activity_id = Activity._meta.pk.to_python(activity_id)
+            except (AttributeError, TypeError, ValueError, ValidationError):
+                raise ApiError(
+                    "The activity filter must be a valid activity ID.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "activityId",
+                )
+            usages = usages.filter(activity_id=activity_id)
+        return Response(
+            [serialize_equipment_usage(usage) for usage in usages]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        usage = self._save(farm, None, request.data)
+        return Response(
+            serialize_equipment_usage(usage),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _save(farm, usage, data):
+        equipment_id = data.get("equipmentId")
+        try:
+            equipment = Equipment.objects.get(farm=farm, pk=equipment_id)
+        except (Equipment.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "The selected equipment does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "equipmentId",
+            )
+
+        activity_id = data.get("activityId")
+        try:
+            activity = Activity.objects.get(farm=farm, pk=activity_id)
+        except (Activity.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "The selected activity does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "activityId",
+            )
+
+        try:
+            hours = parse_decimal(
+                data.get("hours"),
+                "hours",
+                "Hours are required.",
+                "Hours must be a number.",
+                positive_message="Hours must be greater than zero.",
+            )
+        except ValueError as exc:
+            raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, "hours")
+        EquipmentUsageListView._validate_source_precision(
+            hours, "hours", "hours", "Hours"
+        )
+
+        cost_per_hour_keys = ("costPerHour", "cost_per_hour")
+        total_cost_keys = ("totalCost", "total_cost")
+        has_cost_per_hour = any(
+            data.get(key) not in (None, "") for key in cost_per_hour_keys
+        )
+        has_total_cost = any(
+            data.get(key) not in (None, "") for key in total_cost_keys
+        )
+        if has_cost_per_hour == has_total_cost:
+            raise ApiError(
+                "Provide exactly one of costPerHour or totalCost.",
+                status.HTTP_400_BAD_REQUEST,
+                "costPerHour",
+            )
+
+        cost_per_hour = None
+        total_cost = None
+        if has_cost_per_hour:
+            cost_per_hour_raw = next(
+                data[key]
+                for key in cost_per_hour_keys
+                if data.get(key) not in (None, "")
+            )
+            try:
+                cost_per_hour = parse_decimal(
+                    cost_per_hour_raw,
+                    "costPerHour",
+                    "Cost per hour is required.",
+                    "Cost per hour must be a number.",
+                    negative_message="Cost per hour cannot be negative.",
+                )
+                EquipmentUsageListView._validate_source_precision(
+                    cost_per_hour,
+                    "costPerHour",
+                    "cost_per_hour",
+                    "Cost per hour",
+                )
+            except ValueError as exc:
+                raise ApiError(
+                    str(exc), status.HTTP_400_BAD_REQUEST, "costPerHour"
+                )
+        else:
+            total_cost_raw = next(
+                data[key]
+                for key in total_cost_keys
+                if data.get(key) not in (None, "")
+            )
+            try:
+                total_cost = parse_decimal(
+                    total_cost_raw,
+                    "totalCost",
+                    "Total cost is required.",
+                    "Total cost must be a number.",
+                    negative_message="Total cost cannot be negative.",
+                )
+                EquipmentUsageListView._validate_source_precision(
+                    total_cost, "totalCost", "total_cost", "Total cost"
+                )
+            except ValueError as exc:
+                raise ApiError(
+                    str(exc), status.HTTP_400_BAD_REQUEST, "totalCost"
+                )
+
+        record_date = parse_body_date(
+            data,
+            "date",
+            "Date is required.",
+            "Date must be a valid calendar date.",
+        )
+        if usage is None:
+            return EquipmentUsage.objects.create(
+                farm=farm,
+                equipment=equipment,
+                activity=activity,
+                hours=hours,
+                cost_per_hour=cost_per_hour,
+                total_cost=total_cost,
+                date=record_date,
+            )
+        usage.equipment = equipment
+        usage.activity = activity
+        usage.hours = hours
+        usage.cost_per_hour = cost_per_hour
+        usage.total_cost = total_cost
+        usage.date = record_date
+        usage.save()
+        return usage
+
+
+class EquipmentUsageDetailView(APIView):
+    def get(self, request, usage_id):
+        farm = get_farm(request.user)
+        usage = scoped_get(
+            EquipmentUsage,
+            farm,
+            usage_id,
+            "That equipment usage no longer exists.",
+        )
+        return Response(serialize_equipment_usage(usage))
+
+    def put(self, request, usage_id):
+        farm = get_farm(request.user)
+        usage = scoped_get(
+            EquipmentUsage,
+            farm,
+            usage_id,
+            "That equipment usage no longer exists.",
+        )
+        usage = EquipmentUsageListView._save(farm, usage, request.data)
+        return Response(serialize_equipment_usage(usage))
+
+    def delete(self, request, usage_id):
+        farm = get_farm(request.user)
+        usage = scoped_get(
+            EquipmentUsage,
+            farm,
+            usage_id,
+            "That equipment usage no longer exists.",
+        )
+        usage.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class InventoryItemListView(APIView):
     def get(self, request):
         farm = get_inventory_farm(request)
@@ -2303,7 +2931,13 @@ class InventoryItemDetailView(APIView):
                 "Cannot delete an inventory item with stock movements.",
                 status.HTTP_409_CONFLICT,
             )
-        item.delete()
+        try:
+            item.delete()
+        except ProtectedError as exc:
+            raise ApiError(
+                "Inventory items referenced by planned lines cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            ) from exc
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -2823,6 +3457,178 @@ class ExpenseDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class RecurringExpenseTemplateListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        templates = farm.recurring_expense_templates.select_related("category")
+        return Response(
+            [
+                serialize_recurring_expense_template(template)
+                for template in templates
+            ]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        requested_farm_id = request.data.get("farmId")
+        if (
+            requested_farm_id not in (None, "")
+            and str(requested_farm_id) != str(farm.id)
+        ):
+            raise ApiError(
+                "You do not have access to that farm.",
+                status.HTTP_403_FORBIDDEN,
+                "farmId",
+            )
+        values = self._validate(request.data, farm)
+        template = RecurringExpenseTemplate.objects.create(
+            farm=farm,
+            **values,
+        )
+        return Response(
+            serialize_recurring_expense_template(template),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _validate(data, farm, existing=None):
+        values = {}
+        partial = existing is not None
+
+        if not partial or "categoryId" in data:
+            category_id = data.get("categoryId")
+            if category_id in (None, ""):
+                raise ApiError(
+                    "Category is required.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "categoryId",
+                )
+            values["category"] = scoped_get(
+                ExpenseCategoryRecord,
+                farm,
+                category_id,
+                "The selected expense category does not exist.",
+                "categoryId",
+            )
+
+        if not partial or "amount" in data:
+            amount = parse_body_decimal(
+                data,
+                "amount",
+                "Amount is required.",
+                "Amount must be a number.",
+                positive_message="Amount must be greater than zero.",
+            )
+            try:
+                RecurringExpenseTemplate._meta.get_field(
+                    "amount"
+                ).run_validators(amount)
+            except ValidationError as exc:
+                raise ApiError(
+                    "Amount must fit within 10 integer digits and 4 decimal places.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "amount",
+                ) from exc
+            values["amount"] = amount
+
+        if not partial or "frequency" in data:
+            frequency = data.get("frequency")
+            if frequency not in RecurringExpenseFrequency.values:
+                raise ApiError(
+                    "Frequency must be daily, weekly, monthly, or yearly.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "frequency",
+                )
+            values["frequency"] = frequency
+
+        if not partial or "nextDueDate" in data:
+            values["next_due_date"] = parse_body_date(
+                data,
+                "nextDueDate",
+                "Next due date is required.",
+                "Next due date must be a valid calendar date.",
+            )
+
+        if "paused" in data:
+            if not isinstance(data["paused"], bool):
+                raise ApiError(
+                    "Paused must be a boolean.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "paused",
+                )
+            values["paused"] = data["paused"]
+        elif not partial:
+            values["paused"] = False
+
+        return values
+
+
+class RecurringExpenseTemplateDetailView(APIView):
+    def get(self, request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        return Response(serialize_recurring_expense_template(template))
+
+    def put(self, request, template_id):
+        return self._update(request, template_id)
+
+    def patch(self, request, template_id):
+        return self._update(request, template_id)
+
+    @staticmethod
+    def _update(request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        values = RecurringExpenseTemplateListView._validate(
+            request.data, farm, existing=template
+        )
+        with transaction.atomic():
+            template = RecurringExpenseTemplate.objects.select_for_update().get(
+                pk=template.pk
+            )
+            new_date = values.get("next_due_date")
+            if (
+                new_date is not None
+                and new_date < template.next_due_date
+                and Notification.objects.filter(
+                    recurring_expense_template=template,
+                    occurrence_date__gte=new_date,
+                ).exists()
+            ):
+                raise ApiError(
+                    "Next due date is earlier than a reminder that was "
+                    "already sent. Reload the template and try again.",
+                    status.HTTP_409_CONFLICT,
+                    "nextDueDate",
+                )
+            for field, value in values.items():
+                setattr(template, field, value)
+            template.save(update_fields=[*values.keys(), "updated_at"])
+        template.refresh_from_db()
+        return Response(serialize_recurring_expense_template(template))
+
+    def delete(self, request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        template.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class ExpensePostView(APIView):
     def post(self, request, expense_id):
         farm = get_farm(request.user)
@@ -2833,6 +3639,18 @@ class ExpensePostView(APIView):
             expense.status = ExpenseStatus.POSTED
             expense.save(update_fields=["status"])
         return Response(serialize_expense(expense))
+
+
+class ExpenseReverseView(APIView):
+    def post(self, request, expense_id):
+        farm = get_farm(request.user)
+        try:
+            reversal = reverse_expense(farm, expense_id)
+        except ReversalError as exc:
+            raise ApiError(exc.message, exc.status_code)
+        return Response(
+            serialize_expense(reversal), status=status.HTTP_201_CREATED
+        )
 
 
 class ExpenseAttachmentView(APIView):
@@ -3073,32 +3891,42 @@ class PaymentDetailView(APIView):
     def put(self, request, payment_id):
         farm = get_farm(request.user)
         payment = self._payment(farm, payment_id)
-        values = validate_payment(request.data, farm)
-        for key, value in values.items():
-            setattr(payment, key, value)
-        payment.save()
-        return Response(serialize_payment(payment))
+        self._reject_change(payment)
 
     def patch(self, request, payment_id):
         farm = get_farm(request.user)
         payment = self._payment(farm, payment_id)
-        current = serialize_payment(payment)
-        data = {**current, **request.data}
-        values = validate_payment(data, farm)
-        for key, value in values.items():
-            setattr(payment, key, value)
-        payment.save()
-        return Response(serialize_payment(payment))
+        self._reject_change(payment)
 
     def delete(self, request, payment_id):
         farm = get_farm(request.user)
-        self._payment(farm, payment_id).delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        payment = self._payment(farm, payment_id)
+        self._reject_change(payment, "deleted")
+
+    @staticmethod
+    def _reject_change(payment, action="edited"):
+        raise ApiError(
+            f"Recorded payments cannot be {action}. "
+            "Reverse the payment instead.",
+            status.HTTP_409_CONFLICT,
+        )
 
     @staticmethod
     def _payment(farm, payment_id):
         return scoped_get(
             Payment, farm, payment_id, "That payment no longer exists."
+        )
+
+
+class PaymentReverseView(APIView):
+    def post(self, request, payment_id):
+        farm = get_farm(request.user)
+        try:
+            reversal = reverse_payment(farm, payment_id)
+        except ReversalError as exc:
+            raise ApiError(exc.message, exc.status_code)
+        return Response(
+            serialize_payment(reversal), status=status.HTTP_201_CREATED
         )
 
 
@@ -3468,15 +4296,146 @@ class HarvestListView(APIView):
         )
 
 
-class CustomerListView(APIView):
+class CounterpartyListView(APIView):
+    model = None
+    serializer = None
+    noun = None
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
             [
-                serialize_customer(customer)
-                for customer in farm.customers.all()
+                self.serializer(counterparty)
+                for counterparty in self.model.objects.filter(farm=farm)
             ]
         )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        name = require_name(request.data, "name", self.noun)
+        values = self._optional_values(request.data)
+        counterparty = self.model.objects.create(
+            farm=farm, name=name, **values
+        )
+        return Response(
+            self.serializer(counterparty),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _optional_values(data):
+        values = {}
+        for api_field, model_field in COUNTERPARTY_OPTIONAL_FIELDS:
+            if api_field not in data:
+                continue
+            value = validate_counterparty_length(
+                optional_text(data, api_field), api_field
+            )
+            if api_field == "email" and value:
+                try:
+                    validate_email(value)
+                except ValidationError:
+                    raise ApiError(
+                        "Enter a valid email address.",
+                        status.HTTP_400_BAD_REQUEST,
+                        "email",
+                    )
+            values[model_field] = value
+        return values
+
+
+class CounterpartyDetailView(APIView):
+    model = None
+    serializer = None
+    noun = None
+    id_kwarg = None
+
+    def get(self, request, **kwargs):
+        counterparty = self._get(request, kwargs)
+        return Response(self.serializer(counterparty))
+
+    def put(self, request, **kwargs):
+        return self._update(request, kwargs)
+
+    def patch(self, request, **kwargs):
+        return self._update(request, kwargs)
+
+    def delete(self, request, **kwargs):
+        counterparty = self._get(request, kwargs)
+        self._validate_delete(counterparty)
+        try:
+            counterparty.delete()
+        except ProtectedError:
+            raise ApiError(
+                f"This {self.noun} is linked to existing records and "
+                "cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+                "id",
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _validate_delete(self, counterparty):
+        pass
+
+    def _get(self, request, kwargs):
+        farm = get_farm(request.user)
+        return scoped_get(
+            self.model,
+            farm,
+            kwargs[self.id_kwarg],
+            f"That {self.noun} no longer exists.",
+        )
+
+    def _update(self, request, kwargs):
+        counterparty = self._get(request, kwargs)
+        changed = False
+        if "name" in request.data:
+            counterparty.name = require_name(
+                request.data, "name", self.noun
+            )
+            changed = True
+        for model_field, value in CounterpartyListView._optional_values(
+            request.data
+        ).items():
+            setattr(counterparty, model_field, value)
+            changed = True
+        if changed:
+            counterparty.save()
+        return Response(self.serializer(counterparty))
+
+
+class SupplierListView(CounterpartyListView):
+    model = Supplier
+    serializer = staticmethod(serialize_supplier)
+    noun = "Supplier"
+
+
+class SupplierDetailView(CounterpartyDetailView):
+    model = Supplier
+    serializer = staticmethod(serialize_supplier)
+    noun = "supplier"
+    id_kwarg = "supplier_id"
+
+    def _validate_delete(self, supplier):
+        if supplier.expenses.exists():
+            raise ApiError(
+                "This supplier is linked to expenses and cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+                "id",
+            )
+
+
+class CustomerListView(CounterpartyListView):
+    model = Customer
+    serializer = staticmethod(serialize_customer)
+    noun = "Customer"
+
+
+class CustomerDetailView(CounterpartyDetailView):
+    model = Customer
+    serializer = staticmethod(serialize_customer)
+    noun = "customer"
+    id_kwarg = "customer_id"
 
 
 class SaleListView(APIView):

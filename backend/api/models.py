@@ -381,6 +381,187 @@ class Activity(TimestampedModel):
         ordering = ["created_at", "id"]
 
 
+class Worker(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="workers"
+    )
+    name = models.CharField(max_length=255)
+    user = models.ForeignKey(
+        "api.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="worker_profiles",
+    )
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+
+class LabourRecord(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="labour_records"
+    )
+    worker = models.ForeignKey(
+        Worker, on_delete=models.PROTECT, related_name="labour_records"
+    )
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="labour_records"
+    )
+    hours = models.DecimalField(max_digits=14, decimal_places=4)
+    hourly_cost = models.DecimalField(max_digits=14, decimal_places=4)
+    date = models.DateField()
+
+    class Meta:
+        ordering = ["date", "created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(hours__gt=0),
+                name="labour_record_hours_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(hourly_cost__gt=0),
+                name="labour_record_hourly_cost_positive",
+            ),
+        ]
+
+
+class Equipment(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="equipment"
+    )
+    name = models.CharField(max_length=255)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+
+class EquipmentUsage(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="equipment_usages"
+    )
+    equipment = models.ForeignKey(
+        Equipment, on_delete=models.PROTECT, related_name="usages"
+    )
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="equipment_usages"
+    )
+    hours = models.DecimalField(max_digits=14, decimal_places=4)
+    cost_per_hour = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True
+    )
+    total_cost = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True
+    )
+    cost = models.DecimalField(max_digits=28, decimal_places=8)
+    date = models.DateField()
+
+    class Meta:
+        ordering = ["date", "created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(hours__gt=0),
+                name="equipment_usage_hours_positive",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        cost_per_hour__isnull=False, total_cost__isnull=True
+                    )
+                    | models.Q(
+                        cost_per_hour__isnull=True, total_cost__isnull=False
+                    )
+                ),
+                name="equipment_usage_exactly_one_cost_source",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(cost_per_hour__isnull=True)
+                    | models.Q(cost_per_hour__gte=0)
+                ),
+                name="equipment_usage_cost_per_hour_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(total_cost__isnull=True)
+                    | models.Q(total_cost__gte=0)
+                ),
+                name="equipment_usage_total_cost_nonnegative",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.cost_per_hour is not None:
+            self.cost = self.cost_per_hour * self.hours
+        elif self.total_cost is not None:
+            self.cost = self.total_cost
+        return super().save(*args, **kwargs)
+
+
+class PlannedLabour(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="planned_labour"
+    )
+    hours = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(hours__gt=0), name="planned_labour_hours_positive"
+            )
+        ]
+
+
+class PlannedEquipment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="planned_equipment"
+    )
+    equipment = models.ForeignKey(
+        Equipment, on_delete=models.PROTECT, related_name="planned_activities"
+    )
+    hours = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "equipment"], name="unique_activity_planned_equipment"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(hours__gt=0), name="planned_equipment_hours_positive"
+            ),
+        ]
+
+
+class PlannedInput(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="planned_inputs"
+    )
+    item = models.ForeignKey(
+        "InventoryItem", on_delete=models.PROTECT, related_name="planned_activities"
+    )
+    quantity = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "item"], name="unique_activity_planned_input"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0), name="planned_input_quantity_positive"
+            ),
+        ]
+
+
 class ActivityInputNeed(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     activity = models.ForeignKey(
@@ -509,6 +690,11 @@ class Supplier(TimestampedModel):
         Farm, on_delete=models.CASCADE, related_name="suppliers"
     )
     name = models.CharField(max_length=255)
+    contact_name = models.CharField(max_length=255, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=255, blank=True, default="")
+    address = models.TextField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["name", "id"]
@@ -520,6 +706,11 @@ class Customer(TimestampedModel):
         Farm, on_delete=models.CASCADE, related_name="customers"
     )
     name = models.CharField(max_length=255)
+    contact_name = models.CharField(max_length=255, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=255, blank=True, default="")
+    address = models.TextField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["created_at", "id"]
@@ -564,6 +755,80 @@ def seed_default_expense_categories(sender, instance, created, **kwargs):
         ensure_default_expense_categories(instance)
 
 
+class ImmutableTransactionError(Exception):
+    """Raised when a posted transaction or reversal would be changed."""
+
+
+def protect_posted_set_null(collector, field, sub_objs, using):
+    """SET_NULL for drafts; posted records keep their links intact."""
+    if sub_objs.filter(
+        models.Q(status=ExpenseStatus.POSTED)
+        | models.Q(reversal_of__isnull=False)
+    ).exists():
+        raise models.ProtectedError(
+            "Posted expenses cannot be unlinked.", sub_objs
+        )
+    models.SET_NULL(collector, field, sub_objs, using)
+
+
+class ExpenseQuerySet(models.QuerySet):
+    def _locked(self):
+        return self.filter(
+            models.Q(status=ExpenseStatus.POSTED)
+            | models.Q(reversal_of__isnull=False)
+        )
+
+    def update(self, **kwargs):
+        if self._locked().exists():
+            raise ImmutableTransactionError(
+                "Posted expenses and reversals cannot be updated."
+            )
+        return super().update(**kwargs)
+
+    def delete(self):
+        if self._locked().exists():
+            raise ImmutableTransactionError(
+                "Posted expenses and reversals cannot be deleted."
+            )
+        return super().delete()
+
+    def mark_reversed(self, when):
+        """Reversal-only write: stamp ``reversed_at`` on an original."""
+        return self.filter(
+            status=ExpenseStatus.POSTED,
+            reversal_of__isnull=True,
+            reversed_at__isnull=True,
+        )._unguarded_update(reversed_at=when)
+
+    def _unguarded_update(self, **kwargs):
+        return super().update(**kwargs)
+
+
+class PaymentQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if self.exists():
+            raise ImmutableTransactionError(
+                "Payments cannot be updated once recorded."
+            )
+        return super().update(**kwargs)
+
+    def delete(self):
+        if self.exists():
+            raise ImmutableTransactionError(
+                "Payments cannot be deleted once recorded."
+            )
+        return super().delete()
+
+    def mark_reversed(self, when):
+        """Reversal-only write: stamp ``reversed_at`` on an original."""
+        return self.filter(
+            reversal_of__isnull=True, reversed_at__isnull=True
+        )._unguarded_update(reversed_at=when)
+
+    def _unguarded_update(self, **kwargs):
+        return super().update(**kwargs)
+
+
 class Expense(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
@@ -573,7 +838,7 @@ class Expense(TimestampedModel):
         CropCycle,
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=protect_posted_set_null,
         related_name="expenses",
     )
     category = models.CharField(max_length=255)
@@ -591,7 +856,7 @@ class Expense(TimestampedModel):
         Supplier,
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=protect_posted_set_null,
         related_name="expenses",
     )
     attachment_reference = models.CharField(
@@ -603,11 +868,68 @@ class Expense(TimestampedModel):
         default=ExpenseStatus.DRAFT,
     )
     notes = models.TextField(blank=True, null=True)
+    reversal_of = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.PROTECT,
+        related_name="reversal",
+    )
+    reversed_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    objects = ExpenseQuerySet.as_manager()
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reversal_of__isnull=True)
+                    | models.Q(
+                        status=ExpenseStatus.POSTED,
+                        reversed_at__isnull=True,
+                    )
+                ),
+                name="expense_reversal_is_posted_and_final",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reversed_at__isnull=True)
+                    | models.Q(status=ExpenseStatus.POSTED)
+                ),
+                name="expense_reversed_requires_posted",
+            ),
+        ]
+
+    @property
+    def is_reversal(self):
+        return self.reversal_of_id is not None
+
+    def _is_locked_in_database(self):
+        return (
+            not self._state.adding
+            and type(self)
+            ._base_manager.filter(pk=self.pk)
+            .filter(
+                models.Q(status=ExpenseStatus.POSTED)
+                | models.Q(reversal_of__isnull=False)
+            )
+            .exists()
+        )
+
+    def delete(self, *args, **kwargs):
+        if self._is_locked_in_database():
+            raise ImmutableTransactionError(
+                "Posted expenses and reversals cannot be deleted."
+            )
+        return super().delete(*args, **kwargs)
 
     def save(self, *args, **kwargs):
+        if self._is_locked_in_database():
+            raise ImmutableTransactionError(
+                "Posted expenses and reversals cannot be updated."
+            )
         if self.category_record_id is None and self.category:
             ensure_default_expense_categories(self.farm)
             self.category_record = ExpenseCategoryRecord.objects.filter(
@@ -616,6 +938,64 @@ class Expense(TimestampedModel):
         if self.category_record_id is not None:
             self.category = self.category_record.name
         super().save(*args, **kwargs)
+
+
+class RecurringExpenseFrequency(models.TextChoices):
+    DAILY = "daily", "daily"
+    WEEKLY = "weekly", "weekly"
+    MONTHLY = "monthly", "monthly"
+    YEARLY = "yearly", "yearly"
+
+
+class RecurringExpenseTemplate(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm,
+        on_delete=models.CASCADE,
+        related_name="recurring_expense_templates",
+    )
+    category = models.ForeignKey(
+        ExpenseCategoryRecord,
+        on_delete=models.PROTECT,
+        related_name="recurring_expense_templates",
+    )
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        validators=[MinValueValidator(0.0001)],
+    )
+    frequency = models.CharField(
+        max_length=10,
+        choices=RecurringExpenseFrequency.choices,
+    )
+    next_due_date = models.DateField()
+    paused = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["next_due_date", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="recurring_expense_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    frequency__in=RecurringExpenseFrequency.values
+                ),
+                name="recurring_expense_frequency_valid",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.category_id
+            and self.farm_id
+            and self.category.farm_id != self.farm_id
+        ):
+            raise ValidationError(
+                {"category": "The category must belong to this farm."}
+            )
 
 
 class Budget(TimestampedModel):
@@ -777,22 +1157,58 @@ class Payment(TimestampedModel):
     date = models.DateField()
     linked_expense = models.ForeignKey(
         Expense,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="payments",
         null=True,
         blank=True,
     )
     linked_sale = models.ForeignKey(
         Sale,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="payments",
         null=True,
         blank=True,
     )
     reference = models.CharField(max_length=255, blank=True, null=True)
+    reversal_of = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.PROTECT,
+        related_name="reversal",
+    )
+    reversed_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    objects = PaymentQuerySet.as_manager()
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reversal_of__isnull=True)
+                    | models.Q(reversed_at__isnull=True)
+                ),
+                name="payment_reversal_is_final",
+            ),
+        ]
+
+    @property
+    def is_reversal(self):
+        return self.reversal_of_id is not None
+
+    def delete(self, *args, **kwargs):
+        raise ImmutableTransactionError(
+            "Payments cannot be deleted once recorded."
+        )
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ImmutableTransactionError(
+                "Payments cannot be updated once recorded."
+            )
+        super().save(*args, **kwargs)
 
 
 class ImportPreview(models.Model):
@@ -844,6 +1260,21 @@ class Notification(TimestampedModel):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="notifications"
     )
+    farm = models.ForeignKey(
+        Farm,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="notifications",
+    )
+    recurring_expense_template = models.ForeignKey(
+        RecurringExpenseTemplate,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="notifications",
+    )
+    occurrence_date = models.DateField(null=True, blank=True)
     type = models.CharField(
         max_length=20,
         choices=NotificationType.choices,
@@ -859,6 +1290,16 @@ class Notification(TimestampedModel):
                 fields=["user", "read", "-created_at"],
                 name="notif_user_read_created_idx",
             )
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recurring_expense_template", "occurrence_date"],
+                condition=models.Q(
+                    recurring_expense_template__isnull=False,
+                    occurrence_date__isnull=False,
+                ),
+                name="uniq_recurring_expense_reminder",
+            ),
         ]
 
     def __str__(self):

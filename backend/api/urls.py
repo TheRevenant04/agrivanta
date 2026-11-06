@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, re_path
 
 from . import chat_views, views
 
@@ -63,6 +63,31 @@ urlpatterns = [
         "activities/<str:activity_id>/resource-needs",
         views.ActivityResourceNeedsView.as_view(),
     ),
+    re_path(
+        r"^activities/(?P<activity_id>[^/]+)/(?P<kind>planned-inputs|planned-labour|planned-equipment)$",
+        views.PlannedLineView.as_view(),
+    ),
+    re_path(
+        r"^activities/(?P<activity_id>[^/]+)/(?P<kind>planned-inputs|planned-labour|planned-equipment)/(?P<line_id>[^/]+)$",
+        views.PlannedLineView.as_view(),
+    ),
+    path("workers", views.WorkerListView.as_view()),
+    path("workers/<str:worker_id>", views.WorkerDetailView.as_view()),
+    path("labour-records", views.LabourRecordListView.as_view()),
+    path(
+        "labour-records/<str:record_id>",
+        views.LabourRecordDetailView.as_view(),
+    ),
+    path("equipment", views.EquipmentListView.as_view()),
+    path(
+        "equipment/<str:equipment_id>",
+        views.EquipmentDetailView.as_view(),
+    ),
+    path("equipment-usages", views.EquipmentUsageListView.as_view()),
+    path(
+        "equipment-usages/<str:usage_id>",
+        views.EquipmentUsageDetailView.as_view(),
+    ),
     path("inventory-items", views.InventoryItemListView.as_view()),
     path(
         "inventory-items/<str:item_id>",
@@ -94,8 +119,20 @@ urlpatterns = [
         views.ExpensePostView.as_view(),
     ),
     path(
+        "expenses/<str:expense_id>/reverse",
+        views.ExpenseReverseView.as_view(),
+    ),
+    path(
         "expenses/<str:expense_id>/attachments",
         views.ExpenseAttachmentView.as_view(),
+    ),
+    path(
+        "recurring-expense-templates",
+        views.RecurringExpenseTemplateListView.as_view(),
+    ),
+    path(
+        "recurring-expense-templates/<str:template_id>",
+        views.RecurringExpenseTemplateDetailView.as_view(),
     ),
     path("imports/preview", views.ImportPreviewView.as_view()),
     path("imports/commit", views.ImportCommitView.as_view()),
@@ -121,6 +158,10 @@ urlpatterns = [
         "payments/<str:payment_id>",
         views.PaymentDetailView.as_view(),
     ),
+    path(
+        "payments/<str:payment_id>/reverse",
+        views.PaymentReverseView.as_view(),
+    ),
     path("budgets", views.BudgetListView.as_view()),
     path("budgets/<str:budget_id>", views.BudgetDetailView.as_view()),
     path("harvests/cycles", views.HarvestCycleListView.as_view()),
@@ -130,7 +171,16 @@ urlpatterns = [
     ),
     path("harvests", views.HarvestListView.as_view()),
     path("harvests/<str:harvest_id>", views.HarvestDetailView.as_view()),
+    path("suppliers", views.SupplierListView.as_view()),
+    path(
+        "suppliers/<str:supplier_id>",
+        views.SupplierDetailView.as_view(),
+    ),
     path("customers", views.CustomerListView.as_view()),
+    path(
+        "customers/<str:customer_id>",
+        views.CustomerDetailView.as_view(),
+    ),
     path("sales", views.SaleListView.as_view()),
     path("sales/<str:sale_id>", views.SaleDetailView.as_view()),
     path(

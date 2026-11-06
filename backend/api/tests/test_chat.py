@@ -42,19 +42,20 @@ def _stream_events(response):
     return [json.loads(line) for line in response.streaming_content]
 
 
-def _create_cycle_data(cycle):
+def _create_cycle_data(cycle, with_expense=True):
     data = cycle()
     user = User.objects.get(email="owner@agrivanta.test")
     farm = user.farm
     cycle_model = farm.crop_cycles.get(pk=data["cycle"]["id"])
-    Expense.objects.create(
-        farm=farm,
-        cycle=cycle_model,
-        category=ExpenseCategory.INPUTS,
-        amount="75.00",
-        date="2026-03-15",
-        status=ExpenseStatus.POSTED,
-    )
+    if with_expense:
+        Expense.objects.create(
+            farm=farm,
+            cycle=cycle_model,
+            category=ExpenseCategory.INPUTS,
+            amount="75.00",
+            date="2026-03-15",
+            status=ExpenseStatus.POSTED,
+        )
     customer = Customer.objects.create(farm=farm, name="Buyer")
     harvest = Harvest.objects.create(
         farm=farm,
@@ -189,8 +190,7 @@ def test_chat_streams_multi_tool_answer_with_exact_evidence(
 def test_chat_missing_data_returns_explicit_limitation_without_figures(
     client, cycle, monkeypatch
 ):
-    user, _, cycle_model = _create_cycle_data(cycle)
-    Expense.objects.filter(farm=user.farm).delete()
+    _, _, cycle_model = _create_cycle_data(cycle, with_expense=False)
     fake = _fake_client(
         {
             "tool_calls": [

@@ -154,6 +154,13 @@ def serialize_activity_type(activity_type):
 
 
 def serialize_activity(activity):
+    total_labour_cost = sum(
+        (
+            record.hours * record.hourly_cost
+            for record in activity.labour_records.all()
+        ),
+        Decimal("0"),
+    )
     return {
         "id": as_id(activity.id),
         "cycleId": as_id(activity.cycle_id),
@@ -164,6 +171,7 @@ def serialize_activity(activity):
         "plannedDate": as_date(activity.planned_date),
         "status": activity.status,
         "description": activity.description or None,
+        "totalLabourCost": as_number(total_labour_cost),
         "resourceNeeds": {
             "inputs": [
                 {
@@ -176,6 +184,49 @@ def serialize_activity(activity):
             "labourHours": as_number(activity.labour_hours),
             "equipment": activity.equipment or "",
         },
+    }
+
+
+def serialize_worker(worker):
+    return {
+        "id": as_id(worker.id),
+        "farmId": as_id(worker.farm_id),
+        "name": worker.name,
+        "userId": as_id(worker.user_id) if worker.user_id else None,
+    }
+
+
+def serialize_labour_record(record):
+    return {
+        "id": as_id(record.id),
+        "farmId": as_id(record.farm_id),
+        "workerId": as_id(record.worker_id),
+        "activityId": as_id(record.activity_id),
+        "hours": as_number(record.hours),
+        "hourlyCost": as_number(record.hourly_cost),
+        "date": as_date(record.date),
+    }
+
+
+def serialize_equipment(equipment):
+    return {
+        "id": as_id(equipment.id),
+        "farmId": as_id(equipment.farm_id),
+        "name": equipment.name,
+    }
+
+
+def serialize_equipment_usage(usage):
+    return {
+        "id": as_id(usage.id),
+        "farmId": as_id(usage.farm_id),
+        "equipmentId": as_id(usage.equipment_id),
+        "activityId": as_id(usage.activity_id),
+        "hours": as_number(usage.hours),
+        "costPerHour": as_number(usage.cost_per_hour),
+        "totalCost": as_number(usage.total_cost),
+        "cost": as_number(usage.cost),
+        "date": as_date(usage.date),
     }
 
 
@@ -256,6 +307,25 @@ def serialize_expense(expense):
             for attachment in expense.attachments.all()
         ],
         "notes": expense.notes or None,
+        "createdAt": as_datetime(expense.created_at),
+        "reversalOfId": (
+            as_id(expense.reversal_of_id) if expense.reversal_of_id else None
+        ),
+        "reversed": expense.reversed_at is not None,
+        "reversedAt": as_datetime(expense.reversed_at),
+    }
+
+
+def serialize_recurring_expense_template(template):
+    return {
+        "id": as_id(template.id),
+        "farmId": as_id(template.farm_id),
+        "categoryId": as_id(template.category_id),
+        "category": template.category.name,
+        "amount": as_number(template.amount),
+        "frequency": template.frequency,
+        "nextDueDate": as_date(template.next_due_date),
+        "paused": template.paused,
     }
 
 
@@ -285,6 +355,12 @@ def serialize_payment(payment):
             as_id(payment.linked_sale_id) if payment.linked_sale_id else None
         ),
         "reference": payment.reference or None,
+        "createdAt": as_datetime(payment.created_at),
+        "reversalOfId": (
+            as_id(payment.reversal_of_id) if payment.reversal_of_id else None
+        ),
+        "reversed": payment.reversed_at is not None,
+        "reversedAt": as_datetime(payment.reversed_at),
     }
 
 
@@ -299,7 +375,27 @@ def serialize_harvest(harvest):
 
 
 def serialize_customer(customer):
-    return {"id": as_id(customer.id), "name": customer.name}
+    return {
+        "id": as_id(customer.id),
+        "name": customer.name,
+        "contactName": customer.contact_name,
+        "email": customer.email,
+        "phone": customer.phone,
+        "address": customer.address,
+        "notes": customer.notes,
+    }
+
+
+def serialize_supplier(supplier):
+    return {
+        "id": as_id(supplier.id),
+        "name": supplier.name,
+        "contactName": supplier.contact_name,
+        "email": supplier.email,
+        "phone": supplier.phone,
+        "address": supplier.address,
+        "notes": supplier.notes,
+    }
 
 
 def serialize_sale(sale):
@@ -315,7 +411,7 @@ def serialize_sale(sale):
 
 
 def serialize_notification(notification):
-    return {
+    payload = {
         "id": as_id(notification.id),
         "type": notification.type,
         "message": notification.message,
@@ -323,6 +419,15 @@ def serialize_notification(notification):
         "createdAt": as_datetime(notification.created_at),
         "updatedAt": as_datetime(notification.updated_at),
     }
+    if notification.farm_id is not None:
+        payload["farmId"] = as_id(notification.farm_id)
+    if notification.recurring_expense_template_id is not None:
+        payload["recurringExpenseTemplateId"] = as_id(
+            notification.recurring_expense_template_id
+        )
+    if notification.occurrence_date is not None:
+        payload["occurrenceDate"] = as_date(notification.occurrence_date)
+    return payload
 
 
 ISO_DATE_ERROR = "must be a valid calendar date."
