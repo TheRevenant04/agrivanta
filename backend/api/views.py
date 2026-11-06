@@ -2963,7 +2963,8 @@ class RecurringExpenseTemplateDetailView(APIView):
         )
         for field, value in values.items():
             setattr(template, field, value)
-        template.save()
+        template.save(update_fields=[*values.keys(), "updated_at"])
+        template.refresh_from_db()
         return Response(serialize_recurring_expense_template(template))
 
     def delete(self, request, template_id):

@@ -464,6 +464,59 @@ def test_edits_preserve_existing_reminder_and_date_unless_explicitly_changed(
     assert Notification.objects.count() == 1
 
 
+def test_stale_template_update_preserves_task_advanced_schedule(
+    client, monkeypatch
+):
+    template = create_template(
+        client,
+        nextDueDate="2026-01-10",
+        frequency="monthly",
+    )
+    today = [date(2026, 1, 10)]
+    monkeypatch.setattr("api.tasks.timezone.localdate", lambda: today[0])
+    original_save = RecurringExpenseTemplate.save
+    task_ran_during_update = False
+
+    def run_task_before_api_save(self, *args, **kwargs):
+        nonlocal task_ran_during_update
+        update_fields = kwargs.get("update_fields")
+        is_api_update = update_fields is None or "amount" in update_fields
+        if str(self.pk) == template["id"] and is_api_update:
+            task_ran_during_update = True
+            assert process_recurring_expense_reminders.run() == 1
+        return original_save(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        RecurringExpenseTemplate, "save", run_task_before_api_save
+    )
+
+    updated = client.patch(
+        f"{TEMPLATES_URL}/{template['id']}",
+        {"amount": "90"},
+        format="json",
+    )
+
+    assert updated.status_code == 200, updated.data
+    assert task_ran_during_update
+    assert updated.data["nextDueDate"] == "2026-02-10"
+    assert RecurringExpenseTemplate.objects.get(
+        pk=template["id"]
+    ).next_due_date == date(2026, 2, 10)
+
+    today[0] = date(2026, 2, 10)
+    assert process_recurring_expense_reminders.run() == 1
+    assert list(
+        Notification.objects.filter(
+            recurring_expense_template_id=template["id"]
+        )
+        .order_by("occurrence_date")
+        .values_list("occurrence_date", flat=True)
+    ) == [date(2026, 1, 10), date(2026, 2, 10)]
+    assert RecurringExpenseTemplate.objects.get(
+        pk=template["id"]
+    ).next_due_date == date(2026, 3, 10)
+
+
 def test_later_reminder_uses_updated_amount_category_and_frequency(
     client, monkeypatch
 ):
