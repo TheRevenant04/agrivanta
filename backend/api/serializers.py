@@ -154,6 +154,13 @@ def serialize_activity_type(activity_type):
 
 
 def serialize_activity(activity):
+    total_labour_cost = sum(
+        (
+            record.hours * record.hourly_cost
+            for record in activity.labour_records.all()
+        ),
+        Decimal("0"),
+    )
     return {
         "id": as_id(activity.id),
         "cycleId": as_id(activity.cycle_id),
@@ -164,6 +171,7 @@ def serialize_activity(activity):
         "plannedDate": as_date(activity.planned_date),
         "status": activity.status,
         "description": activity.description or None,
+        "totalLabourCost": as_number(total_labour_cost),
         "resourceNeeds": {
             "inputs": [
                 {
@@ -176,6 +184,49 @@ def serialize_activity(activity):
             "labourHours": as_number(activity.labour_hours),
             "equipment": activity.equipment or "",
         },
+    }
+
+
+def serialize_worker(worker):
+    return {
+        "id": as_id(worker.id),
+        "farmId": as_id(worker.farm_id),
+        "name": worker.name,
+        "userId": as_id(worker.user_id) if worker.user_id else None,
+    }
+
+
+def serialize_labour_record(record):
+    return {
+        "id": as_id(record.id),
+        "farmId": as_id(record.farm_id),
+        "workerId": as_id(record.worker_id),
+        "activityId": as_id(record.activity_id),
+        "hours": as_number(record.hours),
+        "hourlyCost": as_number(record.hourly_cost),
+        "date": as_date(record.date),
+    }
+
+
+def serialize_equipment(equipment):
+    return {
+        "id": as_id(equipment.id),
+        "farmId": as_id(equipment.farm_id),
+        "name": equipment.name,
+    }
+
+
+def serialize_equipment_usage(usage):
+    return {
+        "id": as_id(usage.id),
+        "farmId": as_id(usage.farm_id),
+        "equipmentId": as_id(usage.equipment_id),
+        "activityId": as_id(usage.activity_id),
+        "hours": as_number(usage.hours),
+        "costPerHour": as_number(usage.cost_per_hour),
+        "totalCost": as_number(usage.total_cost),
+        "cost": as_number(usage.cost),
+        "date": as_date(usage.date),
     }
 
 

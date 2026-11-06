@@ -381,6 +381,127 @@ class Activity(TimestampedModel):
         ordering = ["created_at", "id"]
 
 
+class Worker(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="workers"
+    )
+    name = models.CharField(max_length=255)
+    user = models.ForeignKey(
+        "api.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="worker_profiles",
+    )
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+
+class LabourRecord(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="labour_records"
+    )
+    worker = models.ForeignKey(
+        Worker, on_delete=models.PROTECT, related_name="labour_records"
+    )
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="labour_records"
+    )
+    hours = models.DecimalField(max_digits=14, decimal_places=4)
+    hourly_cost = models.DecimalField(max_digits=14, decimal_places=4)
+    date = models.DateField()
+
+    class Meta:
+        ordering = ["date", "created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(hours__gt=0),
+                name="labour_record_hours_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(hourly_cost__gt=0),
+                name="labour_record_hourly_cost_positive",
+            ),
+        ]
+
+
+class Equipment(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="equipment"
+    )
+    name = models.CharField(max_length=255)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+
+class EquipmentUsage(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="equipment_usages"
+    )
+    equipment = models.ForeignKey(
+        Equipment, on_delete=models.PROTECT, related_name="usages"
+    )
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="equipment_usages"
+    )
+    hours = models.DecimalField(max_digits=14, decimal_places=4)
+    cost_per_hour = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True
+    )
+    total_cost = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True
+    )
+    cost = models.DecimalField(max_digits=28, decimal_places=8)
+    date = models.DateField()
+
+    class Meta:
+        ordering = ["date", "created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(hours__gt=0),
+                name="equipment_usage_hours_positive",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        cost_per_hour__isnull=False, total_cost__isnull=True
+                    )
+                    | models.Q(
+                        cost_per_hour__isnull=True, total_cost__isnull=False
+                    )
+                ),
+                name="equipment_usage_exactly_one_cost_source",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(cost_per_hour__isnull=True)
+                    | models.Q(cost_per_hour__gte=0)
+                ),
+                name="equipment_usage_cost_per_hour_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(total_cost__isnull=True)
+                    | models.Q(total_cost__gte=0)
+                ),
+                name="equipment_usage_total_cost_nonnegative",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.cost_per_hour is not None:
+            self.cost = self.cost_per_hour * self.hours
+        elif self.total_cost is not None:
+            self.cost = self.total_cost
+        return super().save(*args, **kwargs)
+
+
 class ActivityInputNeed(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     activity = models.ForeignKey(
