@@ -160,6 +160,29 @@ def test_expense_with_supplier_attachment_and_posted_status(client):
     assert response.data["status"] == "posted"
 
 
+def test_supplier_linked_to_expense_cannot_be_deleted(client):
+    farm_id = client.get("/api/farm").data["id"]
+    supplier = Supplier.objects.create(farm_id=farm_id, name="Agro Supply")
+    created = client.post(
+        "/api/expenses",
+        payload(client, supplierId=str(supplier.id)),
+        format="json",
+    )
+    assert created.status_code == 201, created.data
+
+    deleted = client.delete(f"/api/suppliers/{supplier.id}")
+
+    assert deleted.status_code == 409
+    assert deleted.data["field"] == "id"
+    assert "linked to expenses" in deleted.data["detail"].lower()
+    assert Supplier.objects.filter(pk=supplier.id).exists()
+    expense = Expense.objects.get(pk=created.data["id"])
+    assert expense.supplier_record_id == supplier.id
+    assert client.get(f"/api/expenses/{expense.id}").data["supplierId"] == str(
+        supplier.id
+    )
+
+
 def test_expense_accepts_max_length_attachment_reference(client):
     attachment_reference = "a" * 500
     response = client.post(

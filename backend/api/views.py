@@ -54,12 +54,15 @@ from .models import (
     Notification,
     Payment,
     PaymentType,
+    RecurringExpenseFrequency,
+    RecurringExpenseTemplate,
     ReportingPeriod,
     Role,
     Sale,
     Season,
     Supplier,
     StockMovement,
+    Supplier,
     Unit,
     UnitConversion,
     User,
@@ -93,9 +96,11 @@ from .serializers import (
     serialize_movement,
     serialize_notification,
     serialize_payment,
+    serialize_recurring_expense_template,
     serialize_reporting_period,
     serialize_sale,
     serialize_season,
+    serialize_supplier,
     serialize_unit,
     serialize_user,
     serialize_variety,
@@ -119,6 +124,18 @@ STANDARD_ACTIVITY_TEMPLATES = (
 )
 
 DEFAULT_CUSTOMER_NAMES = ["Greenfield Grain Co.", "Harbour Mill"]
+
+COUNTERPARTY_OPTIONAL_FIELDS = (
+    ("contactName", "contact_name"),
+    ("email", "email"),
+    ("phone", "phone"),
+    ("address", "address"),
+    ("notes", "notes"),
+)
+COUNTERPARTY_MAX_LENGTHS = {
+    api_field: Supplier._meta.get_field(model_field).max_length
+    for api_field, model_field in COUNTERPARTY_OPTIONAL_FIELDS
+}
 
 ACTIVITY_TRANSITIONS = {
     ActivityStatus.PLANNED: [ActivityStatus.IN_PROGRESS],
@@ -175,6 +192,17 @@ def optional_text(data, key):
     if value is None:
         return ""
     return str(value).strip()
+
+
+def validate_counterparty_length(value, api_field):
+    max_length = COUNTERPARTY_MAX_LENGTHS[api_field]
+    if max_length and len(value) > max_length:
+        raise ApiError(
+            f"Ensure this field has no more than {max_length} characters.",
+            status.HTTP_400_BAD_REQUEST,
+            api_field,
+        )
+    return value
 
 
 def get_farm(user):
@@ -1907,9 +1935,7 @@ class ActivityListView(APIView):
     def get(self, request):
         activities = activity_queryset_for(request).select_related(
             "cycle", "type"
-        ).prefetch_related(
-            "input_needs", "labour_records", "assignees"
-        )
+        ).prefetch_related("input_needs", "labour_records", "assignees")
         cycle_id = request.query_params.get("cycle")
         if cycle_id:
             try:
@@ -3299,6 +3325,178 @@ class ExpenseDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class RecurringExpenseTemplateListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        templates = farm.recurring_expense_templates.select_related("category")
+        return Response(
+            [
+                serialize_recurring_expense_template(template)
+                for template in templates
+            ]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        requested_farm_id = request.data.get("farmId")
+        if (
+            requested_farm_id not in (None, "")
+            and str(requested_farm_id) != str(farm.id)
+        ):
+            raise ApiError(
+                "You do not have access to that farm.",
+                status.HTTP_403_FORBIDDEN,
+                "farmId",
+            )
+        values = self._validate(request.data, farm)
+        template = RecurringExpenseTemplate.objects.create(
+            farm=farm,
+            **values,
+        )
+        return Response(
+            serialize_recurring_expense_template(template),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _validate(data, farm, existing=None):
+        values = {}
+        partial = existing is not None
+
+        if not partial or "categoryId" in data:
+            category_id = data.get("categoryId")
+            if category_id in (None, ""):
+                raise ApiError(
+                    "Category is required.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "categoryId",
+                )
+            values["category"] = scoped_get(
+                ExpenseCategoryRecord,
+                farm,
+                category_id,
+                "The selected expense category does not exist.",
+                "categoryId",
+            )
+
+        if not partial or "amount" in data:
+            amount = parse_body_decimal(
+                data,
+                "amount",
+                "Amount is required.",
+                "Amount must be a number.",
+                positive_message="Amount must be greater than zero.",
+            )
+            try:
+                RecurringExpenseTemplate._meta.get_field(
+                    "amount"
+                ).run_validators(amount)
+            except ValidationError as exc:
+                raise ApiError(
+                    "Amount must fit within 10 integer digits and 4 decimal places.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "amount",
+                ) from exc
+            values["amount"] = amount
+
+        if not partial or "frequency" in data:
+            frequency = data.get("frequency")
+            if frequency not in RecurringExpenseFrequency.values:
+                raise ApiError(
+                    "Frequency must be daily, weekly, monthly, or yearly.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "frequency",
+                )
+            values["frequency"] = frequency
+
+        if not partial or "nextDueDate" in data:
+            values["next_due_date"] = parse_body_date(
+                data,
+                "nextDueDate",
+                "Next due date is required.",
+                "Next due date must be a valid calendar date.",
+            )
+
+        if "paused" in data:
+            if not isinstance(data["paused"], bool):
+                raise ApiError(
+                    "Paused must be a boolean.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "paused",
+                )
+            values["paused"] = data["paused"]
+        elif not partial:
+            values["paused"] = False
+
+        return values
+
+
+class RecurringExpenseTemplateDetailView(APIView):
+    def get(self, request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        return Response(serialize_recurring_expense_template(template))
+
+    def put(self, request, template_id):
+        return self._update(request, template_id)
+
+    def patch(self, request, template_id):
+        return self._update(request, template_id)
+
+    @staticmethod
+    def _update(request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        values = RecurringExpenseTemplateListView._validate(
+            request.data, farm, existing=template
+        )
+        with transaction.atomic():
+            template = RecurringExpenseTemplate.objects.select_for_update().get(
+                pk=template.pk
+            )
+            new_date = values.get("next_due_date")
+            if (
+                new_date is not None
+                and new_date < template.next_due_date
+                and Notification.objects.filter(
+                    recurring_expense_template=template,
+                    occurrence_date__gte=new_date,
+                ).exists()
+            ):
+                raise ApiError(
+                    "Next due date is earlier than a reminder that was "
+                    "already sent. Reload the template and try again.",
+                    status.HTTP_409_CONFLICT,
+                    "nextDueDate",
+                )
+            for field, value in values.items():
+                setattr(template, field, value)
+            template.save(update_fields=[*values.keys(), "updated_at"])
+        template.refresh_from_db()
+        return Response(serialize_recurring_expense_template(template))
+
+    def delete(self, request, template_id):
+        farm = get_farm(request.user)
+        template = scoped_get(
+            RecurringExpenseTemplate,
+            farm,
+            template_id,
+            "That recurring expense template no longer exists.",
+        )
+        template.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class ExpensePostView(APIView):
     def post(self, request, expense_id):
         farm = get_farm(request.user)
@@ -3944,15 +4142,146 @@ class HarvestListView(APIView):
         )
 
 
-class CustomerListView(APIView):
+class CounterpartyListView(APIView):
+    model = None
+    serializer = None
+    noun = None
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
             [
-                serialize_customer(customer)
-                for customer in farm.customers.all()
+                self.serializer(counterparty)
+                for counterparty in self.model.objects.filter(farm=farm)
             ]
         )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        name = require_name(request.data, "name", self.noun)
+        values = self._optional_values(request.data)
+        counterparty = self.model.objects.create(
+            farm=farm, name=name, **values
+        )
+        return Response(
+            self.serializer(counterparty),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _optional_values(data):
+        values = {}
+        for api_field, model_field in COUNTERPARTY_OPTIONAL_FIELDS:
+            if api_field not in data:
+                continue
+            value = validate_counterparty_length(
+                optional_text(data, api_field), api_field
+            )
+            if api_field == "email" and value:
+                try:
+                    validate_email(value)
+                except ValidationError:
+                    raise ApiError(
+                        "Enter a valid email address.",
+                        status.HTTP_400_BAD_REQUEST,
+                        "email",
+                    )
+            values[model_field] = value
+        return values
+
+
+class CounterpartyDetailView(APIView):
+    model = None
+    serializer = None
+    noun = None
+    id_kwarg = None
+
+    def get(self, request, **kwargs):
+        counterparty = self._get(request, kwargs)
+        return Response(self.serializer(counterparty))
+
+    def put(self, request, **kwargs):
+        return self._update(request, kwargs)
+
+    def patch(self, request, **kwargs):
+        return self._update(request, kwargs)
+
+    def delete(self, request, **kwargs):
+        counterparty = self._get(request, kwargs)
+        self._validate_delete(counterparty)
+        try:
+            counterparty.delete()
+        except ProtectedError:
+            raise ApiError(
+                f"This {self.noun} is linked to existing records and "
+                "cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+                "id",
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _validate_delete(self, counterparty):
+        pass
+
+    def _get(self, request, kwargs):
+        farm = get_farm(request.user)
+        return scoped_get(
+            self.model,
+            farm,
+            kwargs[self.id_kwarg],
+            f"That {self.noun} no longer exists.",
+        )
+
+    def _update(self, request, kwargs):
+        counterparty = self._get(request, kwargs)
+        changed = False
+        if "name" in request.data:
+            counterparty.name = require_name(
+                request.data, "name", self.noun
+            )
+            changed = True
+        for model_field, value in CounterpartyListView._optional_values(
+            request.data
+        ).items():
+            setattr(counterparty, model_field, value)
+            changed = True
+        if changed:
+            counterparty.save()
+        return Response(self.serializer(counterparty))
+
+
+class SupplierListView(CounterpartyListView):
+    model = Supplier
+    serializer = staticmethod(serialize_supplier)
+    noun = "Supplier"
+
+
+class SupplierDetailView(CounterpartyDetailView):
+    model = Supplier
+    serializer = staticmethod(serialize_supplier)
+    noun = "supplier"
+    id_kwarg = "supplier_id"
+
+    def _validate_delete(self, supplier):
+        if supplier.expenses.exists():
+            raise ApiError(
+                "This supplier is linked to expenses and cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+                "id",
+            )
+
+
+class CustomerListView(CounterpartyListView):
+    model = Customer
+    serializer = staticmethod(serialize_customer)
+    noun = "Customer"
+
+
+class CustomerDetailView(CounterpartyDetailView):
+    model = Customer
+    serializer = staticmethod(serialize_customer)
+    noun = "customer"
+    id_kwarg = "customer_id"
 
 
 class SaleListView(APIView):

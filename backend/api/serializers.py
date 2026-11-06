@@ -310,6 +310,19 @@ def serialize_expense(expense):
     }
 
 
+def serialize_recurring_expense_template(template):
+    return {
+        "id": as_id(template.id),
+        "farmId": as_id(template.farm_id),
+        "categoryId": as_id(template.category_id),
+        "category": template.category.name,
+        "amount": as_number(template.amount),
+        "frequency": template.frequency,
+        "nextDueDate": as_date(template.next_due_date),
+        "paused": template.paused,
+    }
+
+
 def serialize_budget(budget):
     return {
         "id": as_id(budget.id),
@@ -350,7 +363,27 @@ def serialize_harvest(harvest):
 
 
 def serialize_customer(customer):
-    return {"id": as_id(customer.id), "name": customer.name}
+    return {
+        "id": as_id(customer.id),
+        "name": customer.name,
+        "contactName": customer.contact_name,
+        "email": customer.email,
+        "phone": customer.phone,
+        "address": customer.address,
+        "notes": customer.notes,
+    }
+
+
+def serialize_supplier(supplier):
+    return {
+        "id": as_id(supplier.id),
+        "name": supplier.name,
+        "contactName": supplier.contact_name,
+        "email": supplier.email,
+        "phone": supplier.phone,
+        "address": supplier.address,
+        "notes": supplier.notes,
+    }
 
 
 def serialize_sale(sale):
@@ -366,7 +399,7 @@ def serialize_sale(sale):
 
 
 def serialize_notification(notification):
-    return {
+    payload = {
         "id": as_id(notification.id),
         "type": notification.type,
         "message": notification.message,
@@ -374,6 +407,15 @@ def serialize_notification(notification):
         "createdAt": as_datetime(notification.created_at),
         "updatedAt": as_datetime(notification.updated_at),
     }
+    if notification.farm_id is not None:
+        payload["farmId"] = as_id(notification.farm_id)
+    if notification.recurring_expense_template_id is not None:
+        payload["recurringExpenseTemplateId"] = as_id(
+            notification.recurring_expense_template_id
+        )
+    if notification.occurrence_date is not None:
+        payload["occurrenceDate"] = as_date(notification.occurrence_date)
+    return payload
 
 
 ISO_DATE_ERROR = "must be a valid calendar date."
