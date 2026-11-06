@@ -1787,6 +1787,59 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /payments/{paymentId}:
+    parameters:
+      - $ref: '#/components/parameters/PaymentId'
+    get:
+      tags: [payments]
+      operationId: getPayment
+      summary: Retrieve a payment
+      responses:
+        '200':
+          description: Payment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [payments]
+      operationId: updatePayment
+      summary: Update a payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInput'
+      responses:
+        '200':
+          description: Updated payment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [payments]
+      operationId: deletePayment
+      summary: Delete a payment
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /harvests/cycles:
     get:
       tags: [harvests]
@@ -1981,6 +2034,12 @@ components:
         type: string
     ExpenseId:
       name: expenseId
+      in: path
+      required: true
+      schema:
+        type: string
+    PaymentId:
+      name: paymentId
       in: path
       required: true
       schema:
@@ -2832,7 +2891,9 @@ components:
           description: ISO calendar date (`YYYY-MM-DD`).
         linkedExpenseId:
           type: string
-          description: A payment may link to an expense, a sale, or neither.
+          description: >
+            A payment may link to an expense, a sale, or neither, but not
+            both. Expenses require type `paid`; sales require `received`.
         linkedSaleId:
           type: string
         reference:
