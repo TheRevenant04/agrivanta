@@ -133,6 +133,10 @@ urlpatterns = [
         views.NotificationDetailView.as_view(),
     ),
     path("payments", views.PaymentListView.as_view()),
+    path(
+        "payments/<str:payment_id>",
+        views.PaymentDetailView.as_view(),
+    ),
     path("budgets", views.BudgetListView.as_view()),
     path("budgets/<str:budget_id>", views.BudgetDetailView.as_view()),
     path("harvests/cycles", views.HarvestCycleListView.as_view()),
