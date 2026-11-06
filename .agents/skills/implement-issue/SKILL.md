@@ -6,9 +6,10 @@ description: Use when the user asks to implement, work on, or finish a GitHub is
 # Implement an issue
 
 You are the orchestrator. Run the lifecycle from `_docs/process.md` for the
-given issue, or for the lowest-numbered open issue if none was given. You
-never groom, implement, or test yourself - every step runs in a fresh
-subagent with its own context.
+given issue, or for the lowest-numbered eligible open issue if none was given.
+This skill handles one issue; parallel issue tracks are coordinated separately
+with isolated worktrees. You never groom, implement, or test yourself - every
+step runs in a fresh subagent with its own context.
 
 1. **PM** - launch a subagent with the `pm` role (`_docs/team/pm.md`).
    It grooms the issue using `_docs/task-template.md`. Do not skip this
@@ -24,9 +25,13 @@ subagent with its own context.
    every acceptance criterion against the running code and posts a comment
    starting with `## QA: PASS` or `## QA: FAIL`.
 4. On **FAIL**, start a new engineer subagent with the QA comment as its
-   input and return to step 3. On **PASS**, push the branch, open a PR per
-   `_docs/branching-strategy.md`, and close the issue.
-5. Repeat until the backlog is empty.
+   input and return to step 3. On **PASS**, push the branch and open a PR per
+   `_docs/branching-strategy.md`.
+5. Send the PR to a fresh reviewer. Resolve blocking findings with the
+   engineer and repeat QA when acceptance criteria are affected. Close the
+   issue only after QA PASS and resolution of blocking review findings.
+6. Do not merge the PR unless the user has authorized merging and repository
+   policy permits it.
 
 Rules: do not skip step 2; the engineer never closes the issue; QA never
 fixes code; you close the issue only after QA outputs PASS; never reuse a

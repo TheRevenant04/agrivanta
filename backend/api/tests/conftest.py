@@ -8,7 +8,7 @@ def register(client, **overrides):
     payload = {
         "name": "Olive Owner",
         "email": "owner@agrivanta.test",
-        "password": "password123",
+        "password": "OliveHarvest#42",
     }
     payload.update(overrides)
     return client.post(REGISTER, payload, format="json")
@@ -86,6 +86,7 @@ def cycle(client, setup):
                 "fieldId": data["field"]["id"],
                 "cropId": data["crop"]["id"],
                 "varietyId": data["variety"]["id"],
+                "cycleType": "annual",
                 "startDate": "2026-03-01",
             },
             format="json",

@@ -211,7 +211,10 @@ def test_inventory_movements_csv_collects_all_row_errors(client, setup):
     }
     assert "Unknown" in first["errors"][0]["message"]
     second = body["invalidRows"][1]
-    assert [error["field"] for error in second["errors"]] == ["quantity"]
+    assert {error["field"] for error in second["errors"]} == {
+        "date",
+        "quantity",
+    }
 
 
 def test_expenses_duplicates_are_flagged_in_file_and_against_db(client):
@@ -549,11 +552,11 @@ def test_movements_reject_unrepresentable_quantities(client, setup):
         "inventory_movements",
         csv_file(
             "movements.csv",
-            "item,type,quantity",
-            "Nitrogen,purchase,1e100000",
-            "Nitrogen,purchase,1.23456",
-            "Nitrogen,purchase,10000000000",
-            "Nitrogen,purchase,9999999999.9999",
+            "item,type,quantity,date",
+            "Nitrogen,purchase,1e100000,2026-03-01",
+            "Nitrogen,purchase,1.23456,2026-03-01",
+            "Nitrogen,purchase,10000000000,2026-03-01",
+            "Nitrogen,purchase,9999999999.9999,2026-03-01",
         ),
     )
 
