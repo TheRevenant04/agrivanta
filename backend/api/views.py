@@ -2209,7 +2209,7 @@ class WorkerListView(APIView):
 
     @staticmethod
     def _save(farm, worker, data):
-        name = require_text(data, "name", "Worker name is required.")
+        name = require_name(data, "name", "Worker")
         user = None
         user_id = data.get("userId")
         if user_id not in (None, ""):

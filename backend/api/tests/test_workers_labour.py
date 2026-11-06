@@ -93,6 +93,41 @@ def test_worker_rejects_nonexistent_linked_user(client):
     assert response.data["field"] == "userId"
 
 
+def test_worker_name_length_is_validated_on_create_and_update(client):
+    max_length_name = "W" * 255
+    created = client.post(
+        WORKERS, {"name": max_length_name}, format="json"
+    )
+    assert created.status_code == 201
+    assert created.data["name"] == max_length_name
+
+    updated = client.put(
+        f"{WORKERS}/{created.data['id']}",
+        {"name": max_length_name},
+        format="json",
+    )
+    assert updated.status_code == 200
+    assert updated.data["name"] == max_length_name
+
+    too_long_name = "W" * 256
+    rejected_create = client.post(
+        WORKERS, {"name": too_long_name}, format="json"
+    )
+    assert rejected_create.status_code == 400
+    assert rejected_create.data["field"] == "name"
+
+    rejected_update = client.put(
+        f"{WORKERS}/{created.data['id']}",
+        {"name": too_long_name},
+        format="json",
+    )
+    assert rejected_update.status_code == 400
+    assert rejected_update.data["field"] == "name"
+    assert client.get(f"{WORKERS}/{created.data['id']}").data["name"] == (
+        max_length_name
+    )
+
+
 def test_labour_records_support_crud_and_activity_filter(client, cycle):
     activity = create_activity(client, cycle)
     worker = create_worker(client)
