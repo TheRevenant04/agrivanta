@@ -4033,6 +4033,7 @@ class CounterpartyDetailView(APIView):
 
     def delete(self, request, **kwargs):
         counterparty = self._get(request, kwargs)
+        self._validate_delete(counterparty)
         try:
             counterparty.delete()
         except ProtectedError:
@@ -4043,6 +4044,9 @@ class CounterpartyDetailView(APIView):
                 "id",
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _validate_delete(self, counterparty):
+        pass
 
     def _get(self, request, kwargs):
         farm = get_farm(request.user)
@@ -4082,6 +4086,14 @@ class SupplierDetailView(CounterpartyDetailView):
     serializer = staticmethod(serialize_supplier)
     noun = "supplier"
     id_kwarg = "supplier_id"
+
+    def _validate_delete(self, supplier):
+        if supplier.expenses.exists():
+            raise ApiError(
+                "This supplier is linked to expenses and cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+                "id",
+            )
 
 
 class CustomerListView(CounterpartyListView):
