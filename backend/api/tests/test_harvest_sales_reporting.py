@@ -127,6 +127,7 @@ def test_mixed_harvest_units_converted(client, setup):
             "fieldId": data["field"]["id"],
             "cropId": data["crop"]["id"],
             "varietyId": data["variety"]["id"],
+            "cycleType": "annual",
             "startDate": "2026-03-01",
         },
         format="json",
@@ -164,6 +165,7 @@ def test_sale_quantities_converted_mixed_harvest_units(client, setup):
             "fieldId": data["field"]["id"],
             "cropId": data["crop"]["id"],
             "varietyId": data["variety"]["id"],
+            "cycleType": "annual",
             "startDate": "2026-03-01",
         },
         format="json",
@@ -275,6 +277,7 @@ def test_missing_conversion_raises_error_naming_units(client, setup):
             "fieldId": data["field"]["id"],
             "cropId": data["crop"]["id"],
             "varietyId": data["variety"]["id"],
+            "cycleType": "annual",
             "startDate": "2026-03-01",
         },
         format="json",
@@ -349,12 +352,12 @@ def test_farm_isolation_between_cycles(client, setup):
     data = setup()
     c1 = client.post(
         "/api/crop-cycles",
-        {"fieldId": data["field"]["id"], "cropId": data["crop"]["id"], "varietyId": data["variety"]["id"], "startDate": "2026-03-01"},
+        {"fieldId": data["field"]["id"], "cropId": data["crop"]["id"], "varietyId": data["variety"]["id"], "cycleType": "annual", "startDate": "2026-03-01"},
         format="json",
     ).data
     c2 = client.post(
         "/api/crop-cycles",
-        {"fieldId": data["field"]["id"], "cropId": data["crop"]["id"], "varietyId": data["variety"]["id"], "startDate": "2026-04-01"},
+        {"fieldId": data["field"]["id"], "cropId": data["crop"]["id"], "varietyId": data["variety"]["id"], "cycleType": "annual", "startDate": "2026-04-01"},
         format="json",
     ).data
     h1 = client.post(

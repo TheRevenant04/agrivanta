@@ -455,7 +455,7 @@ def _validate_movement_row(values, index, farm, items_cache):
         errors.append({"field": "quantity", "message": quantity_error})
 
     movement_date, date_error = _parse_date_cell(
-        _field_value(values, index, "date"), required=False
+        _field_value(values, index, "date"), required=True
     )
     if date_error:
         errors.append({"field": "date", "message": date_error})
@@ -782,15 +782,12 @@ def _create_expense(farm, data):
 
 
 def _create_movement(farm, data):
-    movement_date = (
-        date.fromisoformat(data["date"]) if data["date"] else None
-    )
     return StockMovement.objects.create(
         farm=farm,
         item_id=data["itemId"],
         type=data["type"],
         quantity=data["quantity"],
-        date=movement_date,
+        date=date.fromisoformat(data["date"]),
         note=data["note"] or "",
     )
 

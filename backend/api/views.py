@@ -1,12 +1,18 @@
 from decimal import Decimal
+from uuid import UUID
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.paginator import EmptyPage, Paginator
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError, RestrictedError
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -30,23 +36,29 @@ from .models import (
     Crop,
     CropCycle,
     CycleStatus,
+    CycleType,
     Customer,
     Expense,
     ExpenseCategory,
+    ExpenseCategoryRecord,
     ExpenseStatus,
     Equipment,
     EquipmentUsage,
+    ensure_default_expense_categories,
     Farm,
     Field,
     Harvest,
     InventoryItem,
     LabourRecord,
     MovementType,
+    Notification,
     Payment,
     PaymentType,
     ReportingPeriod,
+    Role,
     Sale,
     Season,
+    Supplier,
     StockMovement,
     Unit,
     UnitConversion,
@@ -72,12 +84,14 @@ from .serializers import (
     serialize_expense,
     serialize_equipment,
     serialize_equipment_usage,
+    serialize_expense_category,
     serialize_farm,
     serialize_field,
     serialize_harvest,
     serialize_inventory_item,
     serialize_labour_record,
     serialize_movement,
+    serialize_notification,
     serialize_payment,
     serialize_reporting_period,
     serialize_sale,
@@ -87,14 +101,22 @@ from .serializers import (
     serialize_variety,
     serialize_worker,
 )
+from .unit_conversion import (
+    ConversionRuleData,
+    MissingConversionRuleError,
+    UnitConversionError,
+    UnitData,
+    conversion_factor,
+    convert_quantity,
+)
 
-STANDARD_ACTIVITY_TEMPLATES = [
+STANDARD_ACTIVITY_TEMPLATES = (
     ("Land preparation", ActivityCategory.LAND_PREPARATION),
     ("Planting", ActivityCategory.PLANTING),
     ("Fertilizing", ActivityCategory.FERTILIZING),
     ("Spraying", ActivityCategory.SPRAYING),
     ("Harvesting", ActivityCategory.HARVESTING),
-]
+)
 
 DEFAULT_CUSTOMER_NAMES = ["Greenfield Grain Co.", "Harbour Mill"]
 
@@ -113,6 +135,41 @@ def require_text(data, key, message):
     return value.strip()
 
 
+def require_name(data, key, noun):
+    name = require_text(data, key, f"{noun} name is required.")
+    if len(name) > 255:
+        raise ApiError(
+            f"{noun.capitalize()} name must be 255 characters or fewer.",
+            status.HTTP_400_BAD_REQUEST,
+            key,
+        )
+    return name
+
+
+def ensure_unique_farm_name(model, farm, name, noun, instance=None):
+    matches = model.objects.filter(farm=farm, name__iexact=name)
+    if instance is not None:
+        matches = matches.exclude(pk=instance.pk)
+    if matches.exists():
+        raise ApiError(
+            f'A {noun.lower()} named "{name}" already exists.',
+            status.HTTP_409_CONFLICT,
+            "name",
+        )
+
+
+def save_unique_farm_name(instance, noun):
+    try:
+        with transaction.atomic():
+            instance.save()
+    except IntegrityError:
+        raise ApiError(
+            f'A {noun.lower()} named "{instance.name}" already exists.',
+            status.HTTP_409_CONFLICT,
+            "name",
+        )
+
+
 def optional_text(data, key):
     value = data.get(key)
     if value is None:
@@ -127,6 +184,66 @@ def get_farm(user):
             "No farm is configured.", status.HTTP_404_NOT_FOUND
         )
     return farm
+
+
+def get_activity_farm(user):
+    if user.role == Role.MANAGER:
+        memberships = user.member_farms.all()
+        if memberships.count() == 1:
+            return memberships.first()
+    return get_farm(user)
+
+
+def get_inventory_farm(request):
+    require_activity_manager(request)
+    return get_activity_farm(request.user)
+
+
+def require_activity_manager(request):
+    if request.user.role not in (Role.OWNER, Role.MANAGER):
+        raise ApiError(
+            "Only farm owners and managers can manage activities.",
+            status.HTTP_403_FORBIDDEN,
+        )
+
+
+def activity_queryset_for(request):
+    if request.user.role == Role.WORKER:
+        return (
+            Activity.objects.filter(assignees=request.user)
+            .filter(
+                Q(farm__owner=request.user)
+                | Q(farm__members=request.user)
+            )
+            .distinct()
+        )
+    farm = get_activity_farm(request.user)
+    return farm.activities.all()
+
+
+def get_visible_activity(request, activity_id):
+    try:
+        return activity_queryset_for(request).get(pk=activity_id)
+    except (Activity.DoesNotExist, ValueError, ValidationError):
+        raise ApiError(
+            "That activity no longer exists.", status.HTTP_404_NOT_FOUND
+        )
+
+
+def ensure_activity_cycle_open(activity):
+    if activity.cycle.status == CycleStatus.CLOSED:
+        raise ApiError(
+            "Activities in a closed crop cycle cannot be changed.",
+            status.HTTP_409_CONFLICT,
+        )
+
+
+def require_farm_setup_write(request):
+    if request.user.role not in (Role.OWNER, Role.MANAGER):
+        raise ApiError(
+            "Only farm owners and managers can change setup records.",
+            status.HTTP_403_FORBIDDEN,
+        )
 
 
 def scoped_get(model, farm, pk, message, field=None):
@@ -168,6 +285,74 @@ def parse_body_decimal(
         )
     except ValueError as exc:
         raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, key)
+
+
+def parse_field_area(data):
+    area = parse_body_decimal(
+        data,
+        "area",
+        "Area is required.",
+        "Area must be a number.",
+        positive_message="Area must be greater than zero.",
+    )
+    try:
+        Field._meta.get_field("area").run_validators(area)
+    except ValidationError as exc:
+        raise ApiError(
+            "Area must fit within 10 integer digits and 4 decimal places.",
+            status.HTTP_400_BAD_REQUEST,
+            "area",
+        ) from exc
+    return area
+
+
+def parse_field_polygon(value):
+    if value is None:
+        return None
+
+    def invalid():
+        raise ApiError(
+            "Polygon must be a valid GeoJSON Polygon.",
+            status.HTTP_400_BAD_REQUEST,
+            "polygon",
+        )
+
+    if not isinstance(value, dict) or value.get("type") != "Polygon":
+        invalid()
+    coordinates = value.get("coordinates")
+    if not isinstance(coordinates, list) or not coordinates:
+        invalid()
+
+    position_dimensions = None
+    for ring in coordinates:
+        if not isinstance(ring, list) or len(ring) < 4:
+            invalid()
+        dimensions = None
+        for position in ring:
+            if not isinstance(position, list) or len(position) < 2:
+                invalid()
+            if dimensions is None:
+                dimensions = len(position)
+            if len(position) != dimensions:
+                invalid()
+            for coordinate in position:
+                if isinstance(coordinate, bool) or not isinstance(
+                    coordinate, (int, float)
+                ):
+                    invalid()
+                try:
+                    number = Decimal(str(coordinate))
+                except (ArithmeticError, ValueError):
+                    invalid()
+                if not number.is_finite():
+                    invalid()
+            if position_dimensions is None:
+                position_dimensions = dimensions
+            elif dimensions != position_dimensions:
+                invalid()
+        if ring[0] != ring[-1]:
+            invalid()
+    return value
 
 
 def parse_optional_body_date(data, key, invalid_message):
@@ -264,20 +449,14 @@ def ensure_unique_period_name(model, farm, name, noun, instance=None):
 
 
 def seed_farm(farm):
-    ActivityType.objects.bulk_create(
-        [
-            ActivityType(
-                farm=farm,
-                name=name,
-                category=category,
-                standard=True,
-            )
-            for name, category in STANDARD_ACTIVITY_TEMPLATES
-        ]
-    )
-    Customer.objects.bulk_create(
-        [Customer(farm=farm, name=name) for name in DEFAULT_CUSTOMER_NAMES]
-    )
+    for name, category in STANDARD_ACTIVITY_TEMPLATES:
+        ActivityType.objects.get_or_create(
+            farm=farm,
+            name=name,
+            defaults={"category": category, "standard": True},
+        )
+    for name in DEFAULT_CUSTOMER_NAMES:
+        Customer.objects.get_or_create(farm=farm, name=name)
 
 
 def format_amount(value):
@@ -313,18 +492,34 @@ class RegisterView(APIView):
         if User.objects.filter(email__iexact=email).exists():
             raise ApiError(
                 "An account with that email already exists.",
-                status.HTTP_409_CONFLICT,
+                status.HTTP_400_BAD_REQUEST,
                 "email",
             )
 
         name = str(data.get("name") or "").strip()
+        farm_name = f"{name}'s Farm" if name else "My Farm"
+        if len(farm_name) > 255:
+            raise ApiError(
+                "Farm name must be 255 characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "name",
+            )
+        try:
+            validate_password(password, user=User(email=email, name=name))
+        except ValidationError as exc:
+            raise ApiError(
+                " ".join(exc.messages),
+                status.HTTP_400_BAD_REQUEST,
+                "password",
+            )
+
         with transaction.atomic():
             user = User.objects.create_user(
                 email=email, password=password, name=name
             )
             farm = Farm.objects.create(
                 owner=user,
-                name=f"{name}'s Farm" if name else "My Farm",
+                name=farm_name,
                 reporting_currency="USD",
             )
             seed_farm(farm)
@@ -367,29 +562,50 @@ class MeView(APIView):
         return Response(serialize_user(request.user))
 
 
+def parse_reporting_currency(value):
+    if (
+        not isinstance(value, str)
+        or len(value.strip()) != 3
+        or not value.strip().isascii()
+        or not value.strip().isalpha()
+    ):
+        raise ApiError(
+            "Reporting currency must be a three-letter code such as USD.",
+            status.HTTP_400_BAD_REQUEST,
+            "reportingCurrency",
+        )
+    return value.strip()
+
+
 class FarmView(APIView):
     def get(self, request):
         return Response(serialize_farm(get_farm(request.user)))
 
     def put(self, request):
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Farm name is required."
+        name = require_name(request.data, "name", "Farm")
+        currency = parse_reporting_currency(
+            request.data.get("reportingCurrency")
         )
-        currency = request.data.get("reportingCurrency")
-        currency = str(currency).strip() if currency is not None else ""
-        if (
-            len(currency) != 3
-            or not currency.isalpha()
-        ):
-            raise ApiError(
-                "Reporting currency must be a three-letter code such as USD.",
-                status.HTTP_400_BAD_REQUEST,
-                "reportingCurrency",
-            )
         farm.name = name
         farm.reporting_currency = currency.upper()
         farm.save(update_fields=["name", "reporting_currency"])
+        return Response(serialize_farm(farm))
+
+    def patch(self, request):
+        farm = get_farm(request.user)
+        update_fields = []
+        if "name" in request.data:
+            farm.name = require_name(request.data, "name", "Farm")
+            update_fields.append("name")
+        if "reportingCurrency" in request.data:
+            currency = parse_reporting_currency(
+                request.data["reportingCurrency"]
+            )
+            farm.reporting_currency = currency.upper()
+            update_fields.append("reporting_currency")
+        if update_fields:
+            farm.save(update_fields=update_fields)
         return Response(serialize_farm(farm))
 
 
@@ -501,21 +717,15 @@ class FieldListView(APIView):
 
     def post(self, request):
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Field name is required."
-        )
-        area = parse_body_decimal(
-            request.data,
-            "area",
-            "Area must be a number.",
-            "Area must be a number.",
-            negative_message="Area cannot be negative.",
-        )
+        name = require_name(request.data, "name", "Field")
+        area = parse_field_area(request.data)
+        polygon = parse_field_polygon(request.data.get("polygon"))
         field = Field.objects.create(
             farm=farm,
             name=name,
             area=area,
             notes=optional_text(request.data, "notes"),
+            polygon=polygon,
         )
         return Response(
             serialize_field(field), status=status.HTTP_201_CREATED
@@ -523,29 +733,61 @@ class FieldListView(APIView):
 
 
 class FieldDetailView(APIView):
+    def get(self, request, field_id):
+        farm = get_farm(request.user)
+        field = scoped_get(
+            Field, farm, field_id, "That field no longer exists."
+        )
+        return Response(serialize_field(field))
+
     def put(self, request, field_id):
         farm = get_farm(request.user)
         field = scoped_get(
             Field, farm, field_id, "That field no longer exists."
         )
-        name = require_text(
-            request.data, "name", "Field name is required."
-        )
-        area = parse_body_decimal(
-            request.data,
-            "area",
-            "Area must be a number.",
-            "Area must be a number.",
-            negative_message="Area cannot be negative.",
-        )
+        name = require_name(request.data, "name", "Field")
+        area = parse_field_area(request.data)
         field.name = name
         field.area = area
         field.notes = optional_text(request.data, "notes")
+        field.polygon = parse_field_polygon(request.data.get("polygon"))
         field.save()
         return Response(serialize_field(field))
 
+    def patch(self, request, field_id):
+        farm = get_farm(request.user)
+        field = scoped_get(
+            Field, farm, field_id, "That field no longer exists."
+        )
+        update_fields = []
+        if "name" in request.data:
+            field.name = require_name(request.data, "name", "Field")
+            update_fields.append("name")
+        if "area" in request.data:
+            field.area = parse_field_area(request.data)
+            update_fields.append("area")
+        if "notes" in request.data:
+            field.notes = optional_text(request.data, "notes")
+            update_fields.append("notes")
+        if "polygon" in request.data:
+            field.polygon = parse_field_polygon(request.data["polygon"])
+            update_fields.append("polygon")
+        if update_fields:
+            field.save(update_fields=update_fields + ["updated_at"])
+        return Response(serialize_field(field))
+
+    def delete(self, request, field_id):
+        farm = get_farm(request.user)
+        field = scoped_get(
+            Field, farm, field_id, "That field no longer exists."
+        )
+        field.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class CropListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
@@ -553,47 +795,77 @@ class CropListView(APIView):
         )
 
     def post(self, request):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Crop name is required."
-        )
-        if Crop.objects.filter(farm=farm, name__iexact=name).exists():
-            raise ApiError(
-                f'A crop named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
-        crop = Crop.objects.create(farm=farm, name=name)
+        name = require_name(request.data, "name", "Crop")
+        ensure_unique_farm_name(Crop, farm, name, "Crop")
+        crop = Crop(farm=farm, name=name)
+        save_unique_farm_name(crop, "Crop")
         return Response(
             serialize_crop(crop), status=status.HTTP_201_CREATED
         )
 
 
 class CropDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, crop_id):
+        farm = get_farm(request.user)
+        crop = scoped_get(
+            Crop, farm, crop_id, "That crop no longer exists."
+        )
+        return Response(serialize_crop(crop))
+
     def put(self, request, crop_id):
         farm = get_farm(request.user)
         crop = scoped_get(
             Crop, farm, crop_id, "That crop no longer exists."
         )
-        name = require_text(
-            request.data, "name", "Crop name is required."
-        )
-        if (
-            Crop.objects.filter(farm=farm, name__iexact=name)
-            .exclude(pk=crop.pk)
-            .exists()
-        ):
-            raise ApiError(
-                f'A crop named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
+        require_farm_setup_write(request)
+        name = require_name(request.data, "name", "Crop")
+        ensure_unique_farm_name(Crop, farm, name, "Crop", crop)
         crop.name = name
-        crop.save(update_fields=["name"])
+        save_unique_farm_name(crop, "Crop")
         return Response(serialize_crop(crop))
+
+    def patch(self, request, crop_id):
+        farm = get_farm(request.user)
+        crop = scoped_get(
+            Crop, farm, crop_id, "That crop no longer exists."
+        )
+        require_farm_setup_write(request)
+        if "name" in request.data:
+            crop.name = require_name(request.data, "name", "Crop")
+            ensure_unique_farm_name(Crop, farm, crop.name, "Crop", crop)
+            save_unique_farm_name(crop, "Crop")
+        return Response(serialize_crop(crop))
+
+    def delete(self, request, crop_id):
+        farm = get_farm(request.user)
+        crop = scoped_get(
+            Crop, farm, crop_id, "That crop no longer exists."
+        )
+        require_farm_setup_write(request)
+        if crop.crop_cycles.exists() or crop.varieties.filter(
+            crop_cycles__isnull=False
+        ).exists():
+            raise ApiError(
+                "A crop referenced by a crop cycle cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            crop.delete()
+        except (ProtectedError, RestrictedError):
+            raise ApiError(
+                "A crop referenced by a crop cycle cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class VarietyListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
         farm = get_farm(request.user)
         varieties = farm.varieties.all()
@@ -605,14 +877,12 @@ class VarietyListView(APIView):
         )
 
     def post(self, request):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
         crop = self._crop(farm, request.data.get("cropId"))
-        name = require_text(
-            request.data, "name", "Variety name is required."
-        )
-        variety = Variety.objects.create(
-            farm=farm, crop=crop, name=name
-        )
+        name = require_name(request.data, "name", "Variety")
+        variety = Variety(farm=farm, crop=crop, name=name)
+        variety.save()
         return Response(
             serialize_variety(variety), status=status.HTTP_201_CREATED
         )
@@ -636,22 +906,71 @@ class VarietyListView(APIView):
 
 
 class VarietyDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, variety_id):
+        farm = get_farm(request.user)
+        variety = scoped_get(
+            Variety, farm, variety_id, "That variety no longer exists."
+        )
+        return Response(serialize_variety(variety))
+
     def put(self, request, variety_id):
         farm = get_farm(request.user)
         variety = scoped_get(
             Variety, farm, variety_id, "That variety no longer exists."
         )
+        require_farm_setup_write(request)
         crop = VarietyListView._crop(farm, request.data.get("cropId"))
-        name = require_text(
-            request.data, "name", "Variety name is required."
-        )
+        name = require_name(request.data, "name", "Variety")
         variety.crop = crop
         variety.name = name
         variety.save(update_fields=["crop", "name"])
         return Response(serialize_variety(variety))
 
+    def patch(self, request, variety_id):
+        farm = get_farm(request.user)
+        variety = scoped_get(
+            Variety, farm, variety_id, "That variety no longer exists."
+        )
+        require_farm_setup_write(request)
+        update_fields = []
+        if "cropId" in request.data:
+            variety.crop = VarietyListView._crop(
+                farm, request.data.get("cropId")
+            )
+            update_fields.append("crop")
+        if "name" in request.data:
+            variety.name = require_name(request.data, "name", "Variety")
+            update_fields.append("name")
+        if update_fields:
+            variety.save(update_fields=update_fields + ["updated_at"])
+        return Response(serialize_variety(variety))
+
+    def delete(self, request, variety_id):
+        farm = get_farm(request.user)
+        variety = scoped_get(
+            Variety, farm, variety_id, "That variety no longer exists."
+        )
+        require_farm_setup_write(request)
+        if variety.crop_cycles.exists():
+            raise ApiError(
+                "A variety referenced by a crop cycle cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            variety.delete()
+        except (ProtectedError, RestrictedError):
+            raise ApiError(
+                "A variety referenced by a crop cycle cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class UnitListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
@@ -659,20 +978,13 @@ class UnitListView(APIView):
         )
 
     def post(self, request):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Unit name is required."
-        )
+        name = require_name(request.data, "name", "Unit")
         base_measure = self._base_measure(request.data.get("baseMeasure"))
-        if Unit.objects.filter(farm=farm, name__iexact=name).exists():
-            raise ApiError(
-                f'A unit named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
-        unit = Unit.objects.create(
-            farm=farm, name=name, base_measure=base_measure
-        )
+        ensure_unique_farm_name(Unit, farm, name, "Unit")
+        unit = Unit(farm=farm, name=name, base_measure=base_measure)
+        save_unique_farm_name(unit, "Unit")
         return Response(
             serialize_unit(unit), status=status.HTTP_201_CREATED
         )
@@ -696,31 +1008,67 @@ class UnitListView(APIView):
 
 
 class UnitDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, unit_id):
+        farm = get_farm(request.user)
+        unit = scoped_get(
+            Unit, farm, unit_id, "That unit no longer exists."
+        )
+        return Response(serialize_unit(unit))
+
     def put(self, request, unit_id):
         farm = get_farm(request.user)
         unit = scoped_get(
             Unit, farm, unit_id, "That unit no longer exists."
         )
-        name = require_text(
-            request.data, "name", "Unit name is required."
-        )
+        require_farm_setup_write(request)
+        name = require_name(request.data, "name", "Unit")
         base_measure = UnitListView._base_measure(
             request.data.get("baseMeasure")
         )
-        if (
-            Unit.objects.filter(farm=farm, name__iexact=name)
-            .exclude(pk=unit.pk)
-            .exists()
-        ):
-            raise ApiError(
-                f'A unit named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
+        ensure_unique_farm_name(Unit, farm, name, "Unit", unit)
         unit.name = name
         unit.base_measure = base_measure
-        unit.save(update_fields=["name", "base_measure"])
+        save_unique_farm_name(unit, "Unit")
         return Response(serialize_unit(unit))
+
+    def patch(self, request, unit_id):
+        farm = get_farm(request.user)
+        unit = scoped_get(
+            Unit, farm, unit_id, "That unit no longer exists."
+        )
+        require_farm_setup_write(request)
+        if "name" in request.data:
+            unit.name = require_name(request.data, "name", "Unit")
+            ensure_unique_farm_name(Unit, farm, unit.name, "Unit", unit)
+        if "baseMeasure" in request.data:
+            unit.base_measure = UnitListView._base_measure(
+                request.data.get("baseMeasure")
+            )
+        if "name" in request.data or "baseMeasure" in request.data:
+            save_unique_farm_name(unit, "Unit")
+        return Response(serialize_unit(unit))
+
+    def delete(self, request, unit_id):
+        farm = get_farm(request.user)
+        unit = scoped_get(
+            Unit, farm, unit_id, "That unit no longer exists."
+        )
+        require_farm_setup_write(request)
+        if unit.inventory_items.exists() or unit.harvests.exists():
+            raise ApiError(
+                "A unit referenced by inventory or harvest records cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            unit.delete()
+        except (ProtectedError, RestrictedError):
+            raise ApiError(
+                "A unit referenced by inventory or harvest records cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 def unit_lookup(farm, unit_id, field):
@@ -730,12 +1078,106 @@ def unit_lookup(farm, unit_id, field):
         )
     try:
         return Unit.objects.get(farm=farm, pk=unit_id)
-    except (Unit.DoesNotExist, ValueError, ValidationError):
+    except (Unit.DoesNotExist, TypeError, ValueError, ValidationError):
         raise ApiError(
             "That unit does not exist.",
             status.HTTP_404_NOT_FOUND,
             field,
         )
+
+
+def validate_conversion_rule(
+    farm,
+    from_unit,
+    to_unit,
+    *,
+    existing_instance=None,
+):
+    if from_unit.pk == to_unit.pk:
+        raise ApiError(
+            "Choose two different units.",
+            status.HTTP_400_BAD_REQUEST,
+            "toUnitId",
+        )
+    if from_unit.base_measure != to_unit.base_measure:
+        raise ApiError(
+            "Units must share the same base measure category.",
+            status.HTTP_400_BAD_REQUEST,
+            "toUnitId",
+        )
+    if conversion_pair_query(
+        farm, from_unit, to_unit, existing_instance=existing_instance
+    ).exists():
+        raise_conversion_pair_conflict(from_unit, to_unit)
+
+
+def raise_conversion_pair_conflict(from_unit, to_unit):
+    raise ApiError(
+        f'A conversion rule for "{from_unit.name}" and '
+        f'"{to_unit.name}" already exists.',
+        status.HTTP_409_CONFLICT,
+        "toUnitId",
+    )
+
+
+def conversion_pair_query(farm, from_unit, to_unit, existing_instance=None):
+    query = UnitConversion.objects.filter(farm=farm).filter(
+        Q(from_unit=from_unit, to_unit=to_unit)
+        | Q(from_unit=to_unit, to_unit=from_unit)
+    )
+    if existing_instance is not None:
+        query = query.exclude(pk=existing_instance.pk)
+    return query
+
+
+def lock_conversion_farm(farm):
+    Farm.objects.select_for_update().get(pk=farm.pk)
+
+
+def parse_conversion_factor(value):
+    try:
+        factor = parse_decimal(
+            value,
+            "factor",
+            "Conversion factor must be a positive number.",
+            "Conversion factor must be a positive number.",
+            positive_message="Conversion factor must be a positive number.",
+        )
+    except ValueError as exc:
+        raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, "factor")
+    try:
+        return UnitConversion._meta.get_field("factor").clean(factor, None)
+    except ValidationError as exc:
+        raise ApiError(
+            "Conversion factor must fit within 18 digits and 6 decimal places.",
+            status.HTTP_400_BAD_REQUEST,
+            "factor",
+        ) from exc
+
+
+def save_conversion_rule(
+    conversion,
+    farm,
+    from_unit,
+    to_unit,
+    factor_value,
+    *,
+    existing_instance=None,
+    update_fields=None,
+):
+    with transaction.atomic():
+        lock_conversion_farm(farm)
+        validate_conversion_rule(
+            farm,
+            from_unit,
+            to_unit,
+            existing_instance=existing_instance,
+        )
+        factor = parse_conversion_factor(factor_value)
+        conversion.from_unit = from_unit
+        conversion.to_unit = to_unit
+        conversion.factor = factor
+        conversion.save(update_fields=update_fields)
 
 
 class ConversionListView(APIView):
@@ -756,42 +1198,76 @@ class ConversionListView(APIView):
         to_unit = unit_lookup(
             farm, request.data.get("toUnitId"), "toUnitId"
         )
-        if from_unit.pk == to_unit.pk:
-            raise ApiError(
-                "Choose two different units.",
-                status.HTTP_400_BAD_REQUEST,
-                "toUnitId",
-            )
-        try:
-            factor = parse_decimal(
-                request.data.get("factor"),
-                "factor",
-                "Conversion factor must be a positive number.",
-                "Conversion factor must be a positive number.",
-                positive_message="Conversion factor must be a positive number.",
-            )
-        except ValueError as exc:
-            raise ApiError(
-                str(exc), status.HTTP_400_BAD_REQUEST, "factor"
-            )
-        if UnitConversion.objects.filter(
-            farm=farm, from_unit=from_unit, to_unit=to_unit
-        ).exists():
-            raise ApiError(
-                f'A conversion rule from "{from_unit.name}" to '
-                f'"{to_unit.name}" already exists.',
-                status.HTTP_409_CONFLICT,
-            )
-        conversion = UnitConversion.objects.create(
+        conversion = UnitConversion(
             farm=farm,
             from_unit=from_unit,
             to_unit=to_unit,
-            factor=factor,
+        )
+        save_conversion_rule(
+            conversion,
+            farm,
+            from_unit,
+            to_unit,
+            request.data.get("factor"),
         )
         return Response(
             serialize_conversion(conversion),
             status=status.HTTP_201_CREATED,
         )
+
+
+class ConversionDetailView(APIView):
+    def get(self, request, conversion_id):
+        farm = get_farm(request.user)
+        conversion = scoped_get(
+            UnitConversion,
+            farm,
+            conversion_id,
+            "That conversion rule no longer exists.",
+        )
+        return Response(serialize_conversion(conversion))
+
+    def put(self, request, conversion_id):
+        farm = get_farm(request.user)
+        from_unit = unit_lookup(
+            farm, request.data.get("fromUnitId"), "fromUnitId"
+        )
+        to_unit = unit_lookup(
+            farm, request.data.get("toUnitId"), "toUnitId"
+        )
+        with transaction.atomic():
+            lock_conversion_farm(farm)
+            conversion = scoped_get(
+                UnitConversion,
+                farm,
+                conversion_id,
+                "That conversion rule no longer exists.",
+            )
+            validate_conversion_rule(
+                farm,
+                from_unit,
+                to_unit,
+                existing_instance=conversion,
+            )
+            factor = parse_conversion_factor(request.data.get("factor"))
+            conversion.from_unit = from_unit
+            conversion.to_unit = to_unit
+            conversion.factor = factor
+            conversion.save(update_fields=["from_unit", "to_unit", "factor"])
+        return Response(serialize_conversion(conversion))
+
+    def delete(self, request, conversion_id):
+        farm = get_farm(request.user)
+        with transaction.atomic():
+            lock_conversion_farm(farm)
+            conversion = scoped_get(
+                UnitConversion,
+                farm,
+                conversion_id,
+                "That conversion rule no longer exists.",
+            )
+            conversion.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ConversionConvertView(APIView):
@@ -815,43 +1291,27 @@ class ConversionConvertView(APIView):
                 str(exc), status.HTTP_400_BAD_REQUEST, "quantity"
             )
 
-        if from_unit.pk == to_unit.pk:
-            return Response(
-                {
-                    "fromUnitId": str(from_unit.id),
-                    "toUnitId": str(to_unit.id),
-                    "quantity": as_number(quantity),
-                    "factor": 1,
-                    "converted": as_number(quantity),
-                }
+        source_data = _unit_data(from_unit)
+        target_data = _unit_data(to_unit)
+        is_identity = from_unit.pk == to_unit.pk
+        rules = (
+            []
+            if is_identity
+            else _conversion_rule_data(farm, from_unit, to_unit)
+        )
+        try:
+            factor = (
+                1
+                if is_identity
+                else conversion_factor(source_data, target_data, rules)
             )
-
-        if from_unit.base_measure != to_unit.base_measure:
-            raise ApiError(
-                f'Cannot convert "{from_unit.name}" '
-                f"({from_unit.base_measure}) to \"{to_unit.name}\" "
-                f"({to_unit.base_measure}): base measures do not match.",
-                status.HTTP_400_BAD_REQUEST,
+            converted = convert_quantity(
+                quantity, source_data, target_data, rules
             )
-
-        forward = UnitConversion.objects.filter(
-            farm=farm, from_unit=from_unit, to_unit=to_unit
-        ).first()
-        if forward is not None:
-            factor = forward.factor
-            converted = quantity * factor
-        else:
-            reverse = UnitConversion.objects.filter(
-                farm=farm, from_unit=to_unit, to_unit=from_unit
-            ).first()
-            if reverse is None:
-                raise ApiError(
-                    f'No rule exists for converting from '
-                    f'"{from_unit.name}" to "{to_unit.name}".',
-                    status.HTTP_404_NOT_FOUND,
-                )
-            factor = Decimal(1) / reverse.factor
-            converted = quantity / reverse.factor
+        except MissingConversionRuleError as exc:
+            raise ApiError(str(exc), status.HTTP_404_NOT_FOUND)
+        except UnitConversionError as exc:
+            raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST)
 
         return Response(
             {
@@ -876,11 +1336,13 @@ class CropCycleListView(APIView):
         return Response([serialize_cycle(cycle) for cycle in cycles])
 
     def post(self, request):
+        require_farm_setup_write(request)
+        self._reject_status_input(request.data)
         farm = get_farm(request.user)
         field = self._field(farm, request.data.get("fieldId"))
         crop = self._crop(farm, request.data.get("cropId"))
         variety = self._variety(farm, request.data.get("varietyId"))
-        if variety.crop_id != crop.id:
+        if variety is not None and variety.crop_id != crop.id:
             raise ApiError(
                 "The selected variety does not belong to the selected crop.",
                 status.HTTP_400_BAD_REQUEST,
@@ -892,6 +1354,7 @@ class CropCycleListView(APIView):
             "Start date is required.",
             "Start date must be a valid calendar date.",
         )
+        cycle_type = self._cycle_type(request.data.get("cycleType"))
         end_date = self._end_date(
             request.data.get("endDate"), start_date
         )
@@ -906,6 +1369,7 @@ class CropCycleListView(APIView):
             field=field,
             crop=crop,
             variety=variety,
+            cycle_type=cycle_type,
             start_date=start_date,
             end_date=end_date,
             expected_yield=expected_yield,
@@ -953,11 +1417,7 @@ class CropCycleListView(APIView):
     @staticmethod
     def _variety(farm, variety_id):
         if variety_id in (None, ""):
-            raise ApiError(
-                "Select a variety for this crop cycle.",
-                status.HTTP_400_BAD_REQUEST,
-                "varietyId",
-            )
+            return None
         try:
             return Variety.objects.get(farm=farm, pk=variety_id)
         except (Variety.DoesNotExist, ValueError, ValidationError):
@@ -965,6 +1425,28 @@ class CropCycleListView(APIView):
                 "The selected variety does not exist.",
                 status.HTTP_404_NOT_FOUND,
                 "varietyId",
+            )
+
+    @staticmethod
+    def _cycle_type(value):
+        if value not in CycleType.values:
+            message = (
+                "Select whether this crop cycle is annual or perennial."
+                if value in (None, "")
+                else "Cycle type must be annual or perennial."
+            )
+            raise ApiError(
+                message, status.HTTP_400_BAD_REQUEST, "cycleType"
+            )
+        return value
+
+    @staticmethod
+    def _reject_status_input(data):
+        if "status" in data:
+            raise ApiError(
+                "Change crop cycle status through the close or reopen action.",
+                status.HTTP_400_BAD_REQUEST,
+                "status",
             )
 
     @staticmethod
@@ -1000,7 +1482,7 @@ class CropCycleListView(APIView):
         if isinstance(value, str) and not value.strip():
             return None
         try:
-            return parse_decimal(
+            amount = parse_decimal(
                 value,
                 key,
                 f"{'Expected yield' if key == 'expectedYield' else 'Expected price'} must be a number.",
@@ -1015,10 +1497,44 @@ class CropCycleListView(APIView):
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, key
             )
+        model_field = {
+            "expectedYield": "expected_yield",
+            "expectedPrice": "expected_price",
+        }[key]
+        try:
+            return CropCycle._meta.get_field(model_field).clean(
+                amount, None
+            )
+        except ValidationError as exc:
+            label = (
+                "Expected yield"
+                if key == "expectedYield"
+                else "Expected price"
+            )
+            raise ApiError(
+                f"{label} must fit within 14 digits and 4 decimal places.",
+                status.HTTP_400_BAD_REQUEST,
+                key,
+            ) from exc
 
 
 class CropCycleDetailView(APIView):
+    def get(self, request, cycle_id):
+        farm = get_farm(request.user)
+        cycle = scoped_get(
+            CropCycle, farm, cycle_id, "That crop cycle no longer exists."
+        )
+        return Response(serialize_cycle(cycle))
+
     def put(self, request, cycle_id):
+        return self._update(request, cycle_id)
+
+    def patch(self, request, cycle_id):
+        return self._update(request, cycle_id)
+
+    def _update(self, request, cycle_id):
+        require_farm_setup_write(request)
+        CropCycleListView._reject_status_input(request.data)
         farm = get_farm(request.user)
         cycle = scoped_get(
             CropCycle, farm, cycle_id, "That crop cycle no longer exists."
@@ -1028,6 +1544,45 @@ class CropCycleDetailView(APIView):
                 "This crop cycle is closed and can no longer be edited.",
                 status.HTTP_409_CONFLICT,
             )
+        if "fieldId" in request.data:
+            cycle.field = CropCycleListView._field(
+                farm, request.data.get("fieldId")
+            )
+        if "cropId" in request.data:
+            cycle.crop = CropCycleListView._crop(
+                farm, request.data.get("cropId")
+            )
+        if "varietyId" in request.data:
+            cycle.variety = CropCycleListView._variety(
+                farm, request.data.get("varietyId")
+            )
+        if cycle.variety_id and cycle.variety.crop_id != cycle.crop_id:
+            raise ApiError(
+                "The selected variety does not belong to the selected crop.",
+                status.HTTP_400_BAD_REQUEST,
+                "varietyId",
+            )
+        if "cycleType" in request.data:
+            cycle.cycle_type = CropCycleListView._cycle_type(
+                request.data.get("cycleType")
+            )
+        if "startDate" in request.data:
+            cycle.start_date = parse_body_date(
+                request.data,
+                "startDate",
+                "Start date is required.",
+                "Start date must be a valid calendar date.",
+            )
+        if "endDate" in request.data:
+            cycle.end_date = CropCycleListView._end_date(
+                request.data.get("endDate"), cycle.start_date
+            )
+        elif cycle.end_date and cycle.end_date < cycle.start_date:
+            raise ApiError(
+                "End date cannot be before the start date.",
+                status.HTTP_400_BAD_REQUEST,
+                "endDate",
+            )
         if "expectedYield" in request.data:
             cycle.expected_yield = CropCycleListView._optional_amount(
                 request.data, "expectedYield"
@@ -1036,12 +1591,27 @@ class CropCycleDetailView(APIView):
             cycle.expected_price = CropCycleListView._optional_amount(
                 request.data, "expectedPrice"
             )
-        cycle.save(update_fields=["expected_yield", "expected_price"])
+        cycle.save()
         return Response(serialize_cycle(cycle))
+
+    def delete(self, request, cycle_id):
+        require_farm_setup_write(request)
+        farm = get_farm(request.user)
+        cycle = scoped_get(
+            CropCycle, farm, cycle_id, "That crop cycle no longer exists."
+        )
+        if cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "This crop cycle is closed and can no longer be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        cycle.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CropCycleCloseView(APIView):
     def post(self, request, cycle_id):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
         cycle = scoped_get(
             CropCycle, farm, cycle_id, "That crop cycle no longer exists."
@@ -1056,7 +1626,26 @@ class CropCycleCloseView(APIView):
         return Response(serialize_cycle(cycle))
 
 
+class CropCycleReopenView(APIView):
+    def post(self, request, cycle_id):
+        require_farm_setup_write(request)
+        farm = get_farm(request.user)
+        cycle = scoped_get(
+            CropCycle, farm, cycle_id, "That crop cycle no longer exists."
+        )
+        if cycle.status == CycleStatus.OPEN:
+            raise ApiError(
+                "This crop cycle is already open.",
+                status.HTTP_409_CONFLICT,
+            )
+        cycle.status = CycleStatus.OPEN
+        cycle.save(update_fields=["status"])
+        return Response(serialize_cycle(cycle))
+
+
 class ActivityTypeListView(APIView):
+    permission_classes = (IsAuthenticated,)
+
     def get(self, request):
         farm = get_farm(request.user)
         return Response(
@@ -1067,22 +1656,28 @@ class ActivityTypeListView(APIView):
         )
 
     def post(self, request):
+        require_farm_setup_write(request)
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", "Template name is required."
-        )
+        name = require_name(request.data, "name", "Activity type")
         category = self._category(request.data.get("category"))
-        if ActivityType.objects.filter(
-            farm=farm, name__iexact=name
-        ).exists():
-            raise ApiError(
-                f'A template named "{name}" already exists.',
-                status.HTTP_409_CONFLICT,
-                "name",
-            )
-        activity_type = ActivityType.objects.create(
-            farm=farm, name=name, category=category, standard=False
+        inputs = self._inputs(request.data.get("inputs", []))
+        labour_hours = self._labour_hours(
+            request.data.get("labourHours", 0)
         )
+        equipment = self._equipment(request.data.get("equipment", ""))
+        ensure_unique_farm_name(
+            ActivityType, farm, name, "Activity type"
+        )
+        activity_type = ActivityType(
+            farm=farm,
+            name=name,
+            category=category,
+            standard=False,
+            default_inputs=inputs,
+            default_labour_hours=labour_hours,
+            default_equipment=equipment,
+        )
+        save_unique_farm_name(activity_type, "Activity type")
         return Response(
             serialize_activity_type(activity_type),
             status=status.HTTP_201_CREATED,
@@ -1090,53 +1685,252 @@ class ActivityTypeListView(APIView):
 
     @staticmethod
     def _category(value):
-        text = str(value).strip() if value is not None else ""
-        if not text:
+        if not isinstance(value, str) or not value.strip():
             raise ApiError(
-                "A template category is required.",
+                "An activity type category is required.",
                 status.HTTP_400_BAD_REQUEST,
                 "category",
             )
-        if text not in ActivityCategory.values:
+        text = value.strip()
+        if len(text) > 32:
             raise ApiError(
-                "Category must be one of: land preparation, planting, "
-                "fertilizing, spraying, harvesting, custom.",
+                "Activity type category must be 32 characters or fewer.",
                 status.HTTP_400_BAD_REQUEST,
                 "category",
             )
         return text
 
+    @staticmethod
+    def _inputs(value):
+        if not isinstance(value, list):
+            raise ApiError(
+                "Inputs must be a list.",
+                status.HTTP_400_BAD_REQUEST,
+                "inputs",
+            )
+        parsed = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise ApiError(
+                    "Each input must include an item name and quantity.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "inputs",
+                )
+            item_name = item.get("itemName")
+            if not isinstance(item_name, str) or not item_name.strip():
+                raise ApiError(
+                    "Each input must include an item name.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "inputs",
+                )
+            item_name = item_name.strip()
+            if len(item_name) > 255:
+                raise ApiError(
+                    "Input item names must be 255 characters or fewer.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "inputs",
+                )
+            try:
+                quantity = parse_decimal(
+                    item.get("quantity"),
+                    "quantity",
+                    "Input quantity is required.",
+                    "Input quantity must be a number.",
+                    positive_message="Input quantity must be greater than zero.",
+                )
+                ActivityInputNeed._meta.get_field(
+                    "quantity"
+                ).run_validators(quantity)
+            except (ValueError, ValidationError) as exc:
+                message = (
+                    "Input quantity must be a positive number with at most "
+                    "four decimal places."
+                    if isinstance(exc, ValidationError)
+                    else str(exc)
+                )
+                raise ApiError(
+                    message,
+                    status.HTTP_400_BAD_REQUEST,
+                    "inputs",
+                ) from exc
+            parsed.append(
+                {"itemName": item_name, "quantity": str(quantity)}
+            )
+        return parsed
+
+    @staticmethod
+    def _labour_hours(value):
+        try:
+            hours = parse_decimal(
+                value,
+                "labourHours",
+                "Labour hours are required.",
+                "Labour hours must be a number.",
+                negative_message="Labour hours cannot be negative.",
+            )
+            ActivityType._meta.get_field(
+                "default_labour_hours"
+            ).run_validators(hours)
+        except ValueError as exc:
+            raise ApiError(
+                str(exc), status.HTTP_400_BAD_REQUEST, "labourHours"
+            ) from exc
+        except ValidationError as exc:
+            raise ApiError(
+                "Labour hours must be non-negative with at most four "
+                "decimal places.",
+                status.HTTP_400_BAD_REQUEST,
+                "labourHours",
+            ) from exc
+        return hours
+
+    @staticmethod
+    def _equipment(value):
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ApiError(
+                "Equipment must be text.",
+                status.HTTP_400_BAD_REQUEST,
+                "equipment",
+            )
+        text = value.strip()
+        if len(text) > 255:
+            raise ApiError(
+                "Equipment must be 255 characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "equipment",
+            )
+        return text
+
+
+class ActivityTypeDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, type_id):
+        farm = get_farm(request.user)
+        activity_type = scoped_get(
+            ActivityType,
+            farm,
+            type_id,
+            "That activity type no longer exists.",
+        )
+        return Response(serialize_activity_type(activity_type))
+
+    def put(self, request, type_id):
+        return self._update(request, type_id, partial=False)
+
+    def patch(self, request, type_id):
+        return self._update(request, type_id, partial=True)
+
+    def _update(self, request, type_id, *, partial):
+        farm = get_farm(request.user)
+        activity_type = scoped_get(
+            ActivityType,
+            farm,
+            type_id,
+            "That activity type no longer exists.",
+        )
+        require_farm_setup_write(request)
+        if activity_type.standard:
+            raise ApiError(
+                "Standard activity types cannot be changed.",
+                status.HTTP_409_CONFLICT,
+            )
+
+        data = request.data
+        if not partial or "name" in data:
+            name = require_name(data, "name", "Activity type")
+            ensure_unique_farm_name(
+                ActivityType, farm, name, "Activity type", activity_type
+            )
+            activity_type.name = name
+        if not partial or "category" in data:
+            activity_type.category = ActivityTypeListView._category(
+                data.get("category")
+            )
+        if not partial or "inputs" in data:
+            activity_type.default_inputs = ActivityTypeListView._inputs(
+                data.get("inputs", [])
+            )
+        if not partial or "labourHours" in data:
+            activity_type.default_labour_hours = (
+                ActivityTypeListView._labour_hours(data.get("labourHours", 0))
+            )
+        if not partial or "equipment" in data:
+            activity_type.default_equipment = ActivityTypeListView._equipment(
+                data.get("equipment", "")
+            )
+        save_unique_farm_name(activity_type, "Activity type")
+        return Response(serialize_activity_type(activity_type))
+
+    def delete(self, request, type_id):
+        farm = get_farm(request.user)
+        activity_type = scoped_get(
+            ActivityType,
+            farm,
+            type_id,
+            "That activity type no longer exists.",
+        )
+        require_farm_setup_write(request)
+        if activity_type.standard:
+            raise ApiError(
+                "Standard activity types cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        try:
+            activity_type.delete()
+        except (ProtectedError, RestrictedError):
+            raise ApiError(
+                "An activity type referenced by an activity cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class ActivityCycleListView(APIView):
     def get(self, request):
-        farm = get_farm(request.user)
-        return Response(
-            [
-                serialize_cycle_ref(cycle)
-                for cycle in farm.crop_cycles.select_related(
-                    "field", "crop"
-                )
-            ]
-        )
+        if request.user.role == Role.WORKER:
+            cycles = CropCycle.objects.filter(
+                activities__in=activity_queryset_for(request)
+            ).distinct()
+        else:
+            farm = get_activity_farm(request.user)
+            cycles = farm.crop_cycles.all()
+        return Response([
+            serialize_cycle_ref(cycle)
+            for cycle in cycles.select_related("field", "crop")
+        ])
 
 
 class ActivityListView(APIView):
     def get(self, request):
-        farm = get_farm(request.user)
-        activities = farm.activities.select_related(
+        activities = activity_queryset_for(request).select_related(
             "cycle", "type"
-        ).prefetch_related("input_needs", "labour_records")
+        ).prefetch_related(
+            "input_needs", "labour_records", "assignees"
+        )
         cycle_id = request.query_params.get("cycle")
         if cycle_id:
+            try:
+                cycle_id = UUID(cycle_id)
+            except (TypeError, ValueError):
+                return Response([])
             activities = activities.filter(cycle_id=cycle_id)
         return Response(
             [serialize_activity(activity) for activity in activities]
         )
 
     def post(self, request):
-        farm = get_farm(request.user)
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
         cycle = self._cycle(farm, request.data.get("cycleId"))
         activity_type = self._type(farm, request.data.get("typeId"))
+        if cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "Activities cannot be created in a closed crop cycle.",
+                status.HTTP_409_CONFLICT,
+            )
         planned_date = parse_body_date(
             request.data,
             "plannedDate",
@@ -1191,14 +1985,25 @@ class ActivityListView(APIView):
 
 
 class ActivityDetailView(APIView):
+    def get(self, request, activity_id):
+        activity = get_visible_activity(request, activity_id)
+        return Response(serialize_activity(activity))
+
     def put(self, request, activity_id):
-        farm = get_farm(request.user)
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
         activity = scoped_get(
             Activity, farm, activity_id, "That activity no longer exists."
         )
+        ensure_activity_cycle_open(activity)
         cycle = ActivityListView._cycle(
             farm, request.data.get("cycleId")
         )
+        if cycle.status == CycleStatus.CLOSED:
+            raise ApiError(
+                "Activities cannot be moved into a closed crop cycle.",
+                status.HTTP_409_CONFLICT,
+            )
         activity_type = ActivityListView._type(
             farm, request.data.get("typeId")
         )
@@ -1217,13 +2022,23 @@ class ActivityDetailView(APIView):
         activity.save()
         return Response(serialize_activity(activity))
 
-
-class ActivityStatusView(APIView):
-    def put(self, request, activity_id):
-        farm = get_farm(request.user)
+    def delete(self, request, activity_id):
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
         activity = scoped_get(
             Activity, farm, activity_id, "That activity no longer exists."
         )
+        ensure_activity_cycle_open(activity)
+        activity.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ActivityStatusView(APIView):
+    def put(self, request, activity_id):
+        if request.user.role != Role.WORKER:
+            require_activity_manager(request)
+        activity = get_visible_activity(request, activity_id)
+        ensure_activity_cycle_open(activity)
         raw = request.data.get("status")
         target = str(raw).strip() if raw is not None else ""
         if target not in ActivityStatus.values:
@@ -1249,12 +2064,65 @@ class ActivityStatusView(APIView):
         return "in progress" if value == ActivityStatus.IN_PROGRESS else value
 
 
-class ActivityResourceNeedsView(APIView):
+class ActivityAssigneesView(APIView):
     def put(self, request, activity_id):
-        farm = get_farm(request.user)
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
         activity = scoped_get(
             Activity, farm, activity_id, "That activity no longer exists."
         )
+        ensure_activity_cycle_open(activity)
+        if not isinstance(request.data, dict):
+            raise ApiError(
+                "assignedWorkerIds must be provided in an object.",
+                status.HTTP_400_BAD_REQUEST,
+                "assignedWorkerIds",
+            )
+        worker_ids = request.data.get("assignedWorkerIds")
+        if not isinstance(worker_ids, list):
+            raise ApiError(
+                "assignedWorkerIds must be an array.",
+                status.HTTP_400_BAD_REQUEST,
+                "assignedWorkerIds",
+            )
+        try:
+            worker_ids = [UUID(worker_id) for worker_id in worker_ids]
+        except (AttributeError, TypeError, ValueError):
+            raise ApiError(
+                "assignedWorkerIds must contain valid user IDs.",
+                status.HTTP_400_BAD_REQUEST,
+                "assignedWorkerIds",
+            )
+        worker_ids = set(worker_ids)
+        valid_ids = set(
+            User.objects.filter(
+                pk__in=worker_ids,
+                role=Role.WORKER,
+            )
+            .filter(Q(member_farms=farm) | Q(farm=farm))
+            .values_list("pk", flat=True)
+        )
+        if valid_ids != worker_ids:
+            raise ApiError(
+                "Each assigned user must be a worker belonging to this farm.",
+                status.HTTP_400_BAD_REQUEST,
+                "assignedWorkerIds",
+            )
+        activity.assignees.set(valid_ids)
+        activity = Activity.objects.prefetch_related("assignees").get(
+            pk=activity.pk
+        )
+        return Response(serialize_activity(activity))
+
+
+class ActivityResourceNeedsView(APIView):
+    def put(self, request, activity_id):
+        require_activity_manager(request)
+        farm = get_activity_farm(request.user)
+        activity = scoped_get(
+            Activity, farm, activity_id, "That activity no longer exists."
+        )
+        ensure_activity_cycle_open(activity)
         data = request.data
         try:
             labour_hours = parse_decimal(
@@ -1772,16 +2640,16 @@ class EquipmentUsageDetailView(APIView):
 
 class InventoryItemListView(APIView):
     def get(self, request):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         return Response(
             [
                 serialize_inventory_item(item)
-                for item in farm.inventory_items.all()
+                for item in farm.inventory_items.prefetch_related("movements")
             ]
         )
 
     def post(self, request):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         item = self._save(farm, None, request.data)
         return Response(
             serialize_inventory_item(item),
@@ -1790,9 +2658,12 @@ class InventoryItemListView(APIView):
 
     @staticmethod
     def _save(farm, item, data):
-        name = require_text(
-            data, "name", "Inventory item name is required."
-        )
+        if not hasattr(data, "get"):
+            raise ApiError(
+                "Inventory item details must be an object.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        name = require_name(data, "name", "Inventory item")
         unit_id = data.get("unitId")
         if unit_id in (None, ""):
             raise ApiError(
@@ -1806,13 +2677,37 @@ class InventoryItemListView(APIView):
                 status.HTTP_404_NOT_FOUND,
                 "unitId",
             )
-        reorder_level = parse_body_decimal(
-            data,
-            "reorderLevel",
-            "Reorder level must be a number.",
-            "Reorder level must be a number.",
-            negative_message="Reorder level cannot be negative.",
-        )
+        if (
+            item is not None
+            and item.unit_id != unit.id
+            and item.movements.exists()
+        ):
+            raise ApiError(
+                "Cannot change the unit of an item with stock movements.",
+                status.HTTP_409_CONFLICT,
+                "unitId",
+            )
+        reorder_value = data.get("reorderLevel")
+        reorder_level = None
+        if reorder_value not in (None, ""):
+            reorder_level = parse_body_decimal(
+                data,
+                "reorderLevel",
+                "Reorder level must be a number.",
+                "Reorder level must be a number.",
+                negative_message="Reorder level cannot be negative.",
+            )
+            try:
+                InventoryItem._meta.get_field(
+                    "reorder_level"
+                ).run_validators(reorder_level)
+            except ValidationError as exc:
+                raise ApiError(
+                    "Reorder level must be a non-negative number with at "
+                    "most four decimal places.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "reorderLevel",
+                ) from exc
         if item is None:
             return InventoryItem.objects.create(
                 farm=farm,
@@ -1828,8 +2723,18 @@ class InventoryItemListView(APIView):
 
 
 class InventoryItemDetailView(APIView):
+    def get(self, request, item_id):
+        farm = get_inventory_farm(request)
+        item = scoped_get(
+            InventoryItem,
+            farm,
+            item_id,
+            "That inventory item no longer exists.",
+        )
+        return Response(serialize_inventory_item(item))
+
     def put(self, request, item_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         item = scoped_get(
             InventoryItem,
             farm,
@@ -1839,10 +2744,26 @@ class InventoryItemDetailView(APIView):
         item = InventoryItemListView._save(farm, item, request.data)
         return Response(serialize_inventory_item(item))
 
+    def delete(self, request, item_id):
+        farm = get_inventory_farm(request)
+        item = scoped_get(
+            InventoryItem,
+            farm,
+            item_id,
+            "That inventory item no longer exists.",
+        )
+        if item.movements.exists():
+            raise ApiError(
+                "Cannot delete an inventory item with stock movements.",
+                status.HTTP_409_CONFLICT,
+            )
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class ItemMovementListView(APIView):
     def get(self, request, item_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         item = scoped_get(
             InventoryItem,
             farm,
@@ -1857,7 +2778,7 @@ class ItemMovementListView(APIView):
         )
 
     def post(self, request, item_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         item = scoped_get(
             InventoryItem,
             farm,
@@ -1865,22 +2786,93 @@ class ItemMovementListView(APIView):
             "That inventory item does not exist.",
             "itemId",
         )
-        body_item = request.data.get("itemId")
-        if body_item in (None, ""):
+        movement = StockMovementListView._create(
+            farm, request.data, path_item=item
+        )
+        return Response(
+            serialize_movement(movement),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class StockMovementListView(APIView):
+    def get(self, request):
+        farm = get_inventory_farm(request)
+        return Response(
+            [
+                serialize_movement(movement)
+                for movement in farm.stock_movements.all()
+            ]
+        )
+
+    def post(self, request):
+        farm = get_inventory_farm(request)
+        movement = self._create(farm, request.data)
+        return Response(
+            serialize_movement(movement),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _create(farm, data, *, path_item=None):
+        if not hasattr(data, "get"):
+            raise ApiError(
+                "Stock movement details must be an object.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        item_id = data.get("itemId")
+        if item_id in (None, ""):
             raise ApiError(
                 "Select an inventory item.",
                 status.HTTP_400_BAD_REQUEST,
                 "itemId",
             )
-        if str(body_item) != str(item.id):
+        if path_item is not None and str(item_id) != str(path_item.id):
             raise ApiError(
                 "The itemId must match the path.",
                 status.HTTP_400_BAD_REQUEST,
                 "itemId",
             )
-        movement_type = str(
-            request.data.get("type") or ""
-        ).strip()
+        if path_item is None:
+            try:
+                item = InventoryItem.objects.get(farm=farm, pk=item_id)
+            except (
+                InventoryItem.DoesNotExist,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                raise ApiError(
+                    "That inventory item does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "itemId",
+                )
+        else:
+            item = path_item
+
+        unit_id = data.get("unitId")
+        if unit_id not in (None, ""):
+            try:
+                unit = Unit.objects.get(farm=farm, pk=unit_id)
+            except (
+                Unit.DoesNotExist,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                raise ApiError(
+                    "That unit does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "unitId",
+                )
+            if unit.id != item.unit_id:
+                raise ApiError(
+                    "Stock movement quantities must use the item's unit.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "unitId",
+                )
+
+        movement_type = str(data.get("type") or "").strip()
         if movement_type not in MovementType.values:
             raise ApiError(
                 "Movement type must be one of: purchase, usage, adjustment.",
@@ -1889,15 +2881,15 @@ class ItemMovementListView(APIView):
             )
         try:
             quantity = parse_decimal(
-                request.data.get("quantity"),
+                data.get("quantity"),
                 "quantity",
-                "Quantity must be a number.",
+                "Quantity is required.",
                 "Quantity must be a number.",
             )
         except ValueError as exc:
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, "quantity"
-            )
+            ) from exc
         if movement_type == MovementType.ADJUSTMENT:
             if quantity == 0:
                 raise ApiError(
@@ -1911,48 +2903,201 @@ class ItemMovementListView(APIView):
                 status.HTTP_400_BAD_REQUEST,
                 "quantity",
             )
-        available = item.current_quantity()
-        if (
-            movement_type == MovementType.USAGE
-            and quantity > available
-        ):
+        try:
+            StockMovement._meta.get_field("quantity").run_validators(
+                quantity
+            )
+        except ValidationError as exc:
             raise ApiError(
-                f"Usage exceeds the available quantity "
-                f"(available: {format_amount(available)}).",
+                "Quantity must have at most four decimal places.",
                 status.HTTP_400_BAD_REQUEST,
                 "quantity",
+            ) from exc
+
+        movement_date = parse_body_date(
+            data,
+            "date",
+            "Date is required.",
+            "Date must be a valid calendar date.",
+        )
+        unit_cost = None
+        if data.get("unitCost") not in (None, ""):
+            unit_cost = parse_body_decimal(
+                data,
+                "unitCost",
+                "Unit cost must be a number.",
+                "Unit cost must be a number.",
+                negative_message="Unit cost cannot be negative.",
             )
-        movement_date = None
-        if request.data.get("date") not in (None, ""):
-            movement_date = parse_body_date(
-                request.data,
-                "date",
-                "Date is required.",
-                "Date must be a valid calendar date.",
+            try:
+                StockMovement._meta.get_field(
+                    "unit_cost"
+                ).run_validators(unit_cost)
+            except ValidationError as exc:
+                raise ApiError(
+                    "Unit cost must be non-negative with at most four "
+                    "decimal places.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "unitCost",
+                ) from exc
+
+        activity = None
+        activity_id = data.get("activityId")
+        if activity_id not in (None, ""):
+            try:
+                activity = Activity.objects.get(farm=farm, pk=activity_id)
+            except (
+                Activity.DoesNotExist,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                raise ApiError(
+                    "The selected activity does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "activityId",
+                )
+
+        expense = None
+        expense_id = data.get("expenseId")
+        if expense_id not in (None, ""):
+            try:
+                expense = Expense.objects.get(farm=farm, pk=expense_id)
+            except (
+                Expense.DoesNotExist,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                raise ApiError(
+                    "The selected expense does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "expenseId",
+                )
+
+        if movement_type in (
+            MovementType.PURCHASE,
+            MovementType.ADJUSTMENT,
+        ):
+            quantity_delta = quantity
+        else:
+            quantity_delta = -quantity
+        with transaction.atomic():
+            item = InventoryItem.objects.select_for_update().get(
+                farm=farm, pk=item.pk
             )
-        movement = StockMovement.objects.create(
-            farm=farm,
-            item=item,
-            type=movement_type,
-            quantity=quantity,
-            date=movement_date,
-            note=optional_text(request.data, "note"),
+            available = item.current_quantity()
+            if quantity_delta < 0 and -quantity_delta > available:
+                raise ApiError(
+                    "Movement would make stock negative "
+                    f"(available: {format_amount(available)}).",
+                    status.HTTP_400_BAD_REQUEST,
+                    "quantity",
+                )
+            movement = StockMovement.objects.create(
+                farm=farm,
+                item=item,
+                type=movement_type,
+                quantity=quantity,
+                date=movement_date,
+                unit_cost=unit_cost,
+                activity=activity,
+                expense=expense,
+                note=optional_text(data, "note"),
+            )
+        return movement
+
+
+class StockMovementDetailView(APIView):
+    def get(self, request, movement_id):
+        farm = get_inventory_farm(request)
+        movement = scoped_get(
+            StockMovement,
+            farm,
+            movement_id,
+            "That stock movement no longer exists.",
+        )
+        return Response(serialize_movement(movement))
+
+    def put(self, request, movement_id):
+        farm = get_inventory_farm(request)
+        scoped_get(
+            StockMovement,
+            farm,
+            movement_id,
+            "That stock movement no longer exists.",
+        )
+        raise ApiError(
+            "Posted stock movements cannot be edited; create a reversal "
+            "and replacement movement.",
+            status.HTTP_409_CONFLICT,
+        )
+
+    def delete(self, request, movement_id):
+        farm = get_inventory_farm(request)
+        scoped_get(
+            StockMovement,
+            farm,
+            movement_id,
+            "That stock movement no longer exists.",
+        )
+        raise ApiError(
+            "Posted stock movements cannot be deleted; create a reversal "
+            "and replacement movement.",
+            status.HTTP_409_CONFLICT,
+        )
+
+
+class ExpenseCategoryListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        ensure_default_expense_categories(farm)
+        return Response(
+            [
+                serialize_expense_category(category)
+                for category in farm.expense_categories.all()
+            ]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        ensure_default_expense_categories(farm)
+        name = require_text(
+            request.data, "name", "Category name is required."
+        )
+        max_length = ExpenseCategoryRecord._meta.get_field("name").max_length
+        if len(name) > max_length:
+            raise ApiError(
+                f"Category name must be {max_length} characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "name",
+            )
+        if farm.expense_categories.filter(name__iexact=name).exists():
+            raise ApiError(
+                "A category with that name already exists.",
+                status.HTTP_400_BAD_REQUEST,
+                "name",
+            )
+        category = ExpenseCategoryRecord.objects.create(
+            farm=farm, name=name
         )
         return Response(
-            serialize_movement(movement),
+            serialize_expense_category(category),
             status=status.HTTP_201_CREATED,
         )
 
 
-class StockMovementListView(APIView):
-    def get(self, request):
+class ExpenseCategoryDetailView(APIView):
+    def get(self, request, category_id):
         farm = get_farm(request.user)
-        return Response(
-            [
-                serialize_movement(movement)
-                for movement in farm.stock_movements.all()
-            ]
+        ensure_default_expense_categories(farm)
+        category = scoped_get(
+            ExpenseCategoryRecord,
+            farm,
+            category_id,
+            "That expense category no longer exists.",
         )
+        return Response(serialize_expense_category(category))
 
 
 class ExpenseListView(APIView):
@@ -1961,38 +3106,49 @@ class ExpenseListView(APIView):
         return Response(
             [
                 serialize_expense(expense)
-                for expense in farm.expenses.prefetch_related(
-                    "attachments"
-                )
+                for expense in farm.expenses.select_related(
+                    "category_record", "supplier_record"
+                ).prefetch_related("attachments")
             ]
         )
 
     def post(self, request):
         farm = get_farm(request.user)
         values = self._validate(request.data, farm)
-        expense = Expense.objects.create(
-            farm=farm,
-            cycle=values["cycle"],
-            category=values["category"],
-            amount=values["amount"],
-            date=values["date"],
-            supplier=values["supplier"],
-            status=ExpenseStatus.DRAFT,
-        )
+        expense = Expense.objects.create(farm=farm, **values)
         return Response(
             serialize_expense(expense),
             status=status.HTTP_201_CREATED,
         )
 
     @staticmethod
-    def _validate(data, farm):
-        category = str(data.get("category") or "").strip()
-        if category not in ExpenseCategory.values:
+    def _validate(data, farm, default_status=ExpenseStatus.DRAFT):
+        ensure_default_expense_categories(farm)
+        category_id = data.get("categoryId")
+        category_name = str(data.get("category") or "").strip()
+        if category_id not in (None, ""):
+            category = scoped_get(
+                ExpenseCategoryRecord,
+                farm,
+                category_id,
+                "The selected expense category does not exist.",
+                "categoryId",
+            )
+        elif category_name:
+            category = farm.expense_categories.filter(
+                name__iexact=category_name
+            ).first()
+            if category is None:
+                raise ApiError(
+                    "The selected expense category does not exist.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "category",
+                )
+        else:
             raise ApiError(
-                "Category must be one of: inputs, labour, equipment, "
-                "overhead, other.",
+                "Category is required.",
                 status.HTTP_400_BAD_REQUEST,
-                "category",
+                "categoryId",
             )
         try:
             amount = parse_decimal(
@@ -2005,6 +3161,12 @@ class ExpenseListView(APIView):
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, "amount"
             )
+        if amount <= 0:
+            raise ApiError(
+                "Amount must be greater than zero.",
+                status.HTTP_400_BAD_REQUEST,
+                "amount",
+            )
         try:
             expense_date = parse_date(
                 data.get("date"),
@@ -2016,7 +3178,41 @@ class ExpenseListView(APIView):
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, "date"
             )
-        supplier = optional_text(data, "supplier")
+        raw_status = data.get("status")
+        expense_status = str(
+            default_status if raw_status is None else raw_status
+        ).strip()
+        if expense_status not in ExpenseStatus.values:
+            raise ApiError(
+                "Status must be draft or posted.",
+                status.HTTP_400_BAD_REQUEST,
+                "status",
+            )
+        supplier_record = None
+        supplier_text = optional_text(data, "supplier")
+        supplier_id = data.get("supplierId")
+        if supplier_id not in (None, ""):
+            supplier_record = scoped_get(
+                Supplier,
+                farm,
+                supplier_id,
+                "The selected supplier does not exist.",
+                "supplierId",
+            )
+            supplier_text = None
+        attachment_reference = optional_text(
+            data, "attachmentReference"
+        )
+        attachment_max_length = Expense._meta.get_field(
+            "attachment_reference"
+        ).max_length
+        if len(attachment_reference) > attachment_max_length:
+            raise ApiError(
+                "Attachment reference must be "
+                f"{attachment_max_length} characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "attachmentReference",
+            )
         cycle = None
         cycle_id = data.get("cycleId")
         if cycle_id not in (None, ""):
@@ -2029,15 +3225,26 @@ class ExpenseListView(APIView):
                     "cycleId",
                 )
         return {
-            "category": category,
+            "category_record": category,
+            "category": category.name,
             "amount": amount,
             "date": expense_date,
-            "supplier": supplier or None,
+            "supplier": supplier_text or None,
+            "supplier_record": supplier_record,
+            "attachment_reference": attachment_reference or "",
+            "status": expense_status,
             "cycle": cycle,
         }
 
 
 class ExpenseDetailView(APIView):
+    def get(self, request, expense_id):
+        farm = get_farm(request.user)
+        expense = scoped_get(
+            Expense, farm, expense_id, "That expense no longer exists."
+        )
+        return Response(serialize_expense(expense))
+
     def put(self, request, expense_id):
         farm = get_farm(request.user)
         expense = scoped_get(
@@ -2048,12 +3255,11 @@ class ExpenseDetailView(APIView):
                 "Cannot edit a posted expense.",
                 status.HTTP_400_BAD_REQUEST,
             )
-        values = ExpenseListView._validate(request.data, farm)
-        expense.category = values["category"]
-        expense.amount = values["amount"]
-        expense.date = values["date"]
-        expense.supplier = values["supplier"]
-        expense.cycle = values["cycle"]
+        values = ExpenseListView._validate(
+            request.data, farm, default_status=expense.status
+        )
+        for field, value in values.items():
+            setattr(expense, field, value)
         expense.save()
         return Response(serialize_expense(expense))
 
@@ -2514,41 +3720,44 @@ class HarvestDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-def _convert_quantity_between_units(farm, quantity, from_unit, to_unit):
-    if from_unit.pk == to_unit.pk:
-        return quantity
-    if from_unit.base_measure != to_unit.base_measure:
-        raise ApiError(
-            f'Cannot convert "{from_unit.name}" '
-            f"({from_unit.base_measure}) to \"{to_unit.name}\" "
-            f"({to_unit.base_measure}): base measures do not match.",
-            status.HTTP_400_BAD_REQUEST,
-        )
-
-    forward = UnitConversion.objects.filter(
-        farm=farm, from_unit=from_unit, to_unit=to_unit
-    ).first()
-    if forward is not None:
-        return quantity * forward.factor
-
-    reverse = UnitConversion.objects.filter(
-        farm=farm, from_unit=to_unit, to_unit=from_unit
-    ).first()
-    if reverse is None:
-        raise ApiError(
-            f'No rule exists for converting from '
-            f'"{from_unit.name}" to "{to_unit.name}".',
-            status.HTTP_400_BAD_REQUEST,
-        )
-    return quantity / reverse.factor
+def _unit_data(unit):
+    return UnitData(unit.pk, unit.name, unit.base_measure)
 
 
-def aggregate_harvest_quantity_for_cycle(farm, cycle):
-    harvests = list(
-        Harvest.objects.filter(farm=farm, cycle=cycle).select_related(
-            "unit"
-        )
+def _conversion_rule_data(farm, from_unit, to_unit):
+    rules = UnitConversion.objects.filter(farm=farm).filter(
+        Q(from_unit=from_unit, to_unit=to_unit)
+        | Q(from_unit=to_unit, to_unit=from_unit)
     )
+    return [
+        ConversionRuleData(
+            rule.from_unit_id,
+            rule.to_unit_id,
+            rule.factor,
+        )
+        for rule in rules
+    ]
+
+
+def _convert_quantity_between_units(farm, quantity, from_unit, to_unit):
+    source_data = _unit_data(from_unit)
+    target_data = _unit_data(to_unit)
+    rules = (
+        []
+        if from_unit.pk == to_unit.pk
+        else _conversion_rule_data(farm, from_unit, to_unit)
+    )
+    try:
+        return convert_quantity(quantity, source_data, target_data, rules)
+    except UnitConversionError as exc:
+        raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST)
+
+
+def aggregate_harvest_quantity_for_cycle(farm, cycle, through_date=None):
+    harvests = Harvest.objects.filter(farm=farm, cycle=cycle)
+    if through_date is not None:
+        harvests = harvests.filter(date__lte=through_date)
+    harvests = list(harvests.select_related("unit"))
     if not harvests:
         return Decimal(0), None
 
@@ -2799,3 +4008,143 @@ class ProfitabilityReportView(APIView):
                     status.HTTP_404_NOT_FOUND,
                     key,
                 )
+
+
+class DashboardView(APIView):
+    def get(self, request):
+        from .dashboard import dashboard_for_request
+
+        farm = get_farm(request.user)
+        return Response(dashboard_for_request(farm, request.query_params))
+
+
+DEFAULT_NOTIFICATION_PAGE_SIZE = 20
+MAX_NOTIFICATION_PAGE_SIZE = 100
+
+
+def notification_for_user(user, notification_id):
+    try:
+        return Notification.objects.get(user=user, pk=notification_id)
+    except (Notification.DoesNotExist, ValueError, ValidationError):
+        raise ApiError(
+            "That notification no longer exists.",
+            status.HTTP_404_NOT_FOUND,
+            "id",
+        )
+
+
+def notification_page_param(request, key, default, maximum=None):
+    raw = request.query_params.get(key)
+    if raw in (None, ""):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ApiError(
+            f"{key} must be a positive whole number.",
+            status.HTTP_400_BAD_REQUEST,
+            key,
+        )
+    if value < 1 or (maximum is not None and value > maximum):
+        limit = f" between 1 and {maximum}" if maximum is not None else ""
+        raise ApiError(
+            f"{key} must be a positive whole number{limit}.",
+            status.HTTP_400_BAD_REQUEST,
+            key,
+        )
+    return value
+
+
+class NotificationListView(APIView):
+    def get(self, request):
+        page_size = notification_page_param(
+            request,
+            "page_size",
+            DEFAULT_NOTIFICATION_PAGE_SIZE,
+            MAX_NOTIFICATION_PAGE_SIZE,
+        )
+        page_number = notification_page_param(request, "page", 1)
+        notifications = Notification.objects.filter(user=request.user)
+        unread_count = notifications.filter(read=False).count()
+        paginator = Paginator(notifications, page_size)
+        try:
+            page = paginator.page(page_number)
+        except EmptyPage:
+            raise ApiError(
+                "That page does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "page",
+            )
+        return Response(
+            {
+                "count": paginator.count,
+                "unreadCount": unread_count,
+                "page": page.number,
+                "pageSize": page_size,
+                "totalPages": paginator.num_pages,
+                "nextPage": (
+                    page.next_page_number() if page.has_next() else None
+                ),
+                "previousPage": (
+                    page.previous_page_number()
+                    if page.has_previous()
+                    else None
+                ),
+                "results": [
+                    serialize_notification(notification)
+                    for notification in page.object_list
+                ],
+            }
+        )
+
+
+class NotificationDetailView(APIView):
+    def get(self, request, notification_id):
+        notification = notification_for_user(
+            request.user, notification_id
+        )
+        return Response(serialize_notification(notification))
+
+
+class NotificationMarkReadView(APIView):
+    def post(self, request, notification_id):
+        return self._mark_read(request, notification_id)
+
+    def put(self, request, notification_id):
+        return self._mark_read(request, notification_id)
+
+    def patch(self, request, notification_id):
+        return self._mark_read(request, notification_id)
+
+    @staticmethod
+    def _mark_read(request, notification_id):
+        notification = notification_for_user(
+            request.user, notification_id
+        )
+        if not notification.read:
+            notification.read = True
+            notification.save(update_fields=["read", "updated_at"])
+        return Response(serialize_notification(notification))
+
+
+class NotificationMarkAllReadView(APIView):
+    def post(self, request):
+        return self._mark_all_read(request)
+
+    def put(self, request):
+        return self._mark_all_read(request)
+
+    @staticmethod
+    def _mark_all_read(request):
+        updated = Notification.objects.filter(
+            user=request.user, read=False
+        ).update(read=True, updated_at=timezone.now())
+        return Response({"updated": updated, "unreadCount": 0})
+
+
+class NotificationUnreadCountView(APIView):
+    def get(self, request):
+        count = Notification.objects.filter(
+            user=request.user, read=False
+        ).count()
+        return Response({"unreadCount": count})

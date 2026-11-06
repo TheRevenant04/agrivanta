@@ -1,16 +1,21 @@
 [project]
 name = "agrivanta"
 version = "0.1.0"
-description = "Add your description here"
+description = "Farm operations, financial records, and profitability reporting"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "celery>=5.4.0",
     "django>=5.2,<6",
     "django-cors-headers>=4.9.0",
     "djangorestframework>=3.18.3",
     "mcp>=2.3.0",
+    "openai>=1.66.0",
     "openpyxl>=3.1.5",
     "psycopg[binary]>=3.2",
     "pytest>=9.1.1",
     "pytest-django>=4.14.0",
+    "redis>=5.1.0",
+    "sentry-sdk>=2.73.0",
+    "structlog>=26.1.0",
 ]
