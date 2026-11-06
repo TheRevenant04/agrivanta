@@ -3262,79 +3262,150 @@ class PaymentListView(APIView):
 
     def post(self, request):
         farm = get_farm(request.user)
-        payment_type = str(
-            request.data.get("type") or ""
-        ).strip()
-        if payment_type not in PaymentType.values:
-            raise ApiError(
-                "Payment type must be either received or paid.",
-                status.HTTP_400_BAD_REQUEST,
-                "type",
-            )
-        try:
-            amount = parse_decimal(
-                request.data.get("amount"),
-                "amount",
-                "Amount is required.",
-                "Amount must be a number.",
-            )
-        except ValueError as exc:
-            raise ApiError(
-                str(exc), status.HTTP_400_BAD_REQUEST, "amount"
-            )
-        try:
-            payment_date = parse_date(
-                request.data.get("date"),
-                "date",
-                "Date is required.",
-                "Date must be a valid calendar date.",
-            )
-        except ValueError as exc:
-            raise ApiError(
-                str(exc), status.HTTP_400_BAD_REQUEST, "date"
-            )
-
-        linked_expense = None
-        expense_id = request.data.get("linkedExpenseId")
-        if expense_id not in (None, ""):
-            try:
-                linked_expense = Expense.objects.get(
-                    farm=farm, pk=expense_id
-                )
-            except (Expense.DoesNotExist, ValueError, ValidationError):
-                raise ApiError(
-                    "That expense no longer exists.",
-                    status.HTTP_400_BAD_REQUEST,
-                    "linkedExpenseId",
-                )
-
-        linked_sale = None
-        sale_id = request.data.get("linkedSaleId")
-        if sale_id not in (None, ""):
-            try:
-                linked_sale = Sale.objects.get(farm=farm, pk=sale_id)
-            except (Sale.DoesNotExist, ValueError, ValidationError):
-                raise ApiError(
-                    "That sale no longer exists.",
-                    status.HTTP_400_BAD_REQUEST,
-                    "linkedSaleId",
-                )
-
-        reference = optional_text(request.data, "reference")
-        payment = Payment.objects.create(
-            farm=farm,
-            type=payment_type,
-            amount=amount,
-            date=payment_date,
-            linked_expense=linked_expense,
-            linked_sale=linked_sale,
-            reference=reference or None,
-        )
+        values = validate_payment(request.data, farm)
+        payment = Payment.objects.create(farm=farm, **values)
         return Response(
             serialize_payment(payment),
             status=status.HTTP_201_CREATED,
         )
 
+
+class PaymentDetailView(APIView):
+    def get(self, request, payment_id):
+        farm = get_farm(request.user)
+        return Response(
+            serialize_payment(self._payment(farm, payment_id))
+        )
+
+    def put(self, request, payment_id):
+        farm = get_farm(request.user)
+        payment = self._payment(farm, payment_id)
+        values = validate_payment(request.data, farm)
+        for key, value in values.items():
+            setattr(payment, key, value)
+        payment.save()
+        return Response(serialize_payment(payment))
+
+    def patch(self, request, payment_id):
+        farm = get_farm(request.user)
+        payment = self._payment(farm, payment_id)
+        current = serialize_payment(payment)
+        data = {**current, **request.data}
+        values = validate_payment(data, farm)
+        for key, value in values.items():
+            setattr(payment, key, value)
+        payment.save()
+        return Response(serialize_payment(payment))
+
+    def delete(self, request, payment_id):
+        farm = get_farm(request.user)
+        self._payment(farm, payment_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @staticmethod
+    def _payment(farm, payment_id):
+        return scoped_get(
+            Payment, farm, payment_id, "That payment no longer exists."
+        )
+
+
+def validate_payment(data, farm):
+    payment_type = str(data.get("type") or "").strip()
+    if payment_type not in PaymentType.values:
+        raise ApiError(
+            "Payment type must be either received or paid.",
+            status.HTTP_400_BAD_REQUEST,
+            "type",
+        )
+    amount = parse_body_decimal(
+        data,
+        "amount",
+        "Amount is required.",
+        "Amount must be a number.",
+        positive_message="Amount must be greater than zero.",
+    )
+    try:
+        Payment._meta.get_field("amount").run_validators(amount)
+    except ValidationError as exc:
+        raise ApiError(
+            "Amount must fit within 10 integer digits and 4 decimal "
+            "places.",
+            status.HTTP_400_BAD_REQUEST,
+            "amount",
+        ) from exc
+    payment_date = parse_body_date(
+        data,
+        "date",
+        "Date is required.",
+        "Date must be a valid calendar date.",
+    )
+    if payment_date > timezone.localdate():
+        raise ApiError(
+            "Date cannot be in the future.",
+            status.HTTP_400_BAD_REQUEST,
+            "date",
+        )
+
+    linked_expense = None
+    expense_id = data.get("linkedExpenseId")
+    if expense_id not in (None, ""):
+        try:
+            linked_expense = Expense.objects.get(farm=farm, pk=expense_id)
+        except (Expense.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "That expense no longer exists.",
+                status.HTTP_400_BAD_REQUEST,
+                "linkedExpenseId",
+            )
+
+    linked_sale = None
+    sale_id = data.get("linkedSaleId")
+    if sale_id not in (None, ""):
+        try:
+            linked_sale = Sale.objects.get(farm=farm, pk=sale_id)
+        except (Sale.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "That sale no longer exists.",
+                status.HTTP_400_BAD_REQUEST,
+                "linkedSaleId",
+            )
+
+    if linked_expense is not None and linked_sale is not None:
+        raise ApiError(
+            "A payment cannot link to both a sale and an expense.",
+            status.HTTP_400_BAD_REQUEST,
+            "linkedSaleId",
+        )
+    if linked_sale is not None and payment_type != PaymentType.RECEIVED:
+        raise ApiError(
+            "Only received payments can link to a sale.",
+            status.HTTP_400_BAD_REQUEST,
+            "linkedSaleId",
+        )
+    if linked_expense is not None and payment_type != PaymentType.PAID:
+        raise ApiError(
+            "Only paid payments can link to an expense.",
+            status.HTTP_400_BAD_REQUEST,
+            "linkedExpenseId",
+        )
+
+    reference = optional_text(data, "reference")
+    reference_max_length = Payment._meta.get_field("reference").max_length
+    if len(reference) > reference_max_length:
+        raise ApiError(
+            f"Reference must be {reference_max_length} characters or fewer.",
+            status.HTTP_400_BAD_REQUEST,
+            "reference",
+        )
+
+    return {
+        "type": payment_type,
+        "amount": amount,
+        "date": payment_date,
+        "linked_expense": linked_expense,
+        "linked_sale": linked_sale,
+        "reference": reference or None,
+    }
 
 class HarvestCycleListView(APIView):
     def get(self, request):
