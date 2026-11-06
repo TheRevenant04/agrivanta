@@ -186,6 +186,7 @@ def serialize_inventory_item(item):
         "unitId": as_id(item.unit_id),
         "reorderLevel": as_number(item.reorder_level),
         "currentQuantity": as_number(item.current_quantity()),
+        "lowStock": item.is_low_stock(),
     }
 
 
@@ -195,9 +196,15 @@ def serialize_movement(movement):
         "itemId": as_id(movement.item_id),
         "type": movement.type,
         "quantity": as_number(movement.quantity),
+        "date": as_date(movement.date),
+        "unitCost": as_number(movement.unit_cost),
+        "activityId": (
+            as_id(movement.activity_id) if movement.activity_id else None
+        ),
+        "expenseId": (
+            as_id(movement.expense_id) if movement.expense_id else None
+        ),
     }
-    if movement.date:
-        payload["date"] = as_date(movement.date)
     if movement.note:
         payload["note"] = movement.note
     return payload

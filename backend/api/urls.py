@@ -79,6 +79,10 @@ urlpatterns = [
         "expense-categories/<str:category_id>",
         views.ExpenseCategoryDetailView.as_view(),
     ),
+    path(
+        "stock-movements/<str:movement_id>",
+        views.StockMovementDetailView.as_view(),
+    ),
     path("expenses", views.ExpenseListView.as_view()),
     path(
         "expenses/<str:expense_id>",

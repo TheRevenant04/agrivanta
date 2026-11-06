@@ -403,20 +403,28 @@ class InventoryItem(TimestampedModel):
         Unit, on_delete=models.PROTECT, related_name="inventory_items"
     )
     reorder_level = models.DecimalField(
-        max_digits=14, decimal_places=4, default=0
+        max_digits=14,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(0)],
     )
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(reorder_level__isnull=True)
+                | models.Q(reorder_level__gte=0),
+                name="inventory_reorder_level_nonnegative",
+            )
+        ]
 
     def current_quantity(self, as_of_date=None):
         movements = self.movements.all()
         if as_of_date is not None:
-            movements = (
-                movement
-                for movement in movements
-                if movement.date is not None and movement.date <= as_of_date
-            )
+            movements = movements.filter(date__lte=as_of_date)
         total = sum(
             (
                 movement.quantity
@@ -427,6 +435,12 @@ class InventoryItem(TimestampedModel):
         )
         return total
 
+    def is_low_stock(self):
+        return (
+            self.reorder_level is not None
+            and self.current_quantity() <= self.reorder_level
+        )
+
 
 class StockMovement(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -434,15 +448,59 @@ class StockMovement(TimestampedModel):
         Farm, on_delete=models.CASCADE, related_name="stock_movements"
     )
     item = models.ForeignKey(
-        InventoryItem, on_delete=models.CASCADE, related_name="movements"
+        InventoryItem, on_delete=models.PROTECT, related_name="movements"
     )
     type = models.CharField(max_length=20, choices=MovementType.choices)
     quantity = models.DecimalField(max_digits=14, decimal_places=4)
-    date = models.DateField(null=True, blank=True)
+    date = models.DateField()
+    unit_cost = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True
+    )
+    activity = models.ForeignKey(
+        Activity,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="stock_movements",
+    )
+    expense = models.ForeignKey(
+        "Expense",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="stock_movements",
+    )
     note = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(type__in=MovementType.values),
+                name="stock_movement_type_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        type__in=(
+                            MovementType.PURCHASE,
+                            MovementType.USAGE,
+                        ),
+                        quantity__gt=0,
+                    )
+                    | (
+                        models.Q(type=MovementType.ADJUSTMENT)
+                        & ~models.Q(quantity=0)
+                    )
+                ),
+                name="stock_movement_quantity_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(unit_cost__isnull=True)
+                | models.Q(unit_cost__gte=0),
+                name="stock_movement_unit_cost_nonnegative",
+            ),
+        ]
 
 
 class Supplier(TimestampedModel):
