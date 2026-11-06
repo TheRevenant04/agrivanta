@@ -1,6 +1,19 @@
+from datetime import date
+
 from rest_framework.test import APIClient
 
-from api.models import User
+from api.models import (
+    Activity,
+    ActivityType,
+    Crop,
+    CropCycle,
+    Farm,
+    Field,
+    LabourRecord,
+    Role,
+    User,
+    Worker,
+)
 
 from .conftest import register
 
@@ -294,6 +307,225 @@ def test_worker_and_labour_endpoints_are_farm_scoped(client, cycle):
 
     assert client.get(f"{WORKERS}/{worker['id']}").status_code == 200
     assert client.get(f"{LABOUR_RECORDS}/{record['id']}").status_code == 200
+
+
+def test_manager_can_manage_workers_and_labour_in_member_farm(client, cycle):
+    activity = create_activity(client, cycle)
+    worker = create_worker(client)
+    record = create_labour_record(client, worker["id"], activity["id"])
+    farm = Farm.objects.get(pk=worker["farmId"])
+
+    manager = User.objects.create_user(
+        email="worker-labour-manager@agrivanta.test",
+        password="ManagerTest#42",
+        role=Role.MANAGER,
+    )
+    farm.members.add(manager)
+    manager_client = APIClient()
+    manager_client.force_authenticate(user=manager)
+
+    assert manager_client.get(WORKERS).data == [worker]
+    assert manager_client.get(f"{WORKERS}/{worker['id']}").status_code == 200
+    created_worker = manager_client.post(
+        WORKERS, {"name": "Manager Worker"}, format="json"
+    )
+    assert created_worker.status_code == 201
+    assert created_worker.data["farmId"] == str(farm.pk)
+    updated_worker = manager_client.put(
+        f"{WORKERS}/{created_worker.data['id']}",
+        {"name": "Updated Manager Worker"},
+        format="json",
+    )
+    assert updated_worker.status_code == 200
+    assert updated_worker.data["name"] == "Updated Manager Worker"
+    assert manager_client.delete(
+        f"{WORKERS}/{created_worker.data['id']}"
+    ).status_code == 204
+
+    assert manager_client.get(LABOUR_RECORDS).data == [record]
+    assert (
+        manager_client.get(f"{LABOUR_RECORDS}/{record['id']}").status_code
+        == 200
+    )
+    created_record = manager_client.post(
+        LABOUR_RECORDS,
+        {
+            "workerId": worker["id"],
+            "activityId": activity["id"],
+            "hours": 3,
+            "hourlyCost": 12,
+            "date": "2026-03-11",
+        },
+        format="json",
+    )
+    assert created_record.status_code == 201
+    updated_record = manager_client.put(
+        f"{LABOUR_RECORDS}/{created_record.data['id']}",
+        {
+            "workerId": worker["id"],
+            "activityId": activity["id"],
+            "hours": 4,
+            "hourlyCost": 13,
+            "date": "2026-03-12",
+        },
+        format="json",
+    )
+    assert updated_record.status_code == 200
+    assert updated_record.data["hours"] == 4
+    assert manager_client.delete(
+        f"{LABOUR_RECORDS}/{created_record.data['id']}"
+    ).status_code == 204
+
+    foreign_client = APIClient()
+    registered = register(
+        foreign_client, email="foreign-worker-farm@agrivanta.test"
+    )
+    assert registered.status_code == 201, registered.data
+    foreign_farm = Farm.objects.get(owner_id=registered.data["user"]["id"])
+    foreign_field = Field.objects.create(
+        farm=foreign_farm, name="Foreign Field", area=1
+    )
+    foreign_crop = Crop.objects.create(farm=foreign_farm, name="Foreign Crop")
+    foreign_cycle = CropCycle.objects.create(
+        farm=foreign_farm,
+        field=foreign_field,
+        crop=foreign_crop,
+        cycle_type="annual",
+        start_date=date(2026, 3, 1),
+    )
+    foreign_type = ActivityType.objects.create(
+        farm=foreign_farm, name="Foreign Activity", category="planting"
+    )
+    foreign_activity = Activity.objects.create(
+        farm=foreign_farm,
+        cycle=foreign_cycle,
+        type=foreign_type,
+        planned_date=date(2026, 3, 10),
+    )
+    foreign_worker = Worker.objects.create(
+        farm=foreign_farm, name="Foreign Worker"
+    )
+    foreign_record = LabourRecord.objects.create(
+        farm=foreign_farm,
+        worker=foreign_worker,
+        activity=foreign_activity,
+        hours=1,
+        hourly_cost=1,
+        date=date(2026, 3, 10),
+    )
+
+    assert manager_client.get(WORKERS).data == [worker]
+    assert manager_client.get(LABOUR_RECORDS).data == [record]
+    assert manager_client.get(
+        f"{WORKERS}/{foreign_worker.pk}"
+    ).status_code == 404
+    assert manager_client.put(
+        f"{WORKERS}/{foreign_worker.pk}",
+        {"name": "Changed foreign worker"},
+        format="json",
+    ).status_code == 404
+    assert manager_client.delete(
+        f"{WORKERS}/{foreign_worker.pk}"
+    ).status_code == 404
+    assert manager_client.get(
+        f"{LABOUR_RECORDS}/{foreign_record.pk}"
+    ).status_code == 404
+    assert manager_client.put(
+        f"{LABOUR_RECORDS}/{foreign_record.pk}",
+        {
+            "workerId": worker["id"],
+            "activityId": activity["id"],
+            "hours": 1,
+            "hourlyCost": 1,
+            "date": "2026-03-10",
+        },
+        format="json",
+    ).status_code == 404
+    assert manager_client.delete(
+        f"{LABOUR_RECORDS}/{foreign_record.pk}"
+    ).status_code == 404
+
+    foreign_worker_record = manager_client.post(
+        LABOUR_RECORDS,
+        {
+            "workerId": str(foreign_worker.pk),
+            "activityId": activity["id"],
+            "hours": 1,
+            "hourlyCost": 1,
+            "date": "2026-03-10",
+        },
+        format="json",
+    )
+    assert foreign_worker_record.status_code == 404
+    foreign_activity_record = manager_client.post(
+        LABOUR_RECORDS,
+        {
+            "workerId": worker["id"],
+            "activityId": str(foreign_activity.pk),
+            "hours": 1,
+            "hourlyCost": 1,
+            "date": "2026-03-10",
+        },
+        format="json",
+    )
+    assert foreign_activity_record.status_code == 404
+
+
+def test_worker_and_labour_endpoints_require_owner_or_manager_role(
+    client, cycle
+):
+    activity = create_activity(client, cycle)
+    worker = create_worker(client)
+    record = create_labour_record(client, worker["id"], activity["id"])
+    farm = Farm.objects.get(pk=worker["farmId"])
+    user = User.objects.create_user(
+        email="worker-labour-worker@agrivanta.test",
+        password="WorkerTest#42",
+        role=Role.WORKER,
+    )
+    farm.members.add(user)
+    worker_client = APIClient()
+    worker_client.force_authenticate(user=user)
+
+    requests = (
+        ("get", WORKERS, None),
+        ("post", WORKERS, {"name": "Unauthorized Worker"}),
+        ("get", f"{WORKERS}/{worker['id']}", None),
+        ("put", f"{WORKERS}/{worker['id']}", {"name": "Unauthorized"}),
+        ("delete", f"{WORKERS}/{worker['id']}", None),
+        ("get", LABOUR_RECORDS, None),
+        (
+            "post",
+            LABOUR_RECORDS,
+            {
+                "workerId": worker["id"],
+                "activityId": activity["id"],
+                "hours": 1,
+                "hourlyCost": 1,
+                "date": "2026-03-10",
+            },
+        ),
+        ("get", f"{LABOUR_RECORDS}/{record['id']}", None),
+        (
+            "put",
+            f"{LABOUR_RECORDS}/{record['id']}",
+            {
+                "workerId": worker["id"],
+                "activityId": activity["id"],
+                "hours": 1,
+                "hourlyCost": 1,
+                "date": "2026-03-10",
+            },
+        ),
+        ("delete", f"{LABOUR_RECORDS}/{record['id']}", None),
+    )
+    for method, url, payload in requests:
+        response = (
+            getattr(worker_client, method)(url, payload, format="json")
+            if payload is not None
+            else getattr(worker_client, method)(url)
+        )
+        assert response.status_code == 403
 
 
 def test_worker_and_labour_endpoints_require_authentication(anon):
