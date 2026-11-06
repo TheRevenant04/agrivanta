@@ -160,6 +160,30 @@ def test_expense_with_supplier_attachment_and_posted_status(client):
     assert response.data["status"] == "posted"
 
 
+def test_expense_accepts_max_length_attachment_reference(client):
+    attachment_reference = "a" * 500
+    response = client.post(
+        "/api/expenses",
+        payload(client, attachmentReference=attachment_reference),
+        format="json",
+    )
+    assert response.status_code == 201, response.data
+    assert response.data["attachmentReference"] == attachment_reference
+    expense = Expense.objects.get(pk=response.data["id"])
+    assert expense.attachment_reference == attachment_reference
+
+
+def test_expense_rejects_attachment_reference_over_max_length(client):
+    response = client.post(
+        "/api/expenses",
+        payload(client, attachmentReference="a" * 501),
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.data["field"] == "attachmentReference"
+    assert Expense.objects.count() == 0
+
+
 @pytest.mark.parametrize(
     ("overrides", "field"),
     [

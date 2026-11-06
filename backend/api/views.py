@@ -189,6 +189,11 @@ def get_activity_farm(user):
     return get_farm(user)
 
 
+def get_inventory_farm(request):
+    require_activity_manager(request)
+    return get_activity_farm(request.user)
+
+
 def require_activity_manager(request):
     if request.user.role not in (Role.OWNER, Role.MANAGER):
         raise ApiError(
@@ -1068,7 +1073,7 @@ def unit_lookup(farm, unit_id, field):
         )
     try:
         return Unit.objects.get(farm=farm, pk=unit_id)
-    except (Unit.DoesNotExist, ValueError, ValidationError):
+    except (Unit.DoesNotExist, TypeError, ValueError, ValidationError):
         raise ApiError(
             "That unit does not exist.",
             status.HTTP_404_NOT_FOUND,
@@ -2184,16 +2189,16 @@ class ActivityResourceNeedsView(APIView):
 
 class InventoryItemListView(APIView):
     def get(self, request):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         return Response(
             [
                 serialize_inventory_item(item)
-                for item in farm.inventory_items.all()
+                for item in farm.inventory_items.prefetch_related("movements")
             ]
         )
 
     def post(self, request):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         item = self._save(farm, None, request.data)
         return Response(
             serialize_inventory_item(item),
@@ -2202,9 +2207,12 @@ class InventoryItemListView(APIView):
 
     @staticmethod
     def _save(farm, item, data):
-        name = require_text(
-            data, "name", "Inventory item name is required."
-        )
+        if not hasattr(data, "get"):
+            raise ApiError(
+                "Inventory item details must be an object.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        name = require_name(data, "name", "Inventory item")
         unit_id = data.get("unitId")
         if unit_id in (None, ""):
             raise ApiError(
@@ -2218,13 +2226,37 @@ class InventoryItemListView(APIView):
                 status.HTTP_404_NOT_FOUND,
                 "unitId",
             )
-        reorder_level = parse_body_decimal(
-            data,
-            "reorderLevel",
-            "Reorder level must be a number.",
-            "Reorder level must be a number.",
-            negative_message="Reorder level cannot be negative.",
-        )
+        if (
+            item is not None
+            and item.unit_id != unit.id
+            and item.movements.exists()
+        ):
+            raise ApiError(
+                "Cannot change the unit of an item with stock movements.",
+                status.HTTP_409_CONFLICT,
+                "unitId",
+            )
+        reorder_value = data.get("reorderLevel")
+        reorder_level = None
+        if reorder_value not in (None, ""):
+            reorder_level = parse_body_decimal(
+                data,
+                "reorderLevel",
+                "Reorder level must be a number.",
+                "Reorder level must be a number.",
+                negative_message="Reorder level cannot be negative.",
+            )
+            try:
+                InventoryItem._meta.get_field(
+                    "reorder_level"
+                ).run_validators(reorder_level)
+            except ValidationError as exc:
+                raise ApiError(
+                    "Reorder level must be a non-negative number with at "
+                    "most four decimal places.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "reorderLevel",
+                ) from exc
         if item is None:
             return InventoryItem.objects.create(
                 farm=farm,
@@ -2240,8 +2272,18 @@ class InventoryItemListView(APIView):
 
 
 class InventoryItemDetailView(APIView):
+    def get(self, request, item_id):
+        farm = get_inventory_farm(request)
+        item = scoped_get(
+            InventoryItem,
+            farm,
+            item_id,
+            "That inventory item no longer exists.",
+        )
+        return Response(serialize_inventory_item(item))
+
     def put(self, request, item_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         item = scoped_get(
             InventoryItem,
             farm,
@@ -2251,10 +2293,26 @@ class InventoryItemDetailView(APIView):
         item = InventoryItemListView._save(farm, item, request.data)
         return Response(serialize_inventory_item(item))
 
+    def delete(self, request, item_id):
+        farm = get_inventory_farm(request)
+        item = scoped_get(
+            InventoryItem,
+            farm,
+            item_id,
+            "That inventory item no longer exists.",
+        )
+        if item.movements.exists():
+            raise ApiError(
+                "Cannot delete an inventory item with stock movements.",
+                status.HTTP_409_CONFLICT,
+            )
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class ItemMovementListView(APIView):
     def get(self, request, item_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         item = scoped_get(
             InventoryItem,
             farm,
@@ -2269,7 +2327,7 @@ class ItemMovementListView(APIView):
         )
 
     def post(self, request, item_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         item = scoped_get(
             InventoryItem,
             farm,
@@ -2277,22 +2335,93 @@ class ItemMovementListView(APIView):
             "That inventory item does not exist.",
             "itemId",
         )
-        body_item = request.data.get("itemId")
-        if body_item in (None, ""):
+        movement = StockMovementListView._create(
+            farm, request.data, path_item=item
+        )
+        return Response(
+            serialize_movement(movement),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class StockMovementListView(APIView):
+    def get(self, request):
+        farm = get_inventory_farm(request)
+        return Response(
+            [
+                serialize_movement(movement)
+                for movement in farm.stock_movements.all()
+            ]
+        )
+
+    def post(self, request):
+        farm = get_inventory_farm(request)
+        movement = self._create(farm, request.data)
+        return Response(
+            serialize_movement(movement),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _create(farm, data, *, path_item=None):
+        if not hasattr(data, "get"):
+            raise ApiError(
+                "Stock movement details must be an object.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        item_id = data.get("itemId")
+        if item_id in (None, ""):
             raise ApiError(
                 "Select an inventory item.",
                 status.HTTP_400_BAD_REQUEST,
                 "itemId",
             )
-        if str(body_item) != str(item.id):
+        if path_item is not None and str(item_id) != str(path_item.id):
             raise ApiError(
                 "The itemId must match the path.",
                 status.HTTP_400_BAD_REQUEST,
                 "itemId",
             )
-        movement_type = str(
-            request.data.get("type") or ""
-        ).strip()
+        if path_item is None:
+            try:
+                item = InventoryItem.objects.get(farm=farm, pk=item_id)
+            except (
+                InventoryItem.DoesNotExist,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                raise ApiError(
+                    "That inventory item does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "itemId",
+                )
+        else:
+            item = path_item
+
+        unit_id = data.get("unitId")
+        if unit_id not in (None, ""):
+            try:
+                unit = Unit.objects.get(farm=farm, pk=unit_id)
+            except (
+                Unit.DoesNotExist,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                raise ApiError(
+                    "That unit does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "unitId",
+                )
+            if unit.id != item.unit_id:
+                raise ApiError(
+                    "Stock movement quantities must use the item's unit.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "unitId",
+                )
+
+        movement_type = str(data.get("type") or "").strip()
         if movement_type not in MovementType.values:
             raise ApiError(
                 "Movement type must be one of: purchase, usage, adjustment.",
@@ -2301,15 +2430,15 @@ class ItemMovementListView(APIView):
             )
         try:
             quantity = parse_decimal(
-                request.data.get("quantity"),
+                data.get("quantity"),
                 "quantity",
-                "Quantity must be a number.",
+                "Quantity is required.",
                 "Quantity must be a number.",
             )
         except ValueError as exc:
             raise ApiError(
                 str(exc), status.HTTP_400_BAD_REQUEST, "quantity"
-            )
+            ) from exc
         if movement_type == MovementType.ADJUSTMENT:
             if quantity == 0:
                 raise ApiError(
@@ -2323,47 +2452,148 @@ class ItemMovementListView(APIView):
                 status.HTTP_400_BAD_REQUEST,
                 "quantity",
             )
-        available = item.current_quantity()
-        if (
-            movement_type == MovementType.USAGE
-            and quantity > available
-        ):
+        try:
+            StockMovement._meta.get_field("quantity").run_validators(
+                quantity
+            )
+        except ValidationError as exc:
             raise ApiError(
-                f"Usage exceeds the available quantity "
-                f"(available: {format_amount(available)}).",
+                "Quantity must have at most four decimal places.",
                 status.HTTP_400_BAD_REQUEST,
                 "quantity",
-            )
-        movement_date = None
-        if request.data.get("date") not in (None, ""):
-            movement_date = parse_body_date(
-                request.data,
-                "date",
-                "Date is required.",
-                "Date must be a valid calendar date.",
-            )
-        movement = StockMovement.objects.create(
-            farm=farm,
-            item=item,
-            type=movement_type,
-            quantity=quantity,
-            date=movement_date,
-            note=optional_text(request.data, "note"),
+            ) from exc
+
+        movement_date = parse_body_date(
+            data,
+            "date",
+            "Date is required.",
+            "Date must be a valid calendar date.",
         )
-        return Response(
-            serialize_movement(movement),
-            status=status.HTTP_201_CREATED,
-        )
+        unit_cost = None
+        if data.get("unitCost") not in (None, ""):
+            unit_cost = parse_body_decimal(
+                data,
+                "unitCost",
+                "Unit cost must be a number.",
+                "Unit cost must be a number.",
+                negative_message="Unit cost cannot be negative.",
+            )
+            try:
+                StockMovement._meta.get_field(
+                    "unit_cost"
+                ).run_validators(unit_cost)
+            except ValidationError as exc:
+                raise ApiError(
+                    "Unit cost must be non-negative with at most four "
+                    "decimal places.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "unitCost",
+                ) from exc
+
+        activity = None
+        activity_id = data.get("activityId")
+        if activity_id not in (None, ""):
+            try:
+                activity = Activity.objects.get(farm=farm, pk=activity_id)
+            except (
+                Activity.DoesNotExist,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                raise ApiError(
+                    "The selected activity does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "activityId",
+                )
+
+        expense = None
+        expense_id = data.get("expenseId")
+        if expense_id not in (None, ""):
+            try:
+                expense = Expense.objects.get(farm=farm, pk=expense_id)
+            except (
+                Expense.DoesNotExist,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                raise ApiError(
+                    "The selected expense does not exist.",
+                    status.HTTP_404_NOT_FOUND,
+                    "expenseId",
+                )
+
+        if movement_type in (
+            MovementType.PURCHASE,
+            MovementType.ADJUSTMENT,
+        ):
+            quantity_delta = quantity
+        else:
+            quantity_delta = -quantity
+        with transaction.atomic():
+            item = InventoryItem.objects.select_for_update().get(
+                farm=farm, pk=item.pk
+            )
+            available = item.current_quantity()
+            if quantity_delta < 0 and -quantity_delta > available:
+                raise ApiError(
+                    "Movement would make stock negative "
+                    f"(available: {format_amount(available)}).",
+                    status.HTTP_400_BAD_REQUEST,
+                    "quantity",
+                )
+            movement = StockMovement.objects.create(
+                farm=farm,
+                item=item,
+                type=movement_type,
+                quantity=quantity,
+                date=movement_date,
+                unit_cost=unit_cost,
+                activity=activity,
+                expense=expense,
+                note=optional_text(data, "note"),
+            )
+        return movement
 
 
-class StockMovementListView(APIView):
-    def get(self, request):
-        farm = get_farm(request.user)
-        return Response(
-            [
-                serialize_movement(movement)
-                for movement in farm.stock_movements.all()
-            ]
+class StockMovementDetailView(APIView):
+    def get(self, request, movement_id):
+        farm = get_inventory_farm(request)
+        movement = scoped_get(
+            StockMovement,
+            farm,
+            movement_id,
+            "That stock movement no longer exists.",
+        )
+        return Response(serialize_movement(movement))
+
+    def put(self, request, movement_id):
+        farm = get_inventory_farm(request)
+        scoped_get(
+            StockMovement,
+            farm,
+            movement_id,
+            "That stock movement no longer exists.",
+        )
+        raise ApiError(
+            "Posted stock movements cannot be edited; create a reversal "
+            "and replacement movement.",
+            status.HTTP_409_CONFLICT,
+        )
+
+    def delete(self, request, movement_id):
+        farm = get_inventory_farm(request)
+        scoped_get(
+            StockMovement,
+            farm,
+            movement_id,
+            "That stock movement no longer exists.",
+        )
+        raise ApiError(
+            "Posted stock movements cannot be deleted; create a reversal "
+            "and replacement movement.",
+            status.HTTP_409_CONFLICT,
         )
 
 
@@ -2519,6 +2749,19 @@ class ExpenseListView(APIView):
                 "supplierId",
             )
             supplier_text = None
+        attachment_reference = optional_text(
+            data, "attachmentReference"
+        )
+        attachment_max_length = Expense._meta.get_field(
+            "attachment_reference"
+        ).max_length
+        if len(attachment_reference) > attachment_max_length:
+            raise ApiError(
+                "Attachment reference must be "
+                f"{attachment_max_length} characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "attachmentReference",
+            )
         cycle = None
         cycle_id = data.get("cycleId")
         if cycle_id not in (None, ""):
@@ -2537,10 +2780,7 @@ class ExpenseListView(APIView):
             "date": expense_date,
             "supplier": supplier_text or None,
             "supplier_record": supplier_record,
-            "attachment_reference": optional_text(
-                data, "attachmentReference"
-            )
-            or "",
+            "attachment_reference": attachment_reference or "",
             "status": expense_status,
             "cycle": cycle,
         }

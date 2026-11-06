@@ -14,6 +14,8 @@ SECRET_KEY = os.environ.get(
 )
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",")
+LLM_OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+LLM_OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
 INSTALLED_APPS = [
     "django.contrib.admin",

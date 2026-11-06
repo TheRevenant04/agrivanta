@@ -32,7 +32,7 @@ def seed_categories(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0013_activity_assignees_farm_members'),
+        ('api', '0014_inventory_stock_movement_details'),
     ]
 
     operations = [
