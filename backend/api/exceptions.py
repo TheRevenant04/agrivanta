@@ -1,7 +1,10 @@
+from django.db.models import ProtectedError
 from rest_framework import status
 from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
+
+from .models import ImmutableTransactionError
 
 
 class ApiError(APIException):
@@ -20,6 +23,22 @@ def api_exception_handler(exc, context):
         if exc.field:
             payload["field"] = exc.field
         return Response(payload, status=exc.status_code)
+
+    if isinstance(exc, ImmutableTransactionError):
+        return Response(
+            {"detail": str(exc)}, status=status.HTTP_409_CONFLICT
+        )
+
+    if isinstance(exc, ProtectedError):
+        return Response(
+            {
+                "detail": (
+                    "This record is referenced by posted transactions "
+                    "and cannot be deleted."
+                )
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
 
     response = drf_exception_handler(exc, context)
 

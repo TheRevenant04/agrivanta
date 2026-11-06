@@ -219,7 +219,7 @@ def _cycle_spend(farm, cycles, start_date, end_date):
         ]
         try:
             allocations = allocate_shared_cost(
-                expense.amount,
+                abs(expense.amount),
                 allocation_targets,
                 rule.basis,
             )
@@ -229,7 +229,8 @@ def _cycle_spend(farm, cycles, start_date, end_date):
                 status.HTTP_400_BAD_REQUEST,
                 "allocationRule",
             )
-        spend += sum(
+        sign = -1 if expense.amount < 0 else 1
+        spend += sign * sum(
             (
                 allocation["amount"]
                 for allocation in allocations

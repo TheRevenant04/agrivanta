@@ -106,6 +106,7 @@ from .serializers import (
     serialize_variety,
     serialize_worker,
 )
+from .transactions import ReversalError, reverse_expense, reverse_payment
 from .unit_conversion import (
     ConversionRuleData,
     MissingConversionRuleError,
@@ -3509,6 +3510,18 @@ class ExpensePostView(APIView):
         return Response(serialize_expense(expense))
 
 
+class ExpenseReverseView(APIView):
+    def post(self, request, expense_id):
+        farm = get_farm(request.user)
+        try:
+            reversal = reverse_expense(farm, expense_id)
+        except ReversalError as exc:
+            raise ApiError(exc.message, exc.status_code)
+        return Response(
+            serialize_expense(reversal), status=status.HTTP_201_CREATED
+        )
+
+
 class ExpenseAttachmentView(APIView):
     def post(self, request, expense_id):
         farm = get_farm(request.user)
@@ -3747,32 +3760,42 @@ class PaymentDetailView(APIView):
     def put(self, request, payment_id):
         farm = get_farm(request.user)
         payment = self._payment(farm, payment_id)
-        values = validate_payment(request.data, farm)
-        for key, value in values.items():
-            setattr(payment, key, value)
-        payment.save()
-        return Response(serialize_payment(payment))
+        self._reject_change(payment)
 
     def patch(self, request, payment_id):
         farm = get_farm(request.user)
         payment = self._payment(farm, payment_id)
-        current = serialize_payment(payment)
-        data = {**current, **request.data}
-        values = validate_payment(data, farm)
-        for key, value in values.items():
-            setattr(payment, key, value)
-        payment.save()
-        return Response(serialize_payment(payment))
+        self._reject_change(payment)
 
     def delete(self, request, payment_id):
         farm = get_farm(request.user)
-        self._payment(farm, payment_id).delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        payment = self._payment(farm, payment_id)
+        self._reject_change(payment, "deleted")
+
+    @staticmethod
+    def _reject_change(payment, action="edited"):
+        raise ApiError(
+            f"Recorded payments cannot be {action}. "
+            "Reverse the payment instead.",
+            status.HTTP_409_CONFLICT,
+        )
 
     @staticmethod
     def _payment(farm, payment_id):
         return scoped_get(
             Payment, farm, payment_id, "That payment no longer exists."
+        )
+
+
+class PaymentReverseView(APIView):
+    def post(self, request, payment_id):
+        farm = get_farm(request.user)
+        try:
+            reversal = reverse_payment(farm, payment_id)
+        except ReversalError as exc:
+            raise ApiError(exc.message, exc.status_code)
+        return Response(
+            serialize_payment(reversal), status=status.HTTP_201_CREATED
         )
 
 

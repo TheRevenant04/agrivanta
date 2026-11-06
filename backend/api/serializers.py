@@ -307,6 +307,12 @@ def serialize_expense(expense):
             for attachment in expense.attachments.all()
         ],
         "notes": expense.notes or None,
+        "createdAt": as_datetime(expense.created_at),
+        "reversalOfId": (
+            as_id(expense.reversal_of_id) if expense.reversal_of_id else None
+        ),
+        "reversed": expense.reversed_at is not None,
+        "reversedAt": as_datetime(expense.reversed_at),
     }
 
 
@@ -349,6 +355,12 @@ def serialize_payment(payment):
             as_id(payment.linked_sale_id) if payment.linked_sale_id else None
         ),
         "reference": payment.reference or None,
+        "createdAt": as_datetime(payment.created_at),
+        "reversalOfId": (
+            as_id(payment.reversal_of_id) if payment.reversal_of_id else None
+        ),
+        "reversed": payment.reversed_at is not None,
+        "reversedAt": as_datetime(payment.reversed_at),
     }
 
 

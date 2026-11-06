@@ -93,26 +93,14 @@ def test_standalone_payment_crud(client):
     assert detail.status_code == 200
     assert detail.data["linkedSaleId"] is None
 
-    updated = client.put(
-        f"{PAYMENTS}/{pid}",
-        payload(type="paid", amount="30", reference=""),
-        format="json",
-    )
-    assert updated.status_code == 200
-    assert updated.data["type"] == "paid"
-    assert updated.data["amount"] == 30
-    assert updated.data["reference"] is None
-
-    patched = client.patch(
+    assert client.put(
+        f"{PAYMENTS}/{pid}", payload(amount="30"), format="json"
+    ).status_code == 409
+    assert client.patch(
         f"{PAYMENTS}/{pid}", {"reference": "R-9"}, format="json"
-    )
-    assert patched.status_code == 200
-    assert patched.data["reference"] == "R-9"
-    assert patched.data["type"] == "paid"
-
-    assert client.delete(f"{PAYMENTS}/{pid}").status_code == 204
-    assert client.get(f"{PAYMENTS}/{pid}").status_code == 404
-    assert client.get(PAYMENTS).data == []
+    ).status_code == 409
+    assert client.delete(f"{PAYMENTS}/{pid}").status_code == 409
+    assert client.get(f"{PAYMENTS}/{pid}").data == detail.data
 
 
 def test_received_payment_links_to_sale(client, cycle):
@@ -158,7 +146,7 @@ def test_invalid_link_combinations_are_rejected(client, cycle):
         payload(type="paid", linkedSaleId=sale["id"]),
         format="json",
     )
-    assert update.status_code == 400
+    assert update.status_code == 409
     assert client.get(f"{PAYMENTS}/{existing}").data["type"] == "received"
 
 
@@ -229,41 +217,21 @@ def test_reference_optional_and_duplicable(client):
     assert first.data["id"] != second.data["id"]
 
 
-@pytest.mark.parametrize("method", ["post", "put", "patch"])
 @pytest.mark.parametrize("reference_length", [255, 256])
-def test_reference_length_is_validated_on_create_and_update(
-    client, method, reference_length
-):
+def test_reference_length_is_validated_on_create(client, reference_length):
     reference = "R" * reference_length
-    if method == "post":
-        response = post(client, reference=reference)
-        payment_id = response.data.get("id")
-    else:
-        created = post(client)
-        payment_id = created.data["id"]
-        data = (
-            {"reference": reference}
-            if method == "patch"
-            else payload(reference=reference)
-        )
-        response = getattr(client, method)(
-            f"{PAYMENTS}/{payment_id}", data, format="json"
-        )
+    response = post(client, reference=reference)
 
     if reference_length > 255:
-        expected_status = 400
-    elif method == "post":
-        expected_status = 201
-    else:
-        expected_status = 200
-    assert response.status_code == expected_status
-    if expected_status != 400:
-        assert response.data["reference"] == reference
-        assert Payment.objects.get(pk=payment_id).reference == reference
-    else:
+        assert response.status_code == 400
         assert response.data["field"] == "reference"
-        if method != "post":
-            assert Payment.objects.get(pk=payment_id).reference is None
+        assert Payment.objects.count() == 0
+    else:
+        assert response.status_code == 201
+        assert response.data["reference"] == reference
+        assert Payment.objects.get(pk=response.data["id"]).reference == (
+            reference
+        )
 
 
 def test_identical_submissions_create_distinct_records(client):
