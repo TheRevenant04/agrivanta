@@ -3,7 +3,11 @@ import uuid
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models.functions import Lower
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils import timezone
 
 
@@ -11,6 +15,12 @@ class Role(models.TextChoices):
     OWNER = "owner", "owner"
     MANAGER = "manager", "manager"
     WORKER = "worker", "worker"
+
+
+class NotificationType(models.TextChoices):
+    INFO = "info", "info"
+    WARNING = "warning", "warning"
+    ALERT = "alert", "alert"
 
 
 class BaseMeasure(models.TextChoices):
@@ -24,13 +34,17 @@ class CycleStatus(models.TextChoices):
     CLOSED = "closed", "closed"
 
 
+class CycleType(models.TextChoices):
+    ANNUAL = "annual", "annual"
+    PERENNIAL = "perennial", "perennial"
+
+
 class ActivityCategory(models.TextChoices):
     LAND_PREPARATION = "land preparation", "land preparation"
     PLANTING = "planting", "planting"
     FERTILIZING = "fertilizing", "fertilizing"
     SPRAYING = "spraying", "spraying"
     HARVESTING = "harvesting", "harvesting"
-    CUSTOM = "custom", "custom"
 
 
 class ActivityStatus(models.TextChoices):
@@ -108,6 +122,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
 
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(role__in=Role.values),
+                name="api_user_role_valid",
+            )
+        ]
+
     def __str__(self):
         return self.email
 
@@ -116,6 +138,9 @@ class Farm(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.OneToOneField(
         User, on_delete=models.CASCADE, related_name="farm"
+    )
+    members = models.ManyToManyField(
+        User, blank=True, related_name="member_farms"
     )
     name = models.CharField(max_length=255)
     reporting_currency = models.CharField(max_length=3)
@@ -180,6 +205,7 @@ class Field(TimestampedModel):
     name = models.CharField(max_length=255)
     area = models.DecimalField(max_digits=14, decimal_places=4)
     notes = models.TextField(blank=True, default="")
+    polygon = models.JSONField(null=True, blank=True)
 
     class Meta:
         ordering = ["created_at", "id"]
@@ -194,6 +220,13 @@ class Crop(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                "farm",
+                name="uniq_crop_farm_name_ci",
+            )
+        ]
 
 
 class Variety(TimestampedModel):
@@ -220,6 +253,13 @@ class Unit(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                "farm",
+                name="uniq_unit_farm_name_ci",
+            )
+        ]
 
 
 class UnitConversion(TimestampedModel):
@@ -248,10 +288,20 @@ class CropCycle(TimestampedModel):
         Field, on_delete=models.CASCADE, related_name="crop_cycles"
     )
     crop = models.ForeignKey(
-        Crop, on_delete=models.CASCADE, related_name="crop_cycles"
+        Crop, on_delete=models.RESTRICT, related_name="crop_cycles"
     )
     variety = models.ForeignKey(
-        Variety, on_delete=models.CASCADE, related_name="crop_cycles"
+        Variety,
+        on_delete=models.RESTRICT,
+        related_name="crop_cycles",
+        null=True,
+        blank=True,
+    )
+    cycle_type = models.CharField(
+        max_length=16,
+        choices=CycleType.choices,
+        null=True,
+        blank=True,
     )
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
@@ -275,13 +325,30 @@ class ActivityType(TimestampedModel):
         Farm, on_delete=models.CASCADE, related_name="activity_types"
     )
     name = models.CharField(max_length=255)
-    category = models.CharField(
-        max_length=32, choices=ActivityCategory.choices
-    )
+    category = models.CharField(max_length=32)
     standard = models.BooleanField(default=False)
+    default_inputs = models.JSONField(default=list)
+    default_labour_hours = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    default_equipment = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                "farm",
+                name="uniq_activity_type_farm_name_ci",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(default_labour_hours__gte=0),
+                name="activity_type_labour_hours_nonnegative",
+            ),
+        ]
 
 
 class Activity(TimestampedModel):
@@ -294,6 +361,9 @@ class Activity(TimestampedModel):
     )
     type = models.ForeignKey(
         ActivityType, on_delete=models.PROTECT, related_name="activities"
+    )
+    assignees = models.ManyToManyField(
+        User, blank=True, related_name="assigned_activities"
     )
     planned_date = models.DateField()
     status = models.CharField(
@@ -454,22 +524,43 @@ class InventoryItem(TimestampedModel):
         Unit, on_delete=models.PROTECT, related_name="inventory_items"
     )
     reorder_level = models.DecimalField(
-        max_digits=14, decimal_places=4, default=0
+        max_digits=14,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(0)],
     )
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(reorder_level__isnull=True)
+                | models.Q(reorder_level__gte=0),
+                name="inventory_reorder_level_nonnegative",
+            )
+        ]
 
-    def current_quantity(self):
+    def current_quantity(self, as_of_date=None):
+        movements = self.movements.all()
+        if as_of_date is not None:
+            movements = movements.filter(date__lte=as_of_date)
         total = sum(
             (
                 movement.quantity
                 if movement.type != MovementType.USAGE
                 else -movement.quantity
             )
-            for movement in self.movements.all()
+            for movement in movements
         )
         return total
+
+    def is_low_stock(self):
+        return (
+            self.reorder_level is not None
+            and self.current_quantity() <= self.reorder_level
+        )
 
 
 class StockMovement(TimestampedModel):
@@ -478,15 +569,59 @@ class StockMovement(TimestampedModel):
         Farm, on_delete=models.CASCADE, related_name="stock_movements"
     )
     item = models.ForeignKey(
-        InventoryItem, on_delete=models.CASCADE, related_name="movements"
+        InventoryItem, on_delete=models.PROTECT, related_name="movements"
     )
     type = models.CharField(max_length=20, choices=MovementType.choices)
     quantity = models.DecimalField(max_digits=14, decimal_places=4)
-    date = models.DateField(null=True, blank=True)
+    date = models.DateField()
+    unit_cost = models.DecimalField(
+        max_digits=14, decimal_places=4, null=True, blank=True
+    )
+    activity = models.ForeignKey(
+        Activity,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="stock_movements",
+    )
+    expense = models.ForeignKey(
+        "Expense",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="stock_movements",
+    )
     note = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(type__in=MovementType.values),
+                name="stock_movement_type_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        type__in=(
+                            MovementType.PURCHASE,
+                            MovementType.USAGE,
+                        ),
+                        quantity__gt=0,
+                    )
+                    | (
+                        models.Q(type=MovementType.ADJUSTMENT)
+                        & ~models.Q(quantity=0)
+                    )
+                ),
+                name="stock_movement_quantity_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(unit_cost__isnull=True)
+                | models.Q(unit_cost__gte=0),
+                name="stock_movement_unit_cost_nonnegative",
+            ),
+        ]
 
 
 class Supplier(TimestampedModel):
@@ -521,6 +656,45 @@ class Customer(TimestampedModel):
         ordering = ["created_at", "id"]
 
 
+class ExpenseCategoryRecord(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm = models.ForeignKey(
+        Farm, on_delete=models.CASCADE, related_name="expense_categories"
+    )
+    name = models.CharField(max_length=255)
+    is_default = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                "farm",
+                Lower("name"),
+                name="expense_category_farm_name_unique",
+            ),
+        ]
+
+
+def ensure_default_expense_categories(farm):
+    existing = {
+        name.lower()
+        for name in farm.expense_categories.values_list("name", flat=True)
+    }
+    missing = [
+        ExpenseCategoryRecord(farm=farm, name=name, is_default=True)
+        for name in ExpenseCategory.values
+        if name not in existing
+    ]
+    if missing:
+        ExpenseCategoryRecord.objects.bulk_create(missing)
+
+
+@receiver(post_save, sender=Farm)
+def seed_default_expense_categories(sender, instance, created, **kwargs):
+    if created:
+        ensure_default_expense_categories(instance)
+
+
 class Expense(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
@@ -533,12 +707,27 @@ class Expense(TimestampedModel):
         on_delete=models.SET_NULL,
         related_name="expenses",
     )
-    category = models.CharField(
-        max_length=32, choices=ExpenseCategory.choices
-    )
+    category = models.CharField(max_length=255)
     amount = models.DecimalField(max_digits=14, decimal_places=4)
     date = models.DateField()
+    category_record = models.ForeignKey(
+        ExpenseCategoryRecord,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="expenses",
+    )
     supplier = models.CharField(max_length=255, blank=True, null=True)
+    supplier_record = models.ForeignKey(
+        Supplier,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="expenses",
+    )
+    attachment_reference = models.CharField(
+        max_length=500, blank=True, default=""
+    )
     status = models.CharField(
         max_length=20,
         choices=ExpenseStatus.choices,
@@ -548,6 +737,16 @@ class Expense(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+
+    def save(self, *args, **kwargs):
+        if self.category_record_id is None and self.category:
+            ensure_default_expense_categories(self.farm)
+            self.category_record = ExpenseCategoryRecord.objects.filter(
+                farm=self.farm, name__iexact=self.category
+            ).first()
+        if self.category_record_id is not None:
+            self.category = self.category_record.name
+        super().save(*args, **kwargs)
 
 
 class Budget(TimestampedModel):
@@ -767,3 +966,35 @@ class ImportCommit(models.Model):
 
     class Meta:
         ordering = ["-created_at", "id"]
+
+
+class Notification(TimestampedModel):
+    """An in-app notification addressed to a single user."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
+    type = models.CharField(
+        max_length=20,
+        choices=NotificationType.choices,
+        default=NotificationType.INFO,
+    )
+    message = models.TextField()
+    read = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+        indexes = [
+            models.Index(
+                fields=["user", "read", "-created_at"],
+                name="notif_user_read_created_idx",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.type}: {self.message[:50]}"
+
+    @property
+    def is_read(self):
+        return self.read

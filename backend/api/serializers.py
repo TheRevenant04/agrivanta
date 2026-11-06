@@ -18,6 +18,10 @@ def as_date(value):
     return value.isoformat() if value else None
 
 
+def as_datetime(value):
+    return value.isoformat() if value else None
+
+
 def serialize_user(user):
     return {"id": as_id(user.id), "email": user.email, "role": user.role}
 
@@ -65,6 +69,8 @@ def serialize_field(field):
     }
     if field.notes:
         payload["notes"] = field.notes
+    if field.polygon is not None:
+        payload["polygon"] = field.polygon
     return payload
 
 
@@ -102,7 +108,10 @@ def serialize_cycle(cycle):
         "id": as_id(cycle.id),
         "fieldId": as_id(cycle.field_id),
         "cropId": as_id(cycle.crop_id),
-        "varietyId": as_id(cycle.variety_id),
+        "varietyId": (
+            as_id(cycle.variety_id) if cycle.variety_id else None
+        ),
+        "cycleType": cycle.cycle_type,
         "startDate": as_date(cycle.start_date),
         "status": cycle.status,
     }
@@ -132,6 +141,15 @@ def serialize_activity_type(activity_type):
         "name": activity_type.name,
         "category": activity_type.category,
         "standard": activity_type.standard,
+        "inputs": [
+            {
+                "itemName": item["itemName"],
+                "quantity": as_number(Decimal(str(item["quantity"]))),
+            }
+            for item in activity_type.default_inputs
+        ],
+        "labourHours": as_number(activity_type.default_labour_hours),
+        "equipment": activity_type.default_equipment,
     }
 
 
@@ -147,6 +165,9 @@ def serialize_activity(activity):
         "id": as_id(activity.id),
         "cycleId": as_id(activity.cycle_id),
         "typeId": as_id(activity.type_id),
+        "assignedWorkerIds": [
+            as_id(user.id) for user in activity.assignees.all()
+        ],
         "plannedDate": as_date(activity.planned_date),
         "status": activity.status,
         "description": activity.description or None,
@@ -216,6 +237,7 @@ def serialize_inventory_item(item):
         "unitId": as_id(item.unit_id),
         "reorderLevel": as_number(item.reorder_level),
         "currentQuantity": as_number(item.current_quantity()),
+        "lowStock": item.is_low_stock(),
     }
 
 
@@ -225,9 +247,15 @@ def serialize_movement(movement):
         "itemId": as_id(movement.item_id),
         "type": movement.type,
         "quantity": as_number(movement.quantity),
+        "date": as_date(movement.date),
+        "unitCost": as_number(movement.unit_cost),
+        "activityId": (
+            as_id(movement.activity_id) if movement.activity_id else None
+        ),
+        "expenseId": (
+            as_id(movement.expense_id) if movement.expense_id else None
+        ),
     }
-    if movement.date:
-        payload["date"] = as_date(movement.date)
     if movement.note:
         payload["note"] = movement.note
     return payload
@@ -240,6 +268,14 @@ def serialize_attachment(attachment):
     return payload
 
 
+def serialize_expense_category(category):
+    return {
+        "id": as_id(category.id),
+        "name": category.name,
+        "isDefault": category.is_default,
+    }
+
+
 def serialize_expense(expense):
     return {
         "id": as_id(expense.id),
@@ -247,9 +283,24 @@ def serialize_expense(expense):
             as_id(expense.cycle_id) if expense.cycle_id else None
         ),
         "category": expense.category,
+        "categoryId": (
+            as_id(expense.category_record_id)
+            if expense.category_record_id
+            else None
+        ),
         "amount": as_number(expense.amount),
         "date": as_date(expense.date),
-        "supplier": expense.supplier or None,
+        "supplier": (
+            expense.supplier_record.name
+            if expense.supplier_record_id
+            else expense.supplier or None
+        ),
+        "supplierId": (
+            as_id(expense.supplier_record_id)
+            if expense.supplier_record_id
+            else None
+        ),
+        "attachmentReference": expense.attachment_reference or None,
         "status": expense.status,
         "attachments": [
             serialize_attachment(attachment)
@@ -331,6 +382,17 @@ def serialize_sale(sale):
         "unitPrice": as_number(sale.unit_price),
         "date": as_date(sale.date),
         "revenue": as_number(sale.revenue),
+    }
+
+
+def serialize_notification(notification):
+    return {
+        "id": as_id(notification.id),
+        "type": notification.type,
+        "message": notification.message,
+        "read": notification.read,
+        "createdAt": as_datetime(notification.created_at),
+        "updatedAt": as_datetime(notification.updated_at),
     }
 
 

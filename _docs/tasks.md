@@ -1,7 +1,11 @@
 # Agrivanta — Implementation Backlog
 
-**Stack:** Django 5 + DRF backend · PostgreSQL · Celery + Redis · React 18 + TypeScript (Vite) frontend
+**Target stack:** Django 5 + DRF backend · PostgreSQL · Celery + Redis · React 18 + TypeScript (Vite) frontend
 **Principle:** Each task is self-contained, session-sized, and independently hand-off-able. Tasks are ordered by dependency; later tasks assume earlier ones are done but do not require reading them — requirements are restated inline.
+
+This file defines the planned backlog, not the live implementation status.
+Use the linked GitHub issues for current task state. Some target components,
+including Celery/Redis, are not yet part of the application.
 
 ---
 

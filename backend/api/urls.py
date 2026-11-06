@@ -25,6 +25,7 @@ urlpatterns = [
     path("units/<str:unit_id>", views.UnitDetailView.as_view()),
     path("conversions", views.ConversionListView.as_view()),
     path("conversions/convert", views.ConversionConvertView.as_view()),
+    path("conversions/<str:conversion_id>", views.ConversionDetailView.as_view()),
     path("crop-cycles", views.CropCycleListView.as_view()),
     path(
         "crop-cycles/<str:cycle_id>",
@@ -34,7 +35,15 @@ urlpatterns = [
         "crop-cycles/<str:cycle_id>/close",
         views.CropCycleCloseView.as_view(),
     ),
+    path(
+        "crop-cycles/<str:cycle_id>/reopen",
+        views.CropCycleReopenView.as_view(),
+    ),
     path("activity-types", views.ActivityTypeListView.as_view()),
+    path(
+        "activity-types/<str:type_id>",
+        views.ActivityTypeDetailView.as_view(),
+    ),
     path("activities/cycles", views.ActivityCycleListView.as_view()),
     path("activities", views.ActivityListView.as_view()),
     path(
@@ -44,6 +53,10 @@ urlpatterns = [
     path(
         "activities/<str:activity_id>/status",
         views.ActivityStatusView.as_view(),
+    ),
+    path(
+        "activities/<str:activity_id>/assignees",
+        views.ActivityAssigneesView.as_view(),
     ),
     path(
         "activities/<str:activity_id>/resource-needs",
@@ -76,6 +89,17 @@ urlpatterns = [
         views.ItemMovementListView.as_view(),
     ),
     path("stock-movements", views.StockMovementListView.as_view()),
+    path(
+        "expense-categories", views.ExpenseCategoryListView.as_view()
+    ),
+    path(
+        "expense-categories/<str:category_id>",
+        views.ExpenseCategoryDetailView.as_view(),
+    ),
+    path(
+        "stock-movements/<str:movement_id>",
+        views.StockMovementDetailView.as_view(),
+    ),
     path("expenses", views.ExpenseListView.as_view()),
     path(
         "expenses/<str:expense_id>",
@@ -91,6 +115,23 @@ urlpatterns = [
     ),
     path("imports/preview", views.ImportPreviewView.as_view()),
     path("imports/commit", views.ImportCommitView.as_view()),
+    path("notifications", views.NotificationListView.as_view()),
+    path(
+        "notifications/unread-count",
+        views.NotificationUnreadCountView.as_view(),
+    ),
+    path(
+        "notifications/read-all",
+        views.NotificationMarkAllReadView.as_view(),
+    ),
+    path(
+        "notifications/<str:notification_id>/read",
+        views.NotificationMarkReadView.as_view(),
+    ),
+    path(
+        "notifications/<str:notification_id>",
+        views.NotificationDetailView.as_view(),
+    ),
     path("payments", views.PaymentListView.as_view()),
     path("budgets", views.BudgetListView.as_view()),
     path("budgets/<str:budget_id>", views.BudgetDetailView.as_view()),
@@ -117,4 +158,5 @@ urlpatterns = [
         "reports/profitability",
         views.ProfitabilityReportView.as_view(),
     ),
+    path("dashboard", views.DashboardView.as_view()),
 ]
