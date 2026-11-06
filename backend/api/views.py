@@ -54,6 +54,9 @@ from .models import (
     Notification,
     Payment,
     PaymentType,
+    PlannedEquipment,
+    PlannedInput,
+    PlannedLabour,
     RecurringExpenseFrequency,
     RecurringExpenseTemplate,
     ReportingPeriod,
@@ -2221,6 +2224,122 @@ class ActivityResourceNeedsView(APIView):
         return Response(serialize_activity(activity))
 
 
+PLANNED_LINE_TYPES = {
+    "planned-inputs": (PlannedInput, "item", "itemId", "quantity"),
+    "planned-labour": (PlannedLabour, None, None, "hours"),
+    "planned-equipment": (PlannedEquipment, "equipment", "equipmentId", "hours"),
+}
+
+
+class PlannedLineView(APIView):
+    def _activity(self, request, activity_id, write=False):
+        if write:
+            require_activity_manager(request)
+        activity = get_visible_activity(request, activity_id)
+        if write:
+            ensure_activity_cycle_open(activity)
+        return activity
+
+    def _line(self, model, activity, line_id):
+        try:
+            return model.objects.get(activity=activity, pk=line_id)
+        except (model.DoesNotExist, ValueError, ValidationError):
+            raise ApiError("That planned line does not exist.", status.HTTP_404_NOT_FOUND)
+
+    def _serialize(self, line, reference, api_reference, amount):
+        data = {
+            "id": str(line.pk),
+            "activityId": str(line.activity_id),
+            amount: as_number(getattr(line, amount)),
+        }
+        if reference:
+            data[api_reference] = str(getattr(line, f"{reference}_id"))
+        return data
+
+    def get(self, request, activity_id, kind, line_id=None):
+        model, reference, api_reference, amount = PLANNED_LINE_TYPES[kind]
+        activity = self._activity(request, activity_id)
+        if line_id is not None:
+            line = self._line(model, activity, line_id)
+            return Response(self._serialize(line, reference, api_reference, amount))
+        return Response([
+            self._serialize(line, reference, api_reference, amount)
+            for line in model.objects.filter(activity=activity)
+        ])
+
+    def _save(self, request, activity_id, kind, line_id=None, partial=False):
+        model, reference, api_reference, amount = PLANNED_LINE_TYPES[kind]
+        activity = self._activity(request, activity_id, write=True)
+        line = (
+            self._line(model, activity, line_id)
+            if line_id is not None else model(activity=activity)
+        )
+        data = request.data
+        if not isinstance(data, dict):
+            raise ApiError("Expected an object.", status.HTTP_400_BAD_REQUEST)
+        if reference and (not partial or api_reference in data):
+            reference_model = InventoryItem if reference == "item" else Equipment
+            value = data.get(api_reference)
+            if value is not None and not isinstance(value, str):
+                raise ApiError("Invalid reference.", status.HTTP_400_BAD_REQUEST, api_reference)
+            target = scoped_get(
+                reference_model, activity.farm, value,
+                "The selected resource does not exist.", api_reference,
+            )
+            setattr(line, reference, target)
+        if not partial or amount in data:
+            value = parse_body_decimal(
+                data, amount, f"{amount} is required.", f"{amount} must be a number.",
+                positive_message=f"{amount} must be greater than zero.",
+            )
+            try:
+                model._meta.get_field(amount).run_validators(value)
+            except ValidationError as exc:
+                raise ApiError(
+                    f"{amount} must fit within 10 integer digits and 4 decimal places.",
+                    status.HTTP_400_BAD_REQUEST, amount,
+                ) from exc
+            setattr(line, amount, value)
+        if reference:
+            duplicates = model.objects.filter(
+                activity=activity, **{reference: getattr(line, reference)}
+            ).exclude(pk=line.pk)
+            if duplicates.exists():
+                raise ApiError("Resource is already planned.", status.HTTP_409_CONFLICT, api_reference)
+        try:
+            with transaction.atomic():
+                line.save()
+        except IntegrityError as exc:
+            raise ApiError("Resource is already planned.", status.HTTP_409_CONFLICT, api_reference) from exc
+        return Response(
+            self._serialize(line, reference, api_reference, amount),
+            status=status.HTTP_201_CREATED if line_id is None else status.HTTP_200_OK,
+        )
+
+    def post(self, request, activity_id, kind, line_id=None):
+        if line_id is not None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return self._save(request, activity_id, kind)
+
+    def put(self, request, activity_id, kind, line_id=None):
+        if line_id is None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return self._save(request, activity_id, kind, line_id)
+
+    def patch(self, request, activity_id, kind, line_id=None):
+        if line_id is None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return self._save(request, activity_id, kind, line_id, partial=True)
+
+    def delete(self, request, activity_id, kind, line_id=None):
+        if line_id is None:
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        model = PLANNED_LINE_TYPES[kind][0]
+        activity = self._activity(request, activity_id, write=True)
+        self._line(model, activity, line_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class WorkerListView(APIView):
     def get(self, request):
         farm = get_inventory_farm(request)
@@ -2481,7 +2600,13 @@ class EquipmentDetailView(APIView):
                 "Equipment with usage records cannot be deleted.",
                 status.HTTP_409_CONFLICT,
             )
-        equipment.delete()
+        try:
+            equipment.delete()
+        except ProtectedError as exc:
+            raise ApiError(
+                "Equipment referenced by planned lines cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            ) from exc
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -2806,7 +2931,13 @@ class InventoryItemDetailView(APIView):
                 "Cannot delete an inventory item with stock movements.",
                 status.HTTP_409_CONFLICT,
             )
-        item.delete()
+        try:
+            item.delete()
+        except ProtectedError as exc:
+            raise ApiError(
+                "Inventory items referenced by planned lines cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            ) from exc
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, re_path
 
 from . import chat_views, views
 
@@ -62,6 +62,14 @@ urlpatterns = [
     path(
         "activities/<str:activity_id>/resource-needs",
         views.ActivityResourceNeedsView.as_view(),
+    ),
+    re_path(
+        r"^activities/(?P<activity_id>[^/]+)/(?P<kind>planned-inputs|planned-labour|planned-equipment)$",
+        views.PlannedLineView.as_view(),
+    ),
+    re_path(
+        r"^activities/(?P<activity_id>[^/]+)/(?P<kind>planned-inputs|planned-labour|planned-equipment)/(?P<line_id>[^/]+)$",
+        views.PlannedLineView.as_view(),
     ),
     path("workers", views.WorkerListView.as_view()),
     path("workers/<str:worker_id>", views.WorkerDetailView.as_view()),

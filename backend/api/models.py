@@ -502,6 +502,66 @@ class EquipmentUsage(TimestampedModel):
         return super().save(*args, **kwargs)
 
 
+class PlannedLabour(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="planned_labour"
+    )
+    hours = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(hours__gt=0), name="planned_labour_hours_positive"
+            )
+        ]
+
+
+class PlannedEquipment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="planned_equipment"
+    )
+    equipment = models.ForeignKey(
+        Equipment, on_delete=models.PROTECT, related_name="planned_activities"
+    )
+    hours = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "equipment"], name="unique_activity_planned_equipment"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(hours__gt=0), name="planned_equipment_hours_positive"
+            ),
+        ]
+
+
+class PlannedInput(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="planned_inputs"
+    )
+    item = models.ForeignKey(
+        "InventoryItem", on_delete=models.PROTECT, related_name="planned_activities"
+    )
+    quantity = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "item"], name="unique_activity_planned_input"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0), name="planned_input_quantity_positive"
+            ),
+        ]
+
+
 class ActivityInputNeed(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     activity = models.ForeignKey(
