@@ -1,9 +1,11 @@
 """Read-only, streamed orchestration for farm question answering."""
 
 import json
+import re
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from api.models import Farm, Role
@@ -132,6 +134,10 @@ _PLAN_MARKER = "Permitted read-only tool definitions (JSON):\n"
 class ChatPlanningError(ValueError):
     """The model did not return a valid, permitted query plan."""
 
+    def __init__(self, message: str, *, invalid_input: str | None = None):
+        super().__init__(message)
+        self.invalid_input = invalid_input
+
 
 @dataclass(frozen=True)
 class ChatExecution:
@@ -186,8 +192,11 @@ def _planning_messages(question: str, definitions: list[dict[str, Any]]):
                 "permitted tool needed to answer it. Do not invent tool "
                 "names, IDs, dates, or arguments. Return only JSON in this "
                 'shape: {"tool_calls":[{"name":"tool_name",'
-                '"arguments":{}}]}. If none of these tools can answer the '
-                "question, return {\"tool_calls\":[]}.\n"
+                '"arguments":{}}],"limitations":[]}. If none of these '
+                "tools can answer the question, return no tool calls and put "
+                "the exact unsupported topic or input phrase from the "
+                "question in limitations. Never guess a replacement value "
+                "or report a figure for an unsupported request.\n"
                 f"{_PLAN_MARKER}{tools_json}"
             ),
         ),
@@ -202,31 +211,63 @@ def _validate_arguments(name: str, arguments: Any) -> dict[str, str]:
     schema = definition["parameters"]
     if not isinstance(arguments, dict):
         raise ChatPlanningError("Tool arguments must be a JSON object.")
-    if set(arguments) - set(schema["properties"]):
-        raise ChatPlanningError("The plan contains unsupported tool arguments.")
+    unsupported = sorted(set(arguments) - set(schema["properties"]))
+    if unsupported:
+        details = ", ".join(
+            f"{key}={str(arguments[key])[:80]!r}" for key in unsupported
+        )
+        raise ChatPlanningError(
+            "The plan contains unsupported tool arguments.",
+            invalid_input=details,
+        )
     if not set(schema["required"]).issubset(arguments):
         raise ChatPlanningError("The plan is missing required tool arguments.")
     if any(
         not isinstance(value, str) or not value.strip()
         for value in arguments.values()
     ):
-        raise ChatPlanningError("Tool arguments must be non-empty strings.")
+        invalid = next(
+            key
+            for key, value in arguments.items()
+            if not isinstance(value, str) or not value.strip()
+        )
+        raise ChatPlanningError(
+            "Tool arguments must be non-empty strings.",
+            invalid_input=invalid,
+        )
     if any(
         key in {"crop_cycle_id", "field_id", "period_id"} and len(value) > 64
         for key, value in arguments.items()
     ):
-        raise ChatPlanningError("Tool identifiers must be 64 characters or fewer.")
+        invalid = next(
+            key
+            for key, value in arguments.items()
+            if key in {"crop_cycle_id", "field_id", "period_id"}
+            and len(value) > 64
+        )
+        raise ChatPlanningError(
+            "Tool identifiers must be 64 characters or fewer.",
+            invalid_input=invalid,
+        )
     if any(
         key in {"start_date", "end_date"} and len(value) != 10
         for key, value in arguments.items()
     ):
-        raise ChatPlanningError("Tool dates must use the YYYY-MM-DD format.")
+        invalid = next(
+            key
+            for key, value in arguments.items()
+            if key in {"start_date", "end_date"} and len(value) != 10
+        )
+        raise ChatPlanningError(
+            "Tool dates must use the YYYY-MM-DD format.",
+            invalid_input=f"{invalid}={arguments[invalid][:80]!r}",
+        )
     return arguments
 
 
 def _parse_tool_calls(
-    text: str, permitted_names: set[str]
-) -> list[dict[str, Any]]:
+    text: str, permitted_names: set[str], question: str
+) -> tuple[list[dict[str, Any]], list[str]]:
     try:
         plan = json.loads(text)
     except (TypeError, json.JSONDecodeError) as exc:
@@ -235,11 +276,28 @@ def _parse_tool_calls(
         ) from exc
     if (
         not isinstance(plan, dict)
-        or set(plan) != {"tool_calls"}
+        or not {"tool_calls"}.issubset(plan)
+        or set(plan) - {"tool_calls", "limitations"}
         or not isinstance(plan["tool_calls"], list)
         or len(plan["tool_calls"]) > 8
     ):
         raise ChatPlanningError("The model returned an invalid query plan.")
+
+    limitations = plan.get("limitations", [])
+    if (
+        not isinstance(limitations, list)
+        or len(limitations) > 4
+        or any(
+            not isinstance(topic, str)
+            or not topic.strip()
+            or len(topic) > 120
+            or topic.casefold() not in question.casefold()
+            for topic in limitations
+        )
+    ):
+        raise ChatPlanningError(
+            "The model returned an invalid unsupported-input description."
+        )
 
     calls = []
     seen = set()
@@ -260,7 +318,7 @@ def _parse_tool_calls(
             json.dumps(call["arguments"], sort_keys=True),
         )
     )
-    return calls
+    return calls, limitations
 
 
 def _json_pointer(path: str, key: str | int) -> str:
@@ -335,6 +393,42 @@ def _fixed_execution(answer: str, evidence: dict[str, Any]) -> ChatExecution:
     )
 
 
+def _invalid_input_answer(invalid_input: str) -> str:
+    return (
+        f"I can't answer this because the input {invalid_input} is invalid "
+        "or unsupported by the permitted farm query tools. No numeric result "
+        "is available."
+    )
+
+
+def _tool_limitation(item: dict[str, Any]) -> str:
+    result = item["result"]
+    error = result.get("error", {})
+    message = error.get("message") or "the query returned no usable data"
+    if result.get("status") == "missing_data":
+        return f"{item['tool']}: Missing data — {message}"
+    if error.get("code") in {"invalid_period", "not_found"}:
+        arguments = item.get("arguments", {})
+        invalid_arguments = [
+            f"{key}={arguments[key]!r}"
+            for key in (
+                "crop_cycle_id",
+                "field_id",
+                "period_id",
+                "start_date",
+                "end_date",
+            )
+            if key in arguments
+        ]
+        details = (
+            f" ({', '.join(invalid_arguments)})"
+            if invalid_arguments
+            else ""
+        )
+        return f"{item['tool']}: Invalid input{details} — {message}"
+    return f"{item['tool']}: Data unavailable — {message}"
+
+
 def prepare_chat(user: Any, question: str) -> ChatExecution:
     definitions = permitted_tool_definitions(user)
     if not definitions:
@@ -347,17 +441,23 @@ def prepare_chat(user: Any, question: str) -> ChatExecution:
     client = get_llm_client()
     try:
         plan_response = client.complete(_planning_messages(question, definitions))
-        calls = _parse_tool_calls(
-            plan_response.text, {tool["name"] for tool in definitions}
+        calls, requested_limitations = _parse_tool_calls(
+            plan_response.text,
+            {tool["name"] for tool in definitions},
+            question,
         )
-    except ChatPlanningError:
+    except ChatPlanningError as exc:
+        if exc.invalid_input:
+            return _fixed_execution(
+                _invalid_input_answer(exc.invalid_input), _empty_evidence()
+            )
         return _fixed_execution(
             "I couldn't identify an available read-only farm query for this "
             "question, so I can't answer it with farm figures.",
             _empty_evidence(),
         )
 
-    if not calls:
+    if not calls and not requested_limitations:
         return _fixed_execution(
             "I couldn't identify an available read-only farm query for this "
             "question, so I can't answer it with farm figures.",
@@ -373,18 +473,15 @@ def prepare_chat(user: Any, question: str) -> ChatExecution:
         for call in calls
     ]
     evidence = _build_evidence(tool_results)
-    limitations = []
+    limitations = [
+        f"requested topic or input '{topic}' is not supported by the "
+        "permitted farm query tools"
+        for topic in requested_limitations
+    ]
     for item in tool_results:
         result = item["result"]
         if result.get("status") != "ok":
-            error = result.get("error", {})
-            message = error.get("message") or "the query returned no usable data"
-            prefix = (
-                "Missing data"
-                if result.get("status") == "missing_data"
-                else "Data unavailable"
-            )
-            limitations.append(f"{item['tool']}: {prefix} — {message}")
+            limitations.append(_tool_limitation(item))
     if limitations:
         return _fixed_execution(
             "I can't answer this from the available farm records: "
@@ -403,9 +500,12 @@ def prepare_chat(user: Any, question: str) -> ChatExecution:
                 "Answer the farm question using only the supplied read-only "
                 "query results. Do not introduce figures, periods, crop "
                 "cycles, or claims absent from those results. Keep the answer "
-                "concise; exact figures, periods, crop cycles, and calculation "
-                "basis are also provided separately in the final evidence "
-                "event."
+                "concise. Label each reported recorded figure as an Actual. "
+                "Do not provide estimates or assumptions; if a requested "
+                "value is unavailable, state that it is missing. Do not "
+                "repeat record IDs or dates. Exact figures, periods, crop "
+                "cycles, and calculation basis are also provided separately "
+                "in the final evidence event."
             ),
         ),
         LLMMessage(role="user", content=question),
@@ -419,6 +519,39 @@ def prepare_chat(user: Any, question: str) -> ChatExecution:
 def _ndjson(event: dict[str, Any]) -> bytes:
     serialized = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
     return f"{serialized}\n".encode("utf-8")
+
+
+_NUMBER_PATTERN = re.compile(
+    r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?(?!\w)"
+)
+
+
+def _answer_is_evidence_grounded(answer: str, evidence: dict[str, Any]) -> bool:
+    figures = evidence.get("figures", [])
+    supported = set()
+    for figure in figures:
+        try:
+            supported.add(Decimal(str(figure["value"])))
+        except (KeyError, InvalidOperation, TypeError, ValueError):
+            continue
+
+    sentences = re.split(r"(?<=[.!?;])\s+|\n+", answer)
+    for sentence in sentences:
+        claims = _NUMBER_PATTERN.findall(sentence)
+        if not claims:
+            continue
+        if not re.search(r"\bactuals?\b", sentence, re.IGNORECASE):
+            return False
+        if re.search(r"\b(?:estimates?|assumptions?)\b", sentence, re.IGNORECASE):
+            return False
+        for claim in claims:
+            normalized = claim.rstrip("%").replace(",", "")
+            try:
+                if Decimal(normalized) not in supported:
+                    return False
+            except InvalidOperation:
+                return False
+    return True
 
 
 def stream_chat(execution: ChatExecution) -> Iterator[bytes]:
@@ -437,22 +570,35 @@ def stream_chat(execution: ChatExecution) -> Iterator[bytes]:
         raise LLMStreamError("No LLM client is available for this response.")
 
     answer_parts = []
+    pending_tokens = []
     completed = False
     try:
         for event in execution.client.stream(execution.messages):
             if isinstance(event, LLMTextDelta):
                 answer_parts.append(event.text)
-                yield _ndjson({"type": "token", "text": event.text})
+                pending_tokens.append(event.text)
             elif isinstance(event, LLMStreamCompleted):
                 if completed or "".join(answer_parts) != event.response.text:
                     raise LLMStreamError(
                         "The final answer does not match the streamed tokens."
                     )
                 completed = True
+                answer = event.response.text
+                if _answer_is_evidence_grounded(answer, execution.evidence):
+                    for text in pending_tokens:
+                        yield _ndjson({"type": "token", "text": text})
+                else:
+                    answer = (
+                        "I can't provide the generated answer because it "
+                        "contained a numeric claim that is not supported by "
+                        "the farm query results. No estimates or assumptions "
+                        "are reported."
+                    )
+                    yield _ndjson({"type": "token", "text": answer})
                 yield _ndjson(
                     {
                         "type": "final",
-                        "answer": event.response.text,
+                        "answer": answer,
                         "evidence": execution.evidence,
                     }
                 )
