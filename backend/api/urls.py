@@ -187,5 +187,15 @@ urlpatterns = [
         "reports/profitability",
         views.ProfitabilityReportView.as_view(),
     ),
+    path(
+        "reports/activity-status",
+        views.ActivityStatusReportView.as_view(),
+    ),
+    path("reports/inventory", views.InventoryReportView.as_view()),
+    path("reports/labour-usage", views.LabourUsageReportView.as_view()),
+    path(
+        "reports/equipment-usage",
+        views.EquipmentUsageReportView.as_view(),
+    ),
     path("dashboard", views.DashboardView.as_view()),
 ]

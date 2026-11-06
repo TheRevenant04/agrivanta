@@ -4594,6 +4594,33 @@ class DashboardView(APIView):
         return Response(dashboard_for_request(farm, request.query_params))
 
 
+class OperationalReportView(APIView):
+    report_name = ""
+
+    def get(self, request):
+        from . import operational_reports
+
+        farm = get_farm(request.user)
+        report = getattr(operational_reports, self.report_name)
+        return Response(report(farm, request.query_params))
+
+
+class ActivityStatusReportView(OperationalReportView):
+    report_name = "activity_status_report"
+
+
+class InventoryReportView(OperationalReportView):
+    report_name = "inventory_report"
+
+
+class LabourUsageReportView(OperationalReportView):
+    report_name = "labour_usage_report"
+
+
+class EquipmentUsageReportView(OperationalReportView):
+    report_name = "equipment_usage_report"
+
+
 DEFAULT_NOTIFICATION_PAGE_SIZE = 20
 MAX_NOTIFICATION_PAGE_SIZE = 100
 
