@@ -50,7 +50,7 @@ def test_custom_category_creation_and_detail(client):
 
 
 def test_max_length_category_is_preserved_in_expense(client):
-    name = "x" * 255
+    name = "é" * 255
     category = client.post(
         "/api/expense-categories", {"name": name}, format="json"
     )
@@ -67,6 +67,17 @@ def test_max_length_category_is_preserved_in_expense(client):
     assert Expense._meta.get_field("category").max_length >= len(name)
     expense.full_clean()
     assert client.get(f"/api/expenses/{expense.id}").data["category"] == name
+
+
+def test_category_name_over_max_length_is_rejected(client):
+    response = client.post(
+        "/api/expense-categories",
+        {"name": "é" * 256},
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.data["field"] == "name"
+    assert "é" * 256 not in categories(client)
 
 
 @pytest.mark.parametrize("name", [None, "", "  "])
@@ -112,6 +123,14 @@ def test_expense_defaults_to_draft_with_optional_fields_omitted(client):
     assert response.data["supplierId"] is None
     assert response.data["attachmentReference"] is None
     assert response.data["amount"] == 120.5
+
+
+def test_expense_defaults_to_draft_with_null_status(client):
+    response = client.post(
+        "/api/expenses", payload(client, status=None), format="json"
+    )
+    assert response.status_code == 201, response.data
+    assert response.data["status"] == "draft"
 
 
 def test_expense_with_supplier_attachment_and_posted_status(client):

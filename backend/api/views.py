@@ -2381,6 +2381,13 @@ class ExpenseCategoryListView(APIView):
         name = require_text(
             request.data, "name", "Category name is required."
         )
+        max_length = ExpenseCategoryRecord._meta.get_field("name").max_length
+        if len(name) > max_length:
+            raise ApiError(
+                f"Category name must be {max_length} characters or fewer.",
+                status.HTTP_400_BAD_REQUEST,
+                "name",
+            )
         if farm.expense_categories.filter(name__iexact=name).exists():
             raise ApiError(
                 "A category with that name already exists.",
