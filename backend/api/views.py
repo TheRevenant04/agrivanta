@@ -2222,7 +2222,7 @@ class ActivityResourceNeedsView(APIView):
 
 class WorkerListView(APIView):
     def get(self, request):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         return Response(
             [
                 serialize_worker(worker)
@@ -2231,7 +2231,7 @@ class WorkerListView(APIView):
         )
 
     def post(self, request):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         worker = self._save(farm, None, request.data)
         return Response(
             serialize_worker(worker), status=status.HTTP_201_CREATED
@@ -2239,7 +2239,7 @@ class WorkerListView(APIView):
 
     @staticmethod
     def _save(farm, worker, data):
-        name = require_text(data, "name", "Worker name is required.")
+        name = require_name(data, "name", "Worker")
         user = None
         user_id = data.get("userId")
         if user_id not in (None, ""):
@@ -2261,14 +2261,14 @@ class WorkerListView(APIView):
 
 class WorkerDetailView(APIView):
     def get(self, request, worker_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         worker = scoped_get(
             Worker, farm, worker_id, "That worker no longer exists."
         )
         return Response(serialize_worker(worker))
 
     def put(self, request, worker_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         worker = scoped_get(
             Worker, farm, worker_id, "That worker no longer exists."
         )
@@ -2276,7 +2276,7 @@ class WorkerDetailView(APIView):
         return Response(serialize_worker(worker))
 
     def delete(self, request, worker_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         worker = scoped_get(
             Worker, farm, worker_id, "That worker no longer exists."
         )
@@ -2291,7 +2291,7 @@ class WorkerDetailView(APIView):
 
 class LabourRecordListView(APIView):
     def get(self, request):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         records = farm.labour_records.select_related("worker", "activity")
         activity_id = request.query_params.get(
             "activityId", request.query_params.get("activity")
@@ -2311,7 +2311,7 @@ class LabourRecordListView(APIView):
         )
 
     def post(self, request):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         record = self._save(farm, None, request.data)
         return Response(
             serialize_labour_record(record), status=status.HTTP_201_CREATED
@@ -2389,7 +2389,7 @@ class LabourRecordListView(APIView):
 
 class LabourRecordDetailView(APIView):
     def get(self, request, record_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         record = scoped_get(
             LabourRecord,
             farm,
@@ -2399,7 +2399,7 @@ class LabourRecordDetailView(APIView):
         return Response(serialize_labour_record(record))
 
     def put(self, request, record_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         record = scoped_get(
             LabourRecord,
             farm,
@@ -2410,7 +2410,7 @@ class LabourRecordDetailView(APIView):
         return Response(serialize_labour_record(record))
 
     def delete(self, request, record_id):
-        farm = get_farm(request.user)
+        farm = get_inventory_farm(request)
         record = scoped_get(
             LabourRecord,
             farm,
