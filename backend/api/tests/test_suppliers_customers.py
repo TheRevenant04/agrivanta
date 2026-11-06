@@ -77,6 +77,47 @@ def test_counterparties_reject_missing_or_blank_names(
     assert "name is required" in response.data["detail"].lower()
 
 
+@pytest.mark.parametrize(("path", "model", "_noun"), RESOURCES)
+@pytest.mark.parametrize("operation", ("create", "update"))
+@pytest.mark.parametrize(("length", "accepted"), ((255, True), (256, False)))
+def test_counterparties_enforce_name_max_length(
+    client, path, model, _noun, operation, length, accepted
+):
+    profile = None
+    if operation == "update":
+        created = client.post(path, {"name": "Length Check"}, format="json")
+        assert created.status_code == 201
+        profile = created.data
+
+    before_count = model.objects.count()
+    name = "x" * length
+    if operation == "create":
+        response = client.post(path, {"name": name}, format="json")
+    else:
+        response = client.patch(
+            f"{path}/{profile['id']}", {"name": name}, format="json"
+        )
+
+    expected_status = (
+        (201 if operation == "create" else 200) if accepted else 400
+    )
+    assert response.status_code == expected_status
+    if expected_status == 400:
+        assert response.data["field"] == "name"
+        assert "255 characters or fewer" in response.data["detail"]
+        if operation == "create":
+            assert model.objects.count() == before_count
+        else:
+            profile_record = model.objects.get(pk=profile["id"])
+            assert profile_record.name == "Length Check"
+    else:
+        assert response.data["name"] == name
+        if operation == "create":
+            assert model.objects.count() == before_count + 1
+        else:
+            assert model.objects.get(pk=profile["id"]).name == name
+
+
 @pytest.mark.parametrize(("path", "_model", "_noun"), RESOURCES)
 def test_counterparties_allow_duplicate_names(client, path, _model, _noun):
     first = client.post(path, {"name": "Same Name"}, format="json")

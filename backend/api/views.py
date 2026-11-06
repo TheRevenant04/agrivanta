@@ -3890,9 +3890,7 @@ class CounterpartyListView(APIView):
 
     def post(self, request):
         farm = get_farm(request.user)
-        name = require_text(
-            request.data, "name", f"{self.noun} name is required."
-        )
+        name = require_name(request.data, "name", self.noun)
         values = self._optional_values(request.data)
         counterparty = self.model.objects.create(
             farm=farm, name=name, **values
@@ -3966,8 +3964,8 @@ class CounterpartyDetailView(APIView):
         counterparty = self._get(request, kwargs)
         changed = False
         if "name" in request.data:
-            counterparty.name = require_text(
-                request.data, "name", f"{self.noun} name is required."
+            counterparty.name = require_name(
+                request.data, "name", self.noun
             )
             changed = True
         for model_field, value in CounterpartyListView._optional_values(
