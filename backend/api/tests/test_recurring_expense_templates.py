@@ -517,6 +517,46 @@ def test_stale_template_update_preserves_task_advanced_schedule(
     ).next_due_date == date(2026, 3, 10)
 
 
+def test_stale_next_due_date_rejected_without_stalling_recurrence(
+    client, monkeypatch
+):
+    template = create_template(
+        client,
+        nextDueDate="2026-01-10",
+        frequency="monthly",
+    )
+    today = [date(2026, 1, 10)]
+    monkeypatch.setattr("api.tasks.timezone.localdate", lambda: today[0])
+    assert process_recurring_expense_reminders.run() == 1
+
+    stale = client.patch(
+        f"{TEMPLATES_URL}/{template['id']}",
+        {"amount": "90", "nextDueDate": "2026-01-10"},
+        format="json",
+    )
+
+    assert stale.status_code == 409
+    stored = RecurringExpenseTemplate.objects.get(pk=template["id"])
+    assert stored.next_due_date == date(2026, 2, 10)
+    assert stored.amount != 90
+
+    today[0] = date(2026, 2, 10)
+    assert process_recurring_expense_reminders.run() == 1
+    assert RecurringExpenseTemplate.objects.get(
+        pk=template["id"]
+    ).next_due_date == date(2026, 3, 10)
+    assert Notification.objects.filter(
+        recurring_expense_template_id=template["id"]
+    ).count() == 2
+
+    future = client.patch(
+        f"{TEMPLATES_URL}/{template['id']}",
+        {"nextDueDate": "2026-04-01"},
+        format="json",
+    )
+    assert future.status_code == 200
+    assert future.data["nextDueDate"] == "2026-04-01"
+
 def test_later_reminder_uses_updated_amount_category_and_frequency(
     client, monkeypatch
 ):

@@ -2961,9 +2961,28 @@ class RecurringExpenseTemplateDetailView(APIView):
         values = RecurringExpenseTemplateListView._validate(
             request.data, farm, existing=template
         )
-        for field, value in values.items():
-            setattr(template, field, value)
-        template.save(update_fields=[*values.keys(), "updated_at"])
+        with transaction.atomic():
+            template = RecurringExpenseTemplate.objects.select_for_update().get(
+                pk=template.pk
+            )
+            new_date = values.get("next_due_date")
+            if (
+                new_date is not None
+                and new_date < template.next_due_date
+                and Notification.objects.filter(
+                    recurring_expense_template=template,
+                    occurrence_date__gte=new_date,
+                ).exists()
+            ):
+                raise ApiError(
+                    "Next due date is earlier than a reminder that was "
+                    "already sent. Reload the template and try again.",
+                    status.HTTP_409_CONFLICT,
+                    "nextDueDate",
+                )
+            for field, value in values.items():
+                setattr(template, field, value)
+            template.save(update_fields=[*values.keys(), "updated_at"])
         template.refresh_from_db()
         return Response(serialize_recurring_expense_template(template))
 
