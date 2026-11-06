@@ -163,7 +163,16 @@ urlpatterns = [
     ),
     path("harvests", views.HarvestListView.as_view()),
     path("harvests/<str:harvest_id>", views.HarvestDetailView.as_view()),
+    path("suppliers", views.SupplierListView.as_view()),
+    path(
+        "suppliers/<str:supplier_id>",
+        views.SupplierDetailView.as_view(),
+    ),
     path("customers", views.CustomerListView.as_view()),
+    path(
+        "customers/<str:customer_id>",
+        views.CustomerDetailView.as_view(),
+    ),
     path("sales", views.SaleListView.as_view()),
     path("sales/<str:sale_id>", views.SaleDetailView.as_view()),
     path(
