@@ -525,15 +525,17 @@ _NUMBER_PATTERN = re.compile(
     r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?"
 )
 _NUMBER_WORD_PATTERN = re.compile(
-    r"\b(?:(?:"
-    r"zero|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"\b(?:"
+    r"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
     r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|"
     r"eighty|ninety|hundred|thousand|million|billion|trillion|"
     r"first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|"
     r"tenth|dozen|score|couple|few|several|many|half|quarter|"
     r"twice|thrice|single|double|triple|pair|handful|numerous"
-    r")(?:s|es)?|halves)\b",
+    r")(?:s|es)?|halves|twent(?:y|ies)|thirt(?:y|ies)|fort(?:y|ies)|"
+    r"fift(?:y|ies)|sixt(?:y|ies)|sevent(?:y|ies)|eight(?:y|ies)|"
+    r"ninet(?:y|ies))\b",
     re.IGNORECASE,
 )
 _UNSUPPORTED_BASIS_PATTERN = re.compile(

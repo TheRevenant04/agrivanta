@@ -358,6 +358,16 @@ def test_chat_invalid_inputs_are_named_instead_of_guessed(
         "Actual costs are half of revenue.",
         "Actual costs are in halves.",
         "Actual costs were dozens of dollars.",
+        "Revenue is in the twenties.",
+        "Costs were in the thirties.",
+        "Revenue was in the forties.",
+        "Costs reached the fifties.",
+        "Revenue is in the sixties.",
+        "Costs were in the seventies.",
+        "Revenue was in the eighties.",
+        "Costs were in the nineties.",
+        "Revenue was in the twenty-first year.",
+        "Costs were in the mid-forties.",
     ],
 )
 def test_chat_rejects_numeric_or_speculative_claims(
