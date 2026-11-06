@@ -72,6 +72,10 @@ urlpatterns = [
         views.ItemMovementListView.as_view(),
     ),
     path("stock-movements", views.StockMovementListView.as_view()),
+    path(
+        "stock-movements/<str:movement_id>",
+        views.StockMovementDetailView.as_view(),
+    ),
     path("expenses", views.ExpenseListView.as_view()),
     path(
         "expenses/<str:expense_id>",
