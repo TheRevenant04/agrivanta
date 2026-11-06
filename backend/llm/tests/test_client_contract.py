@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import openai
 import pytest
 from django.test import override_settings
+from openai.types.responses import Response, ResponseError, ResponseFailedEvent
 
 from llm import (
     FakeLLMClient,
@@ -262,6 +263,35 @@ def test_openai_stream_failure_events_are_typed(
     )
 
     with pytest.raises(interface_error):
+        list(client.stream(MESSAGES))
+
+
+def test_openai_sdk_response_failed_event_uses_nested_typed_error() -> None:
+    event = ResponseFailedEvent(
+        type="response.failed",
+        sequence_number=1,
+        response=Response(
+            id="resp_failed",
+            created_at=1,
+            model="test-model",
+            object="response",
+            output=[],
+            parallel_tool_calls=True,
+            tool_choice="auto",
+            tools=[],
+            error=ResponseError(
+                code="rate_limit_exceeded",
+                message="Rate limit exceeded",
+            ),
+        ),
+    )
+    client = OpenAIResponsesClient(
+        "test-key",
+        "test-model",
+        client=_openai_client(Mock(return_value=iter([event]))),
+    )
+
+    with pytest.raises(LLMRateLimitError):
         list(client.stream(MESSAGES))
 
 

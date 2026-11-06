@@ -192,7 +192,12 @@ class OpenAIResponsesClient:
 
 
 def _stream_failure(event: Any) -> LLMError:
-    provider_error = getattr(event, "error", None)
+    response = getattr(event, "response", None)
+    provider_error = (
+        getattr(response, "error", None)
+        if response is not None
+        else getattr(event, "error", None)
+    )
     if isinstance(provider_error, dict):
         code = provider_error.get("code") or provider_error.get("type")
     else:
