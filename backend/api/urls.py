@@ -1,8 +1,9 @@
 from django.urls import path
 
-from . import views
+from . import chat_views, views
 
 urlpatterns = [
+    path("chat", chat_views.ChatView.as_view()),
     path("auth/register", views.RegisterView.as_view()),
     path("auth/login", views.LoginView.as_view()),
     path("auth/logout", views.LogoutView.as_view()),
@@ -68,6 +69,16 @@ urlpatterns = [
     path(
         "labour-records/<str:record_id>",
         views.LabourRecordDetailView.as_view(),
+    ),
+    path("equipment", views.EquipmentListView.as_view()),
+    path(
+        "equipment/<str:equipment_id>",
+        views.EquipmentDetailView.as_view(),
+    ),
+    path("equipment-usages", views.EquipmentUsageListView.as_view()),
+    path(
+        "equipment-usages/<str:usage_id>",
+        views.EquipmentUsageDetailView.as_view(),
     ),
     path("inventory-items", views.InventoryItemListView.as_view()),
     path(

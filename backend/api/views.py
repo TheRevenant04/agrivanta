@@ -42,6 +42,8 @@ from .models import (
     ExpenseCategory,
     ExpenseCategoryRecord,
     ExpenseStatus,
+    Equipment,
+    EquipmentUsage,
     ensure_default_expense_categories,
     Farm,
     Field,
@@ -80,6 +82,8 @@ from .serializers import (
     serialize_cycle_ref,
     serialize_customer,
     serialize_expense,
+    serialize_equipment,
+    serialize_equipment_usage,
     serialize_expense_category,
     serialize_farm,
     serialize_field,
@@ -1904,7 +1908,7 @@ class ActivityListView(APIView):
         activities = activity_queryset_for(request).select_related(
             "cycle", "type"
         ).prefetch_related(
-            "input_needs", "assignees", "labour_records"
+            "input_needs", "labour_records", "assignees"
         )
         cycle_id = request.query_params.get("cycle")
         if cycle_id:
@@ -2388,6 +2392,271 @@ class LabourRecordDetailView(APIView):
             "That labour record no longer exists.",
         )
         record.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class EquipmentListView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        return Response(
+            [
+                serialize_equipment(equipment)
+                for equipment in farm.equipment.all()
+            ]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        equipment = self._save(farm, None, request.data)
+        return Response(
+            serialize_equipment(equipment), status=status.HTTP_201_CREATED
+        )
+
+    @staticmethod
+    def _save(farm, equipment, data):
+        name = require_name(data, "name", "Equipment")
+        if equipment is None:
+            return Equipment.objects.create(farm=farm, name=name)
+        equipment.name = name
+        equipment.save()
+        return equipment
+
+
+class EquipmentDetailView(APIView):
+    def get(self, request, equipment_id):
+        farm = get_farm(request.user)
+        equipment = scoped_get(
+            Equipment,
+            farm,
+            equipment_id,
+            "That equipment no longer exists.",
+        )
+        return Response(serialize_equipment(equipment))
+
+    def put(self, request, equipment_id):
+        farm = get_farm(request.user)
+        equipment = scoped_get(
+            Equipment,
+            farm,
+            equipment_id,
+            "That equipment no longer exists.",
+        )
+        equipment = EquipmentListView._save(farm, equipment, request.data)
+        return Response(serialize_equipment(equipment))
+
+    def delete(self, request, equipment_id):
+        farm = get_farm(request.user)
+        equipment = scoped_get(
+            Equipment, farm, equipment_id, "That equipment no longer exists."
+        )
+        if equipment.usages.exists():
+            raise ApiError(
+                "Equipment with usage records cannot be deleted.",
+                status.HTTP_409_CONFLICT,
+            )
+        equipment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class EquipmentUsageListView(APIView):
+    @staticmethod
+    def _validate_source_precision(value, api_field, model_field, label):
+        try:
+            EquipmentUsage._meta.get_field(model_field).run_validators(value)
+        except ValidationError as exc:
+            raise ApiError(
+                f"{label} must have at most four decimal places and fit "
+                "within 14 digits.",
+                status.HTTP_400_BAD_REQUEST,
+                api_field,
+            ) from exc
+
+    def get(self, request):
+        farm = get_farm(request.user)
+        usages = farm.equipment_usages.select_related(
+            "equipment", "activity"
+        )
+        activity_id = request.query_params.get(
+            "activityId", request.query_params.get("activity")
+        )
+        if activity_id is not None:
+            try:
+                activity_id = Activity._meta.pk.to_python(activity_id)
+            except (AttributeError, TypeError, ValueError, ValidationError):
+                raise ApiError(
+                    "The activity filter must be a valid activity ID.",
+                    status.HTTP_400_BAD_REQUEST,
+                    "activityId",
+                )
+            usages = usages.filter(activity_id=activity_id)
+        return Response(
+            [serialize_equipment_usage(usage) for usage in usages]
+        )
+
+    def post(self, request):
+        farm = get_farm(request.user)
+        usage = self._save(farm, None, request.data)
+        return Response(
+            serialize_equipment_usage(usage),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _save(farm, usage, data):
+        equipment_id = data.get("equipmentId")
+        try:
+            equipment = Equipment.objects.get(farm=farm, pk=equipment_id)
+        except (Equipment.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "The selected equipment does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "equipmentId",
+            )
+
+        activity_id = data.get("activityId")
+        try:
+            activity = Activity.objects.get(farm=farm, pk=activity_id)
+        except (Activity.DoesNotExist, ValueError, ValidationError):
+            raise ApiError(
+                "The selected activity does not exist.",
+                status.HTTP_404_NOT_FOUND,
+                "activityId",
+            )
+
+        try:
+            hours = parse_decimal(
+                data.get("hours"),
+                "hours",
+                "Hours are required.",
+                "Hours must be a number.",
+                positive_message="Hours must be greater than zero.",
+            )
+        except ValueError as exc:
+            raise ApiError(str(exc), status.HTTP_400_BAD_REQUEST, "hours")
+        EquipmentUsageListView._validate_source_precision(
+            hours, "hours", "hours", "Hours"
+        )
+
+        cost_per_hour_keys = ("costPerHour", "cost_per_hour")
+        total_cost_keys = ("totalCost", "total_cost")
+        has_cost_per_hour = any(
+            data.get(key) not in (None, "") for key in cost_per_hour_keys
+        )
+        has_total_cost = any(
+            data.get(key) not in (None, "") for key in total_cost_keys
+        )
+        if has_cost_per_hour == has_total_cost:
+            raise ApiError(
+                "Provide exactly one of costPerHour or totalCost.",
+                status.HTTP_400_BAD_REQUEST,
+                "costPerHour",
+            )
+
+        cost_per_hour = None
+        total_cost = None
+        if has_cost_per_hour:
+            cost_per_hour_raw = next(
+                data[key]
+                for key in cost_per_hour_keys
+                if data.get(key) not in (None, "")
+            )
+            try:
+                cost_per_hour = parse_decimal(
+                    cost_per_hour_raw,
+                    "costPerHour",
+                    "Cost per hour is required.",
+                    "Cost per hour must be a number.",
+                    negative_message="Cost per hour cannot be negative.",
+                )
+                EquipmentUsageListView._validate_source_precision(
+                    cost_per_hour,
+                    "costPerHour",
+                    "cost_per_hour",
+                    "Cost per hour",
+                )
+            except ValueError as exc:
+                raise ApiError(
+                    str(exc), status.HTTP_400_BAD_REQUEST, "costPerHour"
+                )
+        else:
+            total_cost_raw = next(
+                data[key]
+                for key in total_cost_keys
+                if data.get(key) not in (None, "")
+            )
+            try:
+                total_cost = parse_decimal(
+                    total_cost_raw,
+                    "totalCost",
+                    "Total cost is required.",
+                    "Total cost must be a number.",
+                    negative_message="Total cost cannot be negative.",
+                )
+                EquipmentUsageListView._validate_source_precision(
+                    total_cost, "totalCost", "total_cost", "Total cost"
+                )
+            except ValueError as exc:
+                raise ApiError(
+                    str(exc), status.HTTP_400_BAD_REQUEST, "totalCost"
+                )
+
+        record_date = parse_body_date(
+            data,
+            "date",
+            "Date is required.",
+            "Date must be a valid calendar date.",
+        )
+        if usage is None:
+            return EquipmentUsage.objects.create(
+                farm=farm,
+                equipment=equipment,
+                activity=activity,
+                hours=hours,
+                cost_per_hour=cost_per_hour,
+                total_cost=total_cost,
+                date=record_date,
+            )
+        usage.equipment = equipment
+        usage.activity = activity
+        usage.hours = hours
+        usage.cost_per_hour = cost_per_hour
+        usage.total_cost = total_cost
+        usage.date = record_date
+        usage.save()
+        return usage
+
+
+class EquipmentUsageDetailView(APIView):
+    def get(self, request, usage_id):
+        farm = get_farm(request.user)
+        usage = scoped_get(
+            EquipmentUsage,
+            farm,
+            usage_id,
+            "That equipment usage no longer exists.",
+        )
+        return Response(serialize_equipment_usage(usage))
+
+    def put(self, request, usage_id):
+        farm = get_farm(request.user)
+        usage = scoped_get(
+            EquipmentUsage,
+            farm,
+            usage_id,
+            "That equipment usage no longer exists.",
+        )
+        usage = EquipmentUsageListView._save(farm, usage, request.data)
+        return Response(serialize_equipment_usage(usage))
+
+    def delete(self, request, usage_id):
+        farm = get_farm(request.user)
+        usage = scoped_get(
+            EquipmentUsage,
+            farm,
+            usage_id,
+            "That equipment usage no longer exists.",
+        )
+        usage.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

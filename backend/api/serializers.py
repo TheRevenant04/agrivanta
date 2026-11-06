@@ -208,6 +208,28 @@ def serialize_labour_record(record):
     }
 
 
+def serialize_equipment(equipment):
+    return {
+        "id": as_id(equipment.id),
+        "farmId": as_id(equipment.farm_id),
+        "name": equipment.name,
+    }
+
+
+def serialize_equipment_usage(usage):
+    return {
+        "id": as_id(usage.id),
+        "farmId": as_id(usage.farm_id),
+        "equipmentId": as_id(usage.equipment_id),
+        "activityId": as_id(usage.activity_id),
+        "hours": as_number(usage.hours),
+        "costPerHour": as_number(usage.cost_per_hour),
+        "totalCost": as_number(usage.total_cost),
+        "cost": as_number(usage.cost),
+        "date": as_date(usage.date),
+    }
+
+
 def serialize_inventory_item(item):
     return {
         "id": as_id(item.id),
