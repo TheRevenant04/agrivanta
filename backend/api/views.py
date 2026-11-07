@@ -73,6 +73,7 @@ from .models import (
     Variety,
     Worker,
 )
+from .report_exports import render_report_export, report_payload
 from .serializers import (
     as_date,
     as_number,
@@ -4628,6 +4629,31 @@ class ProfitabilityReportView(APIView):
                     status.HTTP_404_NOT_FOUND,
                     key,
                 )
+
+
+class ReportExportView(APIView):
+    format_kwarg = None
+
+    def get(self, request, report_name):
+        farm = get_farm(request.user)
+        file_format = request.query_params.get("exportFormat")
+        if file_format not in ("csv", "xlsx"):
+            raise ApiError(
+                "exportFormat must be either csv or xlsx.",
+                status.HTTP_400_BAD_REQUEST,
+                "exportFormat",
+            )
+        if report_name == "profitability":
+            ProfitabilityReportView._validate_farm_param(farm, request)
+        payload = report_payload(
+            report_name, farm, request.query_params
+        )
+        return render_report_export(
+            report_name,
+            payload,
+            file_format,
+            request.query_params,
+        )
 
 
 class BudgetVsActualReportView(APIView):
