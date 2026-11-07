@@ -32,7 +32,6 @@ from .models import (
     ActivityInputNeed,
     ActivityStatus,
     ActivityType,
-    Attachment,
     BaseMeasure,
     Budget,
     Crop,
@@ -82,7 +81,6 @@ from .serializers import (
     parse_decimal,
     serialize_activity,
     serialize_activity_type,
-    serialize_attachment,
     serialize_budget,
     serialize_conversion,
     serialize_crop,
@@ -3721,31 +3719,6 @@ class ExpenseReverseView(APIView):
             raise ApiError(exc.message, exc.status_code)
         return Response(
             serialize_expense(reversal), status=status.HTTP_201_CREATED
-        )
-
-
-class ExpenseAttachmentView(APIView):
-    def post(self, request, expense_id):
-        farm = get_farm(request.user)
-        expense = scoped_get(
-            Expense, farm, expense_id, "That expense no longer exists."
-        )
-        if expense.status == ExpenseStatus.POSTED:
-            raise ApiError(
-                "Posted expenses cannot be edited or deleted.",
-                status.HTTP_400_BAD_REQUEST,
-            )
-        upload = request.FILES.get("file")
-        if upload is None or not getattr(upload, "name", ""):
-            raise ApiError(
-                "Invalid attachment.", status.HTTP_400_BAD_REQUEST
-            )
-        attachment = Attachment.objects.create(
-            expense=expense, file=upload, name=upload.name
-        )
-        return Response(
-            serialize_attachment(attachment),
-            status=status.HTTP_201_CREATED,
         )
 
 

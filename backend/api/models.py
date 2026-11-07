@@ -1234,13 +1234,47 @@ class AllocationRule(TimestampedModel):
             )
 
 
+def attachment_storage():
+    from django.core.files.storage import storages
+
+    return storages["attachments"]
+
+
 class Attachment(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     expense = models.ForeignKey(
-        Expense, on_delete=models.CASCADE, related_name="attachments"
+        Expense, on_delete=models.CASCADE, related_name="attachments",
+        null=True, blank=True,
     )
-    file = models.FileField(upload_to="attachments/%Y/%m/")
+    payment = models.ForeignKey(
+        "Payment", on_delete=models.CASCADE, related_name="attachments",
+        null=True, blank=True,
+    )
+    file = models.FileField(upload_to="attachments/%Y/%m/", blank=True)
+    private_file = models.FileField(
+        storage=attachment_storage, upload_to="attachments/", blank=True,
+    )
     name = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=100, blank=True)
+    size = models.PositiveBigIntegerField(null=True, blank=True)
+    sha256 = models.CharField(max_length=64, null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(expense__isnull=False, payment__isnull=True)
+                    | models.Q(expense__isnull=True, payment__isnull=False)
+                ),
+                name="attachment_exactly_one_transaction",
+            ),
+            models.UniqueConstraint(
+                fields=["expense", "sha256"], name="attachment_expense_hash_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["payment", "sha256"], name="attachment_payment_hash_unique",
+            ),
+        ]
 
 
 class Harvest(TimestampedModel):

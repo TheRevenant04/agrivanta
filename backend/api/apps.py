@@ -6,4 +6,5 @@ class ApiConfig(AppConfig):
     name = "api"
 
     def ready(self):
+        from . import attachment_signals  # noqa: F401
         from . import audit  # noqa: F401
