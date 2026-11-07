@@ -4,7 +4,7 @@ from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models.functions import Lower
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -134,7 +134,59 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.email
 
 
-class Farm(models.Model):
+class AuditedQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        with transaction.atomic(using=self.db):
+            count = 0
+            for instance in self:
+                for name, value in kwargs.items():
+                    setattr(instance, name, value)
+                instance.save(update_fields=list(kwargs))
+                count += 1
+            return count
+
+    def bulk_create(self, objs, **kwargs):
+        if any(
+            kwargs.get(option)
+            for option in ("ignore_conflicts", "update_conflicts")
+        ):
+            raise ValidationError(
+                "Conflict-ignoring bulk writes are not supported for audited records."
+            )
+        objs = list(objs)
+        with transaction.atomic(using=self.db):
+            for instance in objs:
+                instance.save(force_insert=True, using=self.db)
+        return objs
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if not fields:
+            return 0
+        with transaction.atomic(using=self.db):
+            for instance in objs:
+                instance.save(using=self.db, update_fields=fields)
+        return len(objs)
+
+
+class AuditedModelMixin:
+    def save(self, *args, **kwargs):
+        with transaction.atomic(using=kwargs.get("using")):
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        with transaction.atomic(using=kwargs.get("using")):
+            return super().delete(*args, **kwargs)
+
+
+def audit_set_null(collector, field, sub_objs, using):
+    from .audit import record_deferred_update
+
+    for instance in sub_objs:
+        record_deferred_update(instance, field.name, None)
+    models.SET_NULL(collector, field, sub_objs, using)
+
+
+class Farm(AuditedModelMixin, models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.OneToOneField(
         User, on_delete=models.CASCADE, related_name="farm"
@@ -145,8 +197,72 @@ class Farm(models.Model):
     name = models.CharField(max_length=255)
     reporting_currency = models.CharField(max_length=3)
 
+    objects = AuditedQuerySet.as_manager()
+
     def __str__(self):
         return self.name
+
+
+class AuditEventQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Audit events are append-only.")
+
+    def delete(self):
+        raise ValidationError("Audit events are append-only.")
+
+
+class AuditEvent(models.Model):
+    class Action(models.TextChoices):
+        CREATED = "created", "created"
+        UPDATED = "updated", "updated"
+        DELETED = "deleted", "deleted"
+
+    class ActorType(models.TextChoices):
+        USER = "user", "user"
+        SYSTEM = "system", "system"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    farm_id = models.UUIDField(db_index=True)
+    model = models.CharField(max_length=32, db_index=True)
+    record_id = models.CharField(max_length=64, db_index=True)
+    action = models.CharField(max_length=16, choices=Action.choices)
+    changes = models.JSONField()
+    actor_type = models.CharField(max_length=16, choices=ActorType.choices)
+    actor_id = models.CharField(max_length=64)
+    actor_name = models.CharField(max_length=255)
+    actor_user = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="audit_events",
+    )
+    timestamp = models.DateTimeField(default=timezone.now, editable=False)
+    related_record_id = models.CharField(max_length=64, blank=True, default="")
+    related_event = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="related_events",
+    )
+
+    objects = AuditEventQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["timestamp", "id"]
+        indexes = [
+            models.Index(fields=["farm_id", "model", "record_id"]),
+            models.Index(fields=["farm_id", "timestamp"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Audit events are append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Audit events are append-only.")
 
 
 class TimestampedModel(models.Model):
@@ -279,7 +395,7 @@ class UnitConversion(TimestampedModel):
         ordering = ["created_at", "id"]
 
 
-class CropCycle(TimestampedModel):
+class CropCycle(AuditedModelMixin, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
         Farm, on_delete=models.CASCADE, related_name="crop_cycles"
@@ -317,6 +433,8 @@ class CropCycle(TimestampedModel):
 
     class Meta:
         ordering = ["created_at", "id"]
+
+    objects = AuditedQuerySet.as_manager()
 
 
 class ActivityType(TimestampedModel):
@@ -574,7 +692,7 @@ class ActivityInputNeed(models.Model):
         ordering = ["id"]
 
 
-class InventoryItem(TimestampedModel):
+class InventoryItem(AuditedModelMixin, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
         Farm, on_delete=models.CASCADE, related_name="inventory_items"
@@ -602,6 +720,8 @@ class InventoryItem(TimestampedModel):
             )
         ]
 
+    objects = AuditedQuerySet.as_manager()
+
     def current_quantity(self, as_of_date=None):
         movements = self.movements.all()
         if as_of_date is not None:
@@ -623,7 +743,7 @@ class InventoryItem(TimestampedModel):
         )
 
 
-class StockMovement(TimestampedModel):
+class StockMovement(AuditedModelMixin, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
         Farm, on_delete=models.CASCADE, related_name="stock_movements"
@@ -641,14 +761,14 @@ class StockMovement(TimestampedModel):
         Activity,
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=audit_set_null,
         related_name="stock_movements",
     )
     expense = models.ForeignKey(
         "Expense",
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=audit_set_null,
         related_name="stock_movements",
     )
     note = models.TextField(blank=True, default="")
@@ -682,6 +802,8 @@ class StockMovement(TimestampedModel):
                 name="stock_movement_unit_cost_nonnegative",
             ),
         ]
+
+    objects = AuditedQuerySet.as_manager()
 
 
 class Supplier(TimestampedModel):
@@ -768,10 +890,10 @@ def protect_posted_set_null(collector, field, sub_objs, using):
         raise models.ProtectedError(
             "Posted expenses cannot be unlinked.", sub_objs
         )
-    models.SET_NULL(collector, field, sub_objs, using)
+    audit_set_null(collector, field, sub_objs, using)
 
 
-class ExpenseQuerySet(models.QuerySet):
+class ExpenseQuerySet(AuditedQuerySet):
     def _locked(self):
         return self.filter(
             models.Q(status=ExpenseStatus.POSTED)
@@ -794,14 +916,26 @@ class ExpenseQuerySet(models.QuerySet):
 
     def mark_reversed(self, when):
         """Reversal-only write: stamp ``reversed_at`` on an original."""
-        return self.filter(
+        query = self.filter(
             status=ExpenseStatus.POSTED,
             reversal_of__isnull=True,
             reversed_at__isnull=True,
-        )._unguarded_update(reversed_at=when)
+        )
+        original = query.first()
+        if original is None:
+            return 0
+        from .audit import record_query_update
+
+        return record_query_update(
+            query,
+            original,
+            {"reversed_at": when},
+            related_record_id=getattr(self, "_reversal_record_id", None),
+            related_event=getattr(self, "_reversal_audit_event", None),
+        )
 
     def _unguarded_update(self, **kwargs):
-        return super().update(**kwargs)
+        return models.QuerySet.update(self, **kwargs)
 
 
 class PaymentQuerySet(models.QuerySet):
@@ -829,7 +963,7 @@ class PaymentQuerySet(models.QuerySet):
         return super().update(**kwargs)
 
 
-class Expense(TimestampedModel):
+class Expense(AuditedModelMixin, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     farm = models.ForeignKey(
         Farm, on_delete=models.CASCADE, related_name="expenses"
