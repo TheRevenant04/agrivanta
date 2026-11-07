@@ -295,10 +295,32 @@ def serialize_csv(report):
     for index, table in enumerate(report.tables):
         if index:
             writer.writerow([])
-            writer.writerow([f"Table: {_display_name(table.name)}"])
-        writer.writerow(table.headers)
-        writer.writerows(table.rows)
+            writer.writerow(
+                [_csv_cell_value(f"Table: {_display_name(table.name)}")]
+            )
+        writer.writerow(_csv_row(table.headers))
+        writer.writerows(_csv_row(row) for row in table.rows)
     return output.getvalue().encode("utf-8")
+
+
+def _csv_cell_value(value):
+    if isinstance(value, str) and value.lstrip(" \t\r\n").startswith(
+        ("=", "+", "-", "@")
+    ):
+        return f"'{value}"
+    return value
+
+
+def _csv_row(values):
+    return tuple(_csv_cell_value(value) for value in values)
+
+
+def _append_xlsx_row(worksheet, values):
+    worksheet.append(values)
+    row_index = worksheet.max_row
+    for column_index, value in enumerate(values, start=1):
+        if isinstance(value, str):
+            worksheet.cell(row=row_index, column=column_index).data_type = "s"
 
 
 def serialize_xlsx(report):
@@ -310,9 +332,9 @@ def serialize_xlsx(report):
             _safe_sheet_name(table.name, sheet_names)
         )
         if table.headers:
-            worksheet.append(table.headers)
+            _append_xlsx_row(worksheet, table.headers)
             for row in table.rows:
-                worksheet.append(row)
+                _append_xlsx_row(worksheet, row)
     if not workbook.sheetnames:
         workbook.create_sheet("Report")
     output = BytesIO()

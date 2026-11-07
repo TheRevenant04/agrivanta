@@ -17,6 +17,7 @@ from api.models import (
     User,
     Worker,
 )
+from api.report_exports import render_report_export
 
 EXPORT = "/api/reports/labour-usage/export"
 REPORT = "/api/reports/labour-usage"
@@ -65,6 +66,57 @@ def _csv_rows(response):
 def _spreadsheet_rows(response, sheet="Labour Usage"):
     workbook = load_workbook(BytesIO(response.content), read_only=True)
     return workbook, list(workbook[sheet].values)
+
+
+def test_formula_leading_text_is_literal_in_csv_and_xlsx():
+    payload = {
+        "rows": [
+            {
+                "equals": "=1+1",
+                "plus": "+SUM(A1:A2)",
+                "minus": "-1+1",
+                "at": "@SUM(A1:A2)",
+                "leadingWhitespace": " \t=1+1",
+                "negativeAmount": Decimal("-12.50"),
+                "count": 7,
+            }
+        ]
+    }
+
+    csv_response = render_report_export("labour-usage", payload, "csv")
+    csv_rows = _csv_rows(csv_response)
+    assert csv_rows[1] == [
+        "'=1+1",
+        "'+SUM(A1:A2)",
+        "'-1+1",
+        "'@SUM(A1:A2)",
+        "' \t=1+1",
+        "-12.50",
+        "7",
+    ]
+
+    xlsx_response = render_report_export("labour-usage", payload, "xlsx")
+    workbook = load_workbook(BytesIO(xlsx_response.content))
+    worksheet = workbook["Labour Usage"]
+    text_cells = [worksheet.cell(row=2, column=column) for column in range(1, 6)]
+    assert [cell.value for cell in text_cells] == [
+        "=1+1",
+        "+SUM(A1:A2)",
+        "-1+1",
+        "@SUM(A1:A2)",
+        " \t=1+1",
+    ]
+    assert all(cell.data_type == "s" for cell in text_cells)
+    assert all(
+        cell.data_type != "f"
+        for row in worksheet.iter_rows()
+        for cell in row
+    )
+    assert worksheet["F2"].value == -12.5
+    assert worksheet["F2"].data_type == "n"
+    assert worksheet["G2"].value == 7
+    assert worksheet["G2"].data_type == "n"
+    workbook.close()
 
 
 def test_labour_report_exports_match_filtered_payload_and_preserve_rows(
