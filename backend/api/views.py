@@ -4637,9 +4637,9 @@ class ReportExportView(APIView):
     def get(self, request, report_name):
         farm = get_farm(request.user)
         file_format = request.query_params.get("exportFormat")
-        if file_format not in ("csv", "xlsx"):
+        if file_format not in ("csv", "xlsx", "pdf"):
             raise ApiError(
-                "exportFormat must be either csv or xlsx.",
+                "exportFormat must be csv, xlsx or pdf.",
                 status.HTTP_400_BAD_REQUEST,
                 "exportFormat",
             )
@@ -4653,6 +4653,7 @@ class ReportExportView(APIView):
             payload,
             file_format,
             request.query_params,
+            farm=farm,
         )
 
 

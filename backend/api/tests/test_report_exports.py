@@ -295,7 +295,7 @@ def test_export_service_supports_existing_report_payloads(client, report_name):
 def test_export_requires_authentication_and_valid_format(anon, client):
     assert anon.get(EXPORT, {"exportFormat": "csv"}).status_code == 401
     assert client.get(EXPORT).status_code == 400
-    invalid = client.get(EXPORT, {"exportFormat": "pdf"})
+    invalid = client.get(EXPORT, {"exportFormat": "invalid"})
     assert invalid.status_code == 400
     assert invalid.data["field"] == "exportFormat"
     unknown = client.get(
