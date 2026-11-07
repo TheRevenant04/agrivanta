@@ -1,13 +1,17 @@
 import base64
+import io
 import uuid
 
 import pytest
+from asgiref.sync import async_to_sync
 from django.core.files.storage import InMemoryStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.files.uploadhandler import FileUploadHandler, TemporaryFileUploadHandler
 from django.test import override_settings
 from rest_framework.test import APIClient
 
 from api.models import Attachment
+from api.attachment_uploads import AttachmentASGIBodyLimit, MAX_REQUEST_SIZE, MAX_SIZE
 
 pytestmark = pytest.mark.django_db
 
@@ -109,12 +113,173 @@ def test_type_validation(client, transactions, data, name, mime, expected):
 
 @override_settings(FILE_UPLOAD_MAX_MEMORY_SIZE=11 * 1024 * 1024)
 @pytest.mark.parametrize("size,expected", [(10 * 1024 * 1024, 201), (10 * 1024 * 1024 + 1, 400)])
-def test_size_boundary(client, transactions, size, expected):
+@pytest.mark.parametrize("kind,index", [("expenses", 0), ("payments", 1)])
+def test_size_boundary(client, transactions, size, expected, kind, index):
     data = b"%PDF-1.4\n" + b"x" * (size - 14) + b"%%EOF"
     assert len(data) == size
-    response = upload(client, f"/api/expenses/{transactions[0]}/attachments", data)
+    response = upload(client, f"/api/{kind}/{transactions[index]}/attachments", data)
     assert response.status_code == expected, response.data
     assert Attachment.objects.count() == (expected == 201)
+    if expected == 201:
+        assert response.data["size"] == size
+        downloaded = client.get(
+            f"/api/{kind}/{transactions[index]}/attachments/{response.data['id']}"
+        )
+        assert b"".join(downloaded.streaming_content) == data
+    else:
+        assert "10 MiB" in response.data["detail"]
+
+
+@override_settings(FILE_UPLOAD_MAX_MEMORY_SIZE=0)
+@pytest.mark.parametrize("kind,index", [("expenses", 0), ("payments", 1)])
+def test_oversized_upload_stops_before_file_is_spooled(
+    client, transactions, private_storage, monkeypatch, kind, index
+):
+    received = 0
+    files = []
+    original = TemporaryFileUploadHandler.receive_data_chunk
+
+    def track(handler, chunk, start):
+        nonlocal received
+        received += len(chunk)
+        files.append(handler.file)
+        return original(handler, chunk, start)
+
+    def new_file(handler, *args, **kwargs):
+        handler.file = io.BytesIO()
+
+    monkeypatch.setattr(TemporaryFileUploadHandler, "new_file", new_file)
+    monkeypatch.setattr(TemporaryFileUploadHandler, "receive_data_chunk", track)
+    data = b"%PDF-1.4\n" + b"x" * (20 * 1024 * 1024) + b"%%EOF"
+    response = upload(client, f"/api/{kind}/{transactions[index]}/attachments", data)
+    assert response.status_code == 400
+    assert "10 MiB" in response.data["detail"]
+    assert 0 < received <= 10 * 1024 * 1024
+    assert files and all(file.closed for file in files)
+    assert not Attachment.objects.exists()
+    assert private_storage.listdir("")[1] == []
+
+
+@override_settings(FILE_UPLOAD_MAX_MEMORY_SIZE=0)
+def test_exact_limit_passes_through_chunked_upload_handler(
+    client, transactions, monkeypatch
+):
+    received = []
+    original = TemporaryFileUploadHandler.receive_data_chunk
+
+    def new_file(handler, *args, **kwargs):
+        FileUploadHandler.new_file(handler, *args, **kwargs)
+        handler.file = SimpleUploadedFile(handler.file_name, b"", handler.content_type)
+
+    def track(handler, chunk, start):
+        received.append(len(chunk))
+        return original(handler, chunk, start)
+
+    monkeypatch.setattr(TemporaryFileUploadHandler, "new_file", new_file)
+    monkeypatch.setattr(TemporaryFileUploadHandler, "receive_data_chunk", track)
+    data = b"%PDF-1.4\n" + b"x" * (MAX_SIZE - 14) + b"%%EOF"
+    response = upload(client, f"/api/expenses/{transactions[0]}/attachments", data)
+    assert response.status_code == 201, response.data
+    assert response.data["size"] == MAX_SIZE
+    assert sum(received) == MAX_SIZE
+    assert len(received) > 1
+    record = Attachment.objects.get(pk=response.data["id"])
+    with record.private_file.open("rb") as stored:
+        assert stored.read() == data
+
+
+@override_settings(FILE_UPLOAD_MAX_MEMORY_SIZE=11 * 1024 * 1024)
+def test_multiple_file_parts_cannot_bypass_upload_cap(client, transactions):
+    url = f"/api/expenses/{transactions[0]}/attachments"
+    response = client.post(
+        url,
+        {
+            "file": SimpleUploadedFile("receipt.pdf", PDF, content_type="application/pdf"),
+            "other": SimpleUploadedFile("other.pdf", b"x" * (10 * 1024 * 1024)),
+        },
+        format="multipart",
+    )
+    assert response.status_code == 400
+    assert "10 MiB" in response.data["detail"]
+    assert not Attachment.objects.exists()
+
+
+@pytest.mark.parametrize("kind", ["expenses", "payments"])
+def test_asgi_stops_body_spooling_before_consuming_oversized_request(
+    monkeypatch, kind
+):
+    from config.asgi import application
+
+    spools = []
+
+    class TrackedSpool(io.BytesIO):
+        written = 0
+
+        def write(self, data):
+            self.written += len(data)
+            return super().write(data)
+
+    def create_spool(*args, **kwargs):
+        spool = TrackedSpool()
+        spools.append(spool)
+        return spool
+
+    monkeypatch.setattr(
+        "django.core.handlers.asgi.tempfile.SpooledTemporaryFile", create_spool
+    )
+    chunks = 0
+    sent = []
+
+    async def receive():
+        nonlocal chunks
+        chunks += 1
+        assert chunks <= 200
+        return {"type": "http.request", "body": b"x" * 65536, "more_body": True}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": f"/prefix/api/{kind}/123/attachments",
+        "root_path": "/prefix",
+        "headers": [],
+    }
+    async_to_sync(application)(scope, receive, send)
+    assert sent[0]["status"] == 413
+    assert b"upload limit" in sent[1]["body"]
+    assert spools[0].closed
+    assert spools[0].written <= MAX_REQUEST_SIZE
+    assert chunks * 65536 < 20 * 1024 * 1024
+
+
+def test_asgi_allows_exact_file_limit_and_multipart_overhead():
+    seen = []
+    sent = []
+
+    async def app(scope, receive, send):
+        while True:
+            message = await receive()
+            seen.append(message)
+            if not message.get("more_body"):
+                return
+
+    messages = iter([
+        {"type": "http.request", "body": b"a" * MAX_SIZE, "more_body": True},
+        {"type": "http.request", "body": b"multipart headers", "more_body": False},
+    ])
+
+    async def receive():
+        return next(messages)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "method": "POST", "path": "/api/expenses/123/attachments"}
+    async_to_sync(AttachmentASGIBodyLimit(app))(scope, receive, send)
+    assert sum(len(message["body"]) for message in seen) == MAX_SIZE + 17
+    assert not sent
 
 
 def test_missing_inputs_and_not_found(client, transactions, private_storage):

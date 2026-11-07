@@ -10,11 +10,11 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from .exceptions import ApiError
+from .attachment_uploads import AttachmentSizeLimitHandler, MAX_SIZE
 from .models import Attachment, Expense, ExpenseStatus, Payment
 from .serializers import serialize_attachment
 from .views import APIView, get_farm, scoped_get
 
-MAX_SIZE = 10 * 1024 * 1024
 TYPES = {
     "application/pdf": (".pdf",),
     "image/jpeg": (".jpg", ".jpeg"),
@@ -80,6 +80,11 @@ def find_attachment(parent, attachment_id):
 
 
 class AttachmentListView(APIView):
+    def initialize_request(self, request, *args, **kwargs):
+        if request.method == "POST":
+            request.upload_handlers.insert(0, AttachmentSizeLimitHandler(request))
+        return super().initialize_request(request, *args, **kwargs)
+
     def get(self, request, kind, parent_id):
         parent = parent_for(request, kind, parent_id)
         return Response([serialize_attachment(a) for a in parent.attachments.all()])
@@ -87,7 +92,10 @@ class AttachmentListView(APIView):
     def post(self, request, kind, parent_id):
         # Check the farm before reading or storing the uploaded content.
         parent_for(request, kind, parent_id)
-        name, content_type, size, digest = validate_upload(request.FILES.get("file"))
+        upload = request.FILES.get("file")
+        if getattr(request._request, "attachment_upload_too_large", False):
+            raise ApiError("File must not exceed 10 MiB.", field="file")
+        name, content_type, size, digest = validate_upload(upload)
         upload = request.FILES["file"]
         stored = None
         try:

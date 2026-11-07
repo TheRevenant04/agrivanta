@@ -8,6 +8,10 @@ not storage paths or URLs. Uploads are limited to 10 MiB and PDF, JPEG, or PNG.
 Duplicate content on the same transaction is rejected. Attachments may be
 added to recorded transactions, but cannot be removed from posted expenses or
 recorded payments. Deleting a draft expense also removes its files after commit.
+Multipart parsing stops when the total file content exceeds 10 MiB. Under the
+provided ASGI application, the entire request is additionally limited to 10 MiB
+plus 64 KiB of multipart overhead before Django buffers it. Servers or proxies
+that buffer requests before the application need their own request limits.
 
 The `attachments` Django storage alias defaults to a private local directory
 outside the static and media roots. To use an S3-compatible Django storage
