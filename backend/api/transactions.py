@@ -41,9 +41,12 @@ def _persist_reversal(model, original, reversal):
     try:
         with transaction.atomic():
             reversal.save()
-            marked = model.objects.filter(pk=original.pk).mark_reversed(
-                reversal.created_at
+            query = model.objects.filter(pk=original.pk)
+            query._reversal_record_id = reversal.pk
+            query._reversal_audit_event = getattr(
+                reversal, "_last_audit_event", None
             )
+            marked = query.mark_reversed(reversal.created_at)
             if marked != 1:
                 raise ReversalError("That record was already reversed.", 409)
     except IntegrityError as exc:

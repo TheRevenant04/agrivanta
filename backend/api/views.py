@@ -14,8 +14,9 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.views import APIView as RestFrameworkAPIView
 
+from .audit import AuditedAPIViewMixin, actor_context
 from .exceptions import ApiError
 from .import_service import (
     SUPPORTED_ENTITY_TYPES,
@@ -25,6 +26,7 @@ from .import_service import (
     preview_import,
 )
 from .models import (
+    AuditEvent,
     Activity,
     ActivityCategory,
     ActivityInputNeed,
@@ -126,6 +128,10 @@ STANDARD_ACTIVITY_TEMPLATES = (
     ("Spraying", ActivityCategory.SPRAYING),
     ("Harvesting", ActivityCategory.HARVESTING),
 )
+
+
+class APIView(AuditedAPIViewMixin, RestFrameworkAPIView):
+    pass
 
 DEFAULT_CUSTOMER_NAMES = ["Greenfield Grain Co.", "Harbour Mill"]
 
@@ -549,11 +555,12 @@ class RegisterView(APIView):
             user = User.objects.create_user(
                 email=email, password=password, name=name
             )
-            farm = Farm.objects.create(
-                owner=user,
-                name=farm_name,
-                reporting_currency="USD",
-            )
+            with actor_context(user):
+                farm = Farm.objects.create(
+                    owner=user,
+                    name=farm_name,
+                    reporting_currency="USD",
+                )
             seed_farm(farm)
             token = Token.objects.create(user=user)
 
@@ -639,6 +646,70 @@ class FarmView(APIView):
         if update_fields:
             farm.save(update_fields=update_fields)
         return Response(serialize_farm(farm))
+
+
+class AuditEventListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if user.role == Role.OWNER:
+            farm = Farm.objects.filter(owner=user).first()
+        elif user.role == Role.MANAGER:
+            memberships = user.member_farms.all()
+            farm = memberships.first() if memberships.count() == 1 else None
+        else:
+            farm = None
+        if farm is None:
+            raise ApiError(
+                "You are not authorized to view this farm's audit history.",
+                status.HTTP_403_FORBIDDEN,
+            )
+
+        model_name = str(request.query_params.get("model", "")).lower()
+        model_names = {
+            "farm": "Farm",
+            "cropcycle": "CropCycle",
+            "expense": "Expense",
+            "inventoryitem": "InventoryItem",
+            "stockmovement": "StockMovement",
+        }
+        record_id = str(request.query_params.get("recordId", "")).strip()
+        if model_name not in model_names or not record_id:
+            raise ApiError(
+                "A valid model and recordId are required.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        events = AuditEvent.objects.filter(
+            farm_id=farm.pk,
+            model=model_names[model_name],
+            record_id=record_id,
+        )
+        return Response(
+            [
+                {
+                    "id": str(event.pk),
+                    "model": event.model,
+                    "recordId": event.record_id,
+                    "action": event.action,
+                    "changes": event.changes,
+                    "actor": {
+                        "type": event.actor_type,
+                        "id": event.actor_id,
+                        "name": event.actor_name,
+                    },
+                    "timestamp": event.timestamp.isoformat(),
+                    "relatedRecordId": event.related_record_id or None,
+                    "relatedEventId": (
+                        str(event.related_event_id)
+                        if event.related_event_id
+                        else None
+                    ),
+                }
+                for event in events
+            ]
+        )
 
 
 class PeriodListView(APIView):

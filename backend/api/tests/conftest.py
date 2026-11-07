@@ -1,6 +1,8 @@
 import pytest
 from rest_framework.test import APIClient
 
+from api.audit import system_actor
+
 REGISTER = "/api/auth/register"
 
 
@@ -17,6 +19,12 @@ def register(client, **overrides):
 @pytest.fixture
 def anon():
     return APIClient()
+
+
+@pytest.fixture(autouse=True)
+def explicit_system_actor_for_test_setup():
+    with system_actor():
+        yield
 
 
 @pytest.fixture
