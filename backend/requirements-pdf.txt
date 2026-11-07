@@ -1,2 +1,2 @@
-weasyprint>=66,<67
+playwright>=1.55,<2
 pypdf>=5,<7

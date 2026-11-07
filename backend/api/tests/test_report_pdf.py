@@ -1,6 +1,11 @@
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+import subprocess
+from threading import Thread
+from unittest.mock import Mock
 
 import pytest
 from pypdf import PdfReader
@@ -17,6 +22,7 @@ from api.models import (
     User,
     Worker,
 )
+from api.pdf_chromium import render_chromium_pdf
 
 EXPORT = "/api/reports/labour-usage/export"
 REPORT = "/api/reports/labour-usage"
@@ -171,3 +177,66 @@ def test_pdf_escapes_report_data(client, cycle):
     )
     _, text = pdf_text(client.get(EXPORT, {"exportFormat": "pdf"}))
     assert "<img src='https://invalid.example/x'>" in text
+
+
+def test_renderer_blocks_scripts_and_network_requests():
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/leak"
+        content = render_chromium_pdf(
+            f"<p>Safe content</p><img src='{url}'>"
+            f"<script>document.write('Script ran');fetch('{url}')</script>"
+        )
+        text = "\n".join(
+            page.extract_text() for page in PdfReader(BytesIO(content)).pages
+        )
+        assert "Safe content" in text
+        assert "Script ran" not in text
+        assert requests == []
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_missing_browser_returns_503_and_cleans_runtime(client, monkeypatch):
+    from api import pdf_chromium
+
+    monkeypatch.setenv("REPORT_PDF_CHROMIUM_EXECUTABLE", "missing-browser")
+    response = client.get(EXPORT, {"exportFormat": "pdf"})
+    assert response.status_code == 503
+    runtime = Path(pdf_chromium.__file__).resolve().parent.parent / ".pdf-runtime"
+    assert not list(runtime.iterdir())
+
+
+def test_renderer_timeout_terminates_process_and_cleans_runtime(monkeypatch):
+    from api import pdf_chromium
+    from api.exceptions import ApiError
+
+    process = Mock(pid=1234)
+    process.communicate.side_effect = [
+        subprocess.TimeoutExpired("renderer", 60), (b"", b"")
+    ]
+    monkeypatch.setattr(pdf_chromium, "_browser_executable", lambda: "browser")
+    monkeypatch.setattr(pdf_chromium.subprocess, "Popen", lambda *a, **k: process)
+    terminate = Mock()
+    monkeypatch.setattr(pdf_chromium, "_terminate_renderer", terminate)
+    with pytest.raises(ApiError) as error:
+        render_chromium_pdf("<p>test</p>")
+    assert error.value.status_code == 503
+    terminate.assert_called_once_with(process)
+    runtime = Path(pdf_chromium.__file__).resolve().parent.parent / ".pdf-runtime"
+    assert not list(runtime.iterdir())

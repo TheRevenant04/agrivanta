@@ -345,7 +345,7 @@ def serialize_xlsx(report):
 
 
 def serialize_pdf(report_name, report, farm, filters):
-    from weasyprint import HTML
+    from .pdf_chromium import render_chromium_pdf
 
     if report_name == "profitability":
         period = "All time"
@@ -380,11 +380,7 @@ def serialize_pdf(report_name, report, farm, filters):
             "tables": tables,
         },
     )
-    return HTML(string=html, url_fetcher=_deny_pdf_url).write_pdf()
-
-
-def _deny_pdf_url(url, *args, **kwargs):
-    raise ValueError("External resources are not allowed in report PDFs")
+    return render_chromium_pdf(html)
 
 
 def render_report_export(
