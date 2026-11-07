@@ -4586,6 +4586,16 @@ class ProfitabilityReportView(APIView):
                 )
 
 
+class BudgetVsActualReportView(APIView):
+    def get(self, request):
+        from .budget_reports import budget_vs_actual_report
+
+        farm = get_farm(request.user)
+        return Response(
+            budget_vs_actual_report(farm, request.query_params)
+        )
+
+
 class DashboardView(APIView):
     def get(self, request):
         from .dashboard import dashboard_for_request
