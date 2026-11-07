@@ -1,6 +1,6 @@
 from django.urls import path, re_path
 
-from . import chat_views, views
+from . import attachment_views, chat_views, views
 
 urlpatterns = [
     path("chat", chat_views.ChatView.as_view()),
@@ -124,8 +124,12 @@ urlpatterns = [
         views.ExpenseReverseView.as_view(),
     ),
     path(
-        "expenses/<str:expense_id>/attachments",
-        views.ExpenseAttachmentView.as_view(),
+        "expenses/<str:parent_id>/attachments",
+        attachment_views.AttachmentListView.as_view(), {"kind": "expenses"},
+    ),
+    path(
+        "expenses/<str:parent_id>/attachments/<str:attachment_id>",
+        attachment_views.AttachmentDetailView.as_view(), {"kind": "expenses"},
     ),
     path(
         "recurring-expense-templates",
@@ -155,6 +159,14 @@ urlpatterns = [
         views.NotificationDetailView.as_view(),
     ),
     path("payments", views.PaymentListView.as_view()),
+    path(
+        "payments/<str:parent_id>/attachments",
+        attachment_views.AttachmentListView.as_view(), {"kind": "payments"},
+    ),
+    path(
+        "payments/<str:parent_id>/attachments/<str:attachment_id>",
+        attachment_views.AttachmentDetailView.as_view(), {"kind": "payments"},
+    ),
     path(
         "payments/<str:payment_id>",
         views.PaymentDetailView.as_view(),

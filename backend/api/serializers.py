@@ -262,10 +262,13 @@ def serialize_movement(movement):
 
 
 def serialize_attachment(attachment):
-    payload = {"id": as_id(attachment.id), "name": attachment.name}
-    if attachment.file:
-        payload["url"] = attachment.file.url
-    return payload
+    return {
+        "id": as_id(attachment.id),
+        "name": attachment.name,
+        "contentType": attachment.content_type or "application/octet-stream",
+        "size": attachment.size,
+        "createdAt": attachment.created_at.isoformat(),
+    }
 
 
 def serialize_expense_category(category):

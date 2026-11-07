@@ -219,7 +219,11 @@ def test_expense_draft_lifecycle_and_posted_immutability(client):
     assert reject_attachment.status_code == 400
 
 
-def test_draft_expense_accepts_attachments_and_deletion(client):
+def test_draft_expense_accepts_attachments_and_deletion(client, monkeypatch):
+    from django.core.files.storage import InMemoryStorage
+    from api.models import Attachment
+
+    monkeypatch.setattr(Attachment._meta.get_field("private_file"), "storage", InMemoryStorage())
     created = client.post(
         "/api/expenses",
         {"category": "overhead", "amount": 90, "date": "2026-03-07"},
@@ -230,14 +234,14 @@ def test_draft_expense_accepts_attachments_and_deletion(client):
         f"/api/expenses/{created['id']}/attachments",
         {
             "file": SimpleUploadedFile(
-                "receipt.txt", b"receipt", content_type="text/plain"
+                "receipt.pdf", b"%PDF-1.4\n%%EOF", content_type="application/pdf"
             )
         },
         format="multipart",
     )
     assert upload.status_code == 201
-    assert upload.data["name"] == "receipt.txt"
-    assert upload.data["url"]
+    assert upload.data["name"] == "receipt.pdf"
+    assert "url" not in upload.data
 
     listing = client.get("/api/expenses")
     assert len(listing.data[0]["attachments"]) == 1
