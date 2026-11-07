@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from io import BytesIO, StringIO
 
 from django.http import HttpResponse
+from django.template.loader import render_to_string
+from django.utils import timezone
 from openpyxl import Workbook
 
 from .exceptions import ApiError
@@ -342,7 +344,48 @@ def serialize_xlsx(report):
     return output.getvalue()
 
 
-def render_report_export(report_name, payload, file_format, filters=None):
+def serialize_pdf(report_name, report, farm, filters):
+    from .pdf_chromium import render_chromium_pdf
+
+    if report_name == "profitability":
+        period = "All time"
+    else:
+        from .dashboard import _resolve_filters
+
+        resolved = _resolve_filters(farm, filters)
+        if resolved["start_date"]:
+            period = f'{resolved["start_date"]} to {resolved["end_date"]}'
+        elif report_name == "dashboard":
+            period = "All dates (current crop cycles)"
+        else:
+            period = "All time"
+
+    tables = [
+        {
+            "name": _display_name(table.name),
+            "rows": [
+                list(zip(table.headers, row, strict=True))
+                for row in table.rows
+            ],
+        }
+        for table in report.tables
+    ]
+    html = render_to_string(
+        "api/report_pdf.html",
+        {
+            "title": _display_name(report_name),
+            "farm_name": farm.name,
+            "period": period,
+            "generated": timezone.localtime().isoformat(timespec="seconds"),
+            "tables": tables,
+        },
+    )
+    return render_chromium_pdf(html)
+
+
+def render_report_export(
+    report_name, payload, file_format, filters=None, *, farm=None
+):
     normalized = normalize_report(report_name, payload, filters)
     if file_format == "csv":
         content = serialize_csv(normalized)
@@ -355,9 +398,13 @@ def render_report_export(report_name, payload, file_format, filters=None):
             "spreadsheetml.sheet"
         )
         extension = "xlsx"
+    elif file_format == "pdf":
+        content = serialize_pdf(report_name, normalized, farm, filters or {})
+        content_type = "application/pdf"
+        extension = "pdf"
     else:
         raise ApiError(
-            "exportFormat must be either csv or xlsx.",
+            "exportFormat must be csv, xlsx or pdf.",
             400,
             "exportFormat",
         )

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: sans-serif; font-size: 10pt; color: #172d22; }
+    h1 { font-size: 20pt; margin-bottom: 5mm; }
+    h2 { font-size: 14pt; margin: 8mm 0 3mm; }
+    .metadata { border-bottom: 1px solid #799286; padding-bottom: 4mm; }
+    .metadata p { margin: 1mm 0; }
+    .record { border: 1px solid #d5e0d9; margin: 3mm 0; padding: 3mm; }
+    .field { margin: 1mm 0; overflow-wrap: anywhere; }
+    .label { font-weight: bold; }
+    .empty { color: #50665a; }
+  </style>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <div class="metadata">
+    <p><strong>Farm:</strong> {{ farm_name }}</p>
+    <p><strong>Reporting period:</strong> {{ period }}</p>
+    <p><strong>Generated:</strong> {{ generated }}</p>
+  </div>
+  {% for table in tables %}
+    <h2>{{ table.name }}</h2>
+    {% for row in table.rows %}
+      <div class="record">
+        {% for label, value in row %}
+          <div class="field"><span class="label">{{ label }}:</span> {% if value is not None %}{{ value }}{% endif %}</div>
+        {% endfor %}
+      </div>
+    {% empty %}
+      <p class="empty">No data for this period.</p>
+    {% endfor %}
+  {% endfor %}
+</body>
+</html>
