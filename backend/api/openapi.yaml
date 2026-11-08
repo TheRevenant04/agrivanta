@@ -2017,6 +2017,18 @@ paths:
                   ChatStreamEvent. This operation is omitted from the
                   generated SDK because that client buffers responses; the
                   frontend uses its handwritten streaming transport.
+        '400':
+          description: The question is missing, blank, or longer than 4000 characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The chat service is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
 

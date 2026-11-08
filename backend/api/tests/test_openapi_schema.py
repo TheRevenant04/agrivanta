@@ -31,6 +31,12 @@ def test_openapi_endpoint_publishes_backend_schema():
     ) in schema
     assert "format: binary" in schema
     assert "Each line is a\n                  ChatStreamEvent." in schema
+    chat_path = schema.split("  /chat:\n", maxsplit=1)[1].split(
+        "\n  /imports/preview:", maxsplit=1
+    )[0]
+    for status_code in ("'400'", "'503'"):
+        assert f"        {status_code}:\n" in chat_path
+    assert chat_path.count("$ref: '#/components/schemas/Error'") == 2
 
 
 def test_openapi_endpoint_is_read_only():
