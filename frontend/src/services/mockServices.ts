@@ -223,6 +223,17 @@ export function createMockServices(
       requireAuth: requireUser,
     }),
 
+    imports: {
+      async preview() {
+        requireUser();
+        throw new ApiError('File imports require the HTTP API client.', 501);
+      },
+      async commit() {
+        requireUser();
+        throw new ApiError('File imports require the HTTP API client.', 501);
+      },
+    },
+
     // Harvest and sale domains (issue #49) are session-protected too.
     ...createHarvestSaleMock({
       seed: options.harvestSale,

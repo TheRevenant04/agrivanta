@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { to: '/harvests', label: 'Harvests' },
   { to: '/sales', label: 'Sales' },
   { to: '/inventory', label: 'Inventory' },
+  { to: '/imports', label: 'Imports' },
   // Activity planning screens (issue #46).
   { to: '/activities', label: 'Activities' },
   { to: '/activity-templates', label: 'Templates' },

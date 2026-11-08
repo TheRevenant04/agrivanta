@@ -15,6 +15,7 @@ import { FarmPage } from '../pages/FarmPage';
 import { FieldsPage } from '../pages/FieldsPage';
 import { HarvestsPage } from '../pages/HarvestsPage';
 import { InventoryPage } from '../pages/InventoryPage';
+import { ImportWizardPage } from '../pages/ImportWizardPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
 import { SalesPage } from '../pages/SalesPage';
@@ -41,6 +42,7 @@ export function AppRoutes() {
             <Route path="/harvests" element={<HarvestsPage />} />
             <Route path="/sales" element={<SalesPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
+            <Route path="/imports" element={<ImportWizardPage />} />
             {/* Activity planning screens (issue #46). */}
             <Route path="/activities" element={<ActivitiesPage />} />
             <Route

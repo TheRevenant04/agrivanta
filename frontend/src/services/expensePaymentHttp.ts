@@ -17,6 +17,7 @@ export type UploadRequest = <T>(
   path: string,
   file: File,
   authenticated: boolean,
+  fields?: Record<string, string>,
 ) => Promise<T>;
 
 function body(input: unknown): RequestInit {

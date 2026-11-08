@@ -41,6 +41,8 @@ export type {
 } from './expensePaymentMock';
 export { createExpensePaymentHttp } from './expensePaymentHttp';
 
+export { createImportHttp } from './importHttp';
+
 // Inventory domain (issue #47).
 export * from './inventoryRules';
 export { createInventoryMock } from './inventoryMock';

@@ -69,6 +69,7 @@ function withUnauthorizedHandling(
     // Expense and payment domains (issue #49) need the same 401 guard.
     expenses: guardDomain(services.expenses),
     payments: guardDomain(services.payments),
+    imports: guardDomain(services.imports),
     // Inventory domain (issue #47).
     items: guardDomain(services.items),
     movements: guardDomain(services.movements),
