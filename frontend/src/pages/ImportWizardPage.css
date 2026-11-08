@@ -35,6 +35,11 @@
   background: #fff8df;
 }
 
+.import-row-skipped {
+  background: #f1f3f1;
+  color: #4b554d;
+}
+
 .import-correction {
   min-width: 10rem;
 }

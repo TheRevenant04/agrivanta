@@ -59,14 +59,14 @@ const commitFixture: ImportCommitResult = {
   },
 };
 
-async function setup() {
+async function setup(result: ImportPreview = previewFixture) {
   const store = createMemorySessionStore();
   const services = createMockServices({ store });
   await services.auth.login({
     email: 'owner@agrivanta.test',
     password: 'password123',
   });
-  const preview = vi.fn(async (): Promise<ImportPreview> => previewFixture);
+  const preview = vi.fn(async (): Promise<ImportPreview> => result);
   const commit = vi.fn(async (): Promise<ImportCommitResult> => commitFixture);
   services.imports = { preview, commit };
 
@@ -131,6 +131,61 @@ describe('ImportWizardPage', () => {
     expect(
       screen.getByRole('button', { name: 'Confirm import (2 selected)' }),
     ).toBeEnabled();
+  });
+
+  it('allows an invalid structural row to be explicitly skipped', async () => {
+    const { preview, commit } = await setup({
+      ...previewFixture,
+      invalidRows: [
+        {
+          row: 3,
+          errors: [
+            {
+              field: 'row',
+              message: 'Row has more values than the headers define.',
+            },
+          ],
+        },
+      ],
+      counts: { total: 3, valid: 1, invalid: 1, duplicate: 1 },
+    });
+    await uploadCsv(preview);
+
+    expect(
+      await screen.findByText(
+        'row: Row has more values than the headers define.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Confirm import (1 selected)' }),
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip invalid row 3' }));
+
+    expect(
+      screen.getByText('This invalid row will be skipped and not imported.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Confirm import (1 selected)' }),
+    ).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo skip row 3' }));
+    expect(
+      screen.getByRole('button', { name: 'Confirm import (1 selected)' }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Skip invalid row 3' }));
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Confirm import (1 selected)' }),
+    );
+
+    expect(
+      await screen.findByText('Successfully imported 1 row.'),
+    ).toBeInTheDocument();
+    expect(commit).toHaveBeenCalledWith({
+      token: 'preview-token',
+      confirmedRows: [{ row: 2 }],
+    });
   });
 
   it('commits only after explicit confirmation and reports the imported count', async () => {

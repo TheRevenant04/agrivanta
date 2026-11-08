@@ -162,6 +162,7 @@ export function ImportWizardPage() {
   const [corrections, setCorrections] = useState<
     Record<number, Record<string, string>>
   >({});
+  const [skippedRows, setSkippedRows] = useState<Set<number>>(new Set());
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -172,6 +173,7 @@ export function ImportWizardPage() {
     setFile(chosen);
     setPreview(null);
     setCorrections({});
+    setSkippedRows(new Set());
     setSelectedRows(new Set());
     setImportedCount(null);
     setError(
@@ -207,6 +209,7 @@ export function ImportWizardPage() {
       const result = await services.imports.preview(entityType, file);
       setPreview(result);
       setCorrections({});
+      setSkippedRows(new Set());
       setSelectedRows(new Set(result.validRows.map((row) => row.row)));
     } catch (cause) {
       setError(toErrorMessage(cause));
@@ -274,6 +277,7 @@ export function ImportWizardPage() {
     setPreview(null);
     setFile(null);
     setCorrections({});
+    setSkippedRows(new Set());
     setSelectedRows(new Set());
     setError(null);
   }
@@ -306,7 +310,7 @@ export function ImportWizardPage() {
 
   const entries = preview ? previewEntries(preview) : [];
   const hasInvalidRows = entries.some(
-    (entry) => currentErrors(entry).length > 0,
+    (entry) => currentErrors(entry).length > 0 && !skippedRows.has(entry.row),
   );
   const columns = FIELD_DEFINITIONS[entityType];
 
@@ -398,15 +402,18 @@ export function ImportWizardPage() {
                     <tr
                       key={entry.row}
                       className={
-                        remainingErrors.length
-                          ? 'import-row-invalid'
-                          : entry.status === 'duplicate'
-                            ? 'import-row-duplicate'
-                            : ''
+                        skippedRows.has(entry.row)
+                          ? 'import-row-skipped'
+                          : remainingErrors.length
+                            ? 'import-row-invalid'
+                            : entry.status === 'duplicate'
+                              ? 'import-row-duplicate'
+                              : ''
                       }
                     >
                       <td>
-                        {entry.status === 'duplicate' ? (
+                        {entry.status === 'duplicate' ||
+                        skippedRows.has(entry.row) ? (
                           '—'
                         ) : (
                           <input
@@ -514,21 +521,51 @@ export function ImportWizardPage() {
                           <span className="import-duplicate">
                             Duplicate: {entry.duplicateReason}
                           </span>
+                        ) : skippedRows.has(entry.row) ? (
+                          <div>
+                            <p role="status">
+                              This invalid row will be skipped and not imported.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSkippedRows((existing) => {
+                                  const next = new Set(existing);
+                                  next.delete(entry.row);
+                                  return next;
+                                })
+                              }
+                            >
+                              Undo skip row {entry.row}
+                            </button>
+                          </div>
                         ) : remainingErrors.length ? (
-                          <ul className="import-errors">
-                            {remainingErrors
-                              .filter(
-                                ({ field }) =>
-                                  !columns.some(
-                                    (column) => column.name === field,
-                                  ),
-                              )
-                              .map(({ field, message }, index) => (
-                                <li key={`${field}-${index}`}>
-                                  {field}: {message}
-                                </li>
-                              ))}
-                          </ul>
+                          <>
+                            <ul className="import-errors">
+                              {remainingErrors
+                                .filter(
+                                  ({ field }) =>
+                                    !columns.some(
+                                      (column) => column.name === field,
+                                    ),
+                                )
+                                .map(({ field, message }, index) => (
+                                  <li key={`${field}-${index}`}>
+                                    {field}: {message}
+                                  </li>
+                                ))}
+                            </ul>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSkippedRows((existing) =>
+                                  new Set(existing).add(entry.row),
+                                )
+                              }
+                            >
+                              Skip invalid row {entry.row}
+                            </button>
+                          </>
                         ) : entry.status === 'invalid' ? (
                           'Corrected'
                         ) : (
