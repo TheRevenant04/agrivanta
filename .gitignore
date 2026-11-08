@@ -27,3 +27,4 @@ Thumbs.db
 
 # Agent audit trail
 .opencode/guardrails.log
+.copilot/session-state/
