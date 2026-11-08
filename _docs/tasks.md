@@ -4,8 +4,9 @@
 **Principle:** Each task is self-contained, session-sized, and independently hand-off-able. Tasks are ordered by dependency; later tasks assume earlier ones are done but do not require reading them — requirements are restated inline.
 
 This file defines the planned backlog, not the live implementation status.
-Use the linked GitHub issues for current task state. Some target components,
-including Celery/Redis, are not yet part of the application.
+Use GitHub issues for current task state. Celery and Redis are available in the
+local Compose stack, but the backlog may also describe workflows or deployment
+capabilities that are not yet implemented.
 
 ---
 

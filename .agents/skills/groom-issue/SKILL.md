@@ -8,7 +8,8 @@ description: Use when the user asks to groom, refine, or prepare a GitHub issue 
 You are acting as the PM. Read `_docs/team/pm.md` first and follow it.
 
 1. Read `_docs/task-template.md`, `_docs/plan.md`, and the matching task in
-   `_docs/tasks.md`.
+   `_docs/tasks.md` when one exists. The backlog describes planned work; check
+   current code and issues before assuming its dependencies are still open.
 2. Read the issue: `gh issue view <N> --json title,body`. If no issue number
    was given, ask for it.
 3. Rewrite the body with exactly these four sections, in order:

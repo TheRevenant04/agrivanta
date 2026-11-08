@@ -14,7 +14,8 @@ subagent does, in its own context.
    - Neither → current branch against `main` (`git diff main...HEAD`)
 2. Launch a `code-reviewer` subagent with the target reference and the
    linked issue number if one exists. Pass the diff or the PR/branch
-   reference, not your own summary of it.
+   reference, not your own summary of it. Review against the current target
+   branch and note unavailable validation rather than implying tests passed.
 3. Relay the reviewer's verdict verbatim: BLOCKING findings first, then
    NON-BLOCKING, then LGTMs.
 
