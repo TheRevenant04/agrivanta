@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { NotificationBell } from './NotificationBell';
 
 const NAV_LINKS = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -38,6 +39,7 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
+        <NotificationBell />
       </header>
       <main>
         <Outlet />

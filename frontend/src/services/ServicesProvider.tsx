@@ -79,6 +79,7 @@ function withUnauthorizedHandling(
     activityTypes: guardDomain(services.activityTypes),
     // Crop cycle domain (issue #45).
     cropCycles: guardDomain(services.cropCycles),
+    notifications: guardDomain(services.notifications),
   };
 }
 

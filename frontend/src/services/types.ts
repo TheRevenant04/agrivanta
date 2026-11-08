@@ -422,10 +422,33 @@ export interface AgrivantaServices
     ExpensePaymentServices,
     ImportServices,
     ReportingServices,
-    HarvestSaleServices {
+    HarvestSaleServices,
+    NotificationServices {
   auth: AuthService;
   /** Crop cycle domain (issue #45). */
   cropCycles: CropCycleService;
+}
+
+export interface Notification {
+  id: string;
+  type: 'info' | 'warning' | 'alert';
+  message: string;
+  read: boolean;
+  createdAt: string;
+  updatedAt: string;
+  farmId?: string;
+  recurringExpenseTemplateId?: string;
+  occurrenceDate?: string;
+}
+
+export interface NotificationService {
+  list(): Promise<Notification[]>;
+  unreadCount(): Promise<number>;
+  markRead(id: string): Promise<Notification>;
+}
+
+export interface NotificationServices {
+  notifications: NotificationService;
 }
 
 /**

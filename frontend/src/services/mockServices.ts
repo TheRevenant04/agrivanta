@@ -3,6 +3,7 @@ import { sessionStore as defaultSessionStore } from './sessionStore';
 import { createFarmSetupMock, type FarmSetupSeed } from './farmSetupMock';
 import { createHarvestSaleMock, type HarvestSaleSeed } from './harvestSaleMock';
 import { createInventoryMock, type InventorySeed } from './inventoryMock';
+import { createNotificationMock } from './notificationMock';
 // Crop cycle domain (issue #45).
 import { createCropCycleMock } from './cropCycleMock';
 import {
@@ -21,6 +22,7 @@ import {
   type AuthSession,
   type CropCycle,
   type LoginCredentials,
+  type Notification,
   type RegisterInput,
   type User,
 } from './types';
@@ -100,6 +102,8 @@ export interface MockServicesOptions {
   activities?: ActivityPlanningSeed;
   /** Seed crop cycles for the crop cycle domain (issue #45). */
   cropCycles?: CropCycle[];
+  /** Seed in-app notifications for the header bell. */
+  notifications?: Notification[];
 }
 
 /**
@@ -251,6 +255,11 @@ export function createMockServices(
     // Crop cycle domain (issue #45) shares the same session requirement.
     ...createCropCycleMock({
       seed: options.cropCycles,
+      requireAuth: requireUser,
+    }),
+
+    ...createNotificationMock({
+      seed: options.notifications,
       requireAuth: requireUser,
     }),
 
