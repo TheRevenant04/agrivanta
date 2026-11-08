@@ -1,39 +1,22 @@
-export interface ReportingPeriod {
-  id: string;
-  name: string;
-  startDate: string;
-  endDate: string;
-}
+import type {
+  DashboardKpis as ApiDashboardKpis,
+  ExportFormat as ApiExportFormat,
+  ReportCell as ApiReportCell,
+  ReportFilters as ApiReportFilters,
+  ReportName as ApiReportName,
+  ReportResult as ApiReportResult,
+  ReportRow as ApiReportRow,
+  ReportingPeriod as ApiReportingPeriod,
+} from './generated/types.gen';
 
-export interface ReportFilters {
-  periodId?: string;
-  startDate?: string;
-  endDate?: string;
-}
-
-export interface DashboardKpis {
-  currentCycleSpend: number;
-  revenueToDate: number;
-  unsoldProduce: { cycleId: string; quantity: number; unitId: string }[];
-  upcomingActivities: number;
-  overdueActivities: number;
-  lowStockItemCount: number;
-}
-
-export type ReportName =
-  | 'activity-status'
-  | 'inventory'
-  | 'labour-usage'
-  | 'equipment-usage'
-  | 'budget-vs-actual';
-export type ExportFormat = 'csv' | 'xlsx' | 'pdf';
-export type ReportCell = string | number | boolean | null;
-export type ReportRow = Record<string, ReportCell>;
-export type ReportResult =
-  | { counts: Record<string, number>; total: number }
-  | { asOf: string; items: ReportRow[] }
-  | { groupBy: string; rows: ReportRow[]; totals: Record<string, number> }
-  | { overall: ReportRow[]; categories: ReportRow[] };
+export type ReportingPeriod = ApiReportingPeriod;
+export type ReportFilters = ApiReportFilters;
+export type DashboardKpis = ApiDashboardKpis;
+export type ReportName = ApiReportName;
+export type ExportFormat = ApiExportFormat;
+export type ReportCell = ApiReportCell;
+export type ReportRow = ApiReportRow;
+export type ReportResult = ApiReportResult;
 
 export interface ReportingServices {
   reporting: {

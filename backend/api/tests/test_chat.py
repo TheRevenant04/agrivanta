@@ -16,7 +16,13 @@ from api.models import (
     User,
 )
 from api.query_tools import crop_cycle_costs, field_profitability
-from llm import FakeLLMClient, LLMResponse, LLMStreamCompleted, LLMTextDelta
+from llm import (
+    FakeLLMClient,
+    LLMError,
+    LLMResponse,
+    LLMStreamCompleted,
+    LLMTextDelta,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -434,3 +440,40 @@ def test_chat_requires_authentication_and_valid_question(anon, monkeypatch):
 
     assert response.status_code == 400
     assert fake.completion_messages == []
+
+
+def test_chat_rejects_overlong_question(client, monkeypatch):
+    fake = _fake_client({"tool_calls": []}, "unused")
+    monkeypatch.setattr("api.chat.get_llm_client", lambda: fake)
+
+    response = client.post(
+        CHAT,
+        {"question": "x" * 4001},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data == {
+        "detail": "The question must be 4000 characters or fewer."
+    }
+    assert fake.completion_messages == []
+
+
+def test_chat_returns_503_when_llm_service_is_unavailable(
+    client, monkeypatch
+):
+    def raise_llm_error(*args, **kwargs):
+        raise LLMError("provider unavailable")
+
+    monkeypatch.setattr("api.chat.get_llm_client", raise_llm_error)
+
+    response = client.post(
+        CHAT,
+        {"question": "What were my expenses?"},
+        format="json",
+    )
+
+    assert response.status_code == 503
+    assert response.data == {
+        "detail": "The chat service is temporarily unavailable."
+    }

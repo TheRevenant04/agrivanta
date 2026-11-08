@@ -3,10 +3,9 @@ info:
   title: Agrivanta API
   version: 0.1.0
   description: |
-    The backend contract the Agrivanta frontend expects. This specification was
-    derived from the frontend's typed services layer in `frontend/src/services/`
-    (`httpServices.ts` plus the per-domain `*Http.ts` modules), which is the only
-    place the app talks to a backend.
+    Backend-maintained API contract for the Agrivanta Django application.
+    This file is also published at `/openapi.yaml`; frontend type generation
+    consumes this backend-owned schema rather than defining a separate contract.
 
     ## Base URL
 
@@ -58,10 +57,9 @@ info:
 
     ## Scope
 
-    Role-based authorization (`403`) is out of scope for this contract: the
-    frontend performs no role checks yet. Reversal-and-replacement flows and
-    audit-history endpoints (backlog tasks 21/22) are not yet called by the
-    frontend and are intentionally absent.
+    The contract covers the API resources consumed by the frontend, including
+    chat, imports, notifications, and reporting. Additional backend endpoints
+    may be added here as they become part of the public client contract.
 servers:
   - url: http://localhost:8000/api
     description: Local development backend (configurable at runtime).
@@ -77,6 +75,10 @@ tags:
   - name: payments
   - name: harvests
   - name: sales
+  - name: chat
+  - name: imports
+  - name: notifications
+  - name: reporting
 
 paths:
   /auth/login:
@@ -1991,6 +1993,265 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /chat:
+    post:
+      tags: [chat]
+      operationId: askChat
+      summary: Ask the read-only analyst a question
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatQuestion'
+      responses:
+        '200':
+          description: Newline-delimited JSON token, final-answer, or error events.
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                format: binary
+                description: >
+                  UTF-8 newline-delimited JSON stream. Each line is a
+                  ChatStreamEvent. This operation is omitted from the
+                  generated SDK because that client buffers responses; the
+                  frontend uses its handwritten streaming transport.
+        '400':
+          description: The question is missing, blank, or longer than 4000 characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The chat service is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /imports/preview:
+    post:
+      tags: [imports]
+      operationId: previewImport
+      summary: Validate an uploaded import file without committing records
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ImportPreviewInput'
+      responses:
+        '200':
+          description: Parsed and validated import preview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportPreview'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /imports/commit:
+    post:
+      tags: [imports]
+      operationId: commitImport
+      summary: Commit the confirmed rows from an import preview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportCommitInput'
+      responses:
+        '201':
+          description: Import result and audit record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportCommitResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications:
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      summary: List the current user's notifications
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: A page of notifications.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/unread-count:
+    get:
+      tags: [notifications]
+      operationId: getUnreadNotificationCount
+      summary: Get the number of unread notifications
+      responses:
+        '200':
+          description: Unread notification count.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnreadCountResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/{notificationId}/read:
+    post:
+      tags: [notifications]
+      operationId: markNotificationRead
+      summary: Mark a notification as read
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Updated notification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /reporting-periods:
+    get:
+      tags: [reporting]
+      operationId: listReportingPeriods
+      summary: List saved reporting periods
+      responses:
+        '200':
+          description: Reporting periods.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportingPeriod'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /seasons:
+    get:
+      tags: [reporting]
+      operationId: listSeasons
+      summary: List farm seasons for reporting filters
+      responses:
+        '200':
+          description: Seasons represented as reporting periods.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportingPeriod'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dashboard:
+    get:
+      tags: [reporting]
+      operationId: getDashboard
+      summary: Get dashboard key performance indicators
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriodId'
+        - $ref: '#/components/parameters/ReportStartDate'
+        - $ref: '#/components/parameters/ReportEndDate'
+      responses:
+        '200':
+          description: Dashboard figures for the selected period.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardKpis'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /reports/{reportName}:
+    get:
+      tags: [reporting]
+      operationId: getReport
+      summary: Run a predefined report
+      parameters:
+        - name: reportName
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ReportName'
+        - $ref: '#/components/parameters/ReportPeriodId'
+        - $ref: '#/components/parameters/ReportStartDate'
+        - $ref: '#/components/parameters/ReportEndDate'
+      responses:
+        '200':
+          description: Report data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /reports/{reportName}/export:
+    get:
+      tags: [reporting]
+      operationId: exportReport
+      summary: Export a predefined report
+      parameters:
+        - name: reportName
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/ReportName'
+        - $ref: '#/components/parameters/ReportPeriodId'
+        - $ref: '#/components/parameters/ReportStartDate'
+        - $ref: '#/components/parameters/ReportEndDate'
+        - name: exportFormat
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/ExportFormat'
+      responses:
+        '200':
+          description: The requested report export.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2001,6 +2262,26 @@ components:
         `/auth/register`, sent as `Authorization: Bearer <token>`.
 
   parameters:
+    ReportPeriodId:
+      name: periodId
+      in: query
+      schema:
+        type: string
+      description: >
+        Optional saved period. Use `startDate` and `endDate` when no saved
+        period is selected.
+    ReportStartDate:
+      name: startDate
+      in: query
+      schema:
+        type: string
+        format: date
+    ReportEndDate:
+      name: endDate
+      in: query
+      schema:
+        type: string
+        format: date
     FieldId:
       name: fieldId
       in: path
@@ -2092,6 +2373,478 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    ChatQuestion:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+
+    ChatEvidenceItem:
+      type: object
+      additionalProperties: true
+
+    ChatEvidence:
+      type: object
+      required: [figures, reportingPeriods, cropCycles, calculationBasis]
+      properties:
+        figures:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvidenceItem'
+        reportingPeriods:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvidenceItem'
+        cropCycles:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvidenceItem'
+        calculationBasis:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvidenceItem'
+        toolResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvidenceItem'
+
+    ChatAnswer:
+      type: object
+      required: [answer, evidence]
+      properties:
+        answer:
+          type: string
+        evidence:
+          $ref: '#/components/schemas/ChatEvidence'
+
+    ChatTokenEvent:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: token
+        text:
+          type: string
+
+    ChatFinalEvent:
+      type: object
+      required: [type, answer, evidence]
+      properties:
+        type:
+          type: string
+          const: final
+        answer:
+          type: string
+        evidence:
+          $ref: '#/components/schemas/ChatEvidence'
+
+    ChatErrorEvent:
+      type: object
+      required: [type, error]
+      properties:
+        type:
+          type: string
+          const: error
+        error:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+
+    ChatStreamEvent:
+      oneOf:
+        - $ref: '#/components/schemas/ChatTokenEvent'
+        - $ref: '#/components/schemas/ChatFinalEvent'
+        - $ref: '#/components/schemas/ChatErrorEvent'
+
+    ImportEntityType:
+      type: string
+      enum: [expenses, inventory_movements]
+
+    ImportRowError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+    ImportValidRow:
+      type: object
+      required: [row]
+      properties:
+        row:
+          type: integer
+        date:
+          type: [string, 'null']
+        category:
+          type: string
+        amount:
+          type: number
+        supplier:
+          type: [string, 'null']
+        notes:
+          type: [string, 'null']
+        cycleId:
+          type: [string, 'null']
+        item:
+          type: string
+        itemId:
+          type: string
+        type:
+          type: string
+        quantity:
+          type: number
+        note:
+          type: [string, 'null']
+
+    ImportInvalidRow:
+      type: object
+      required: [row, errors]
+      properties:
+        row:
+          type: integer
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportRowError'
+
+    ImportDuplicateRow:
+      type: object
+      required: [row, reason, key]
+      properties:
+        row:
+          type: integer
+        reason:
+          type: string
+        key:
+          type: object
+          additionalProperties: true
+
+    ImportPreviewInput:
+      type: object
+      required: [entityType, file]
+      properties:
+        entityType:
+          $ref: '#/components/schemas/ImportEntityType'
+        file:
+          type: string
+          format: binary
+
+    ImportPreview:
+      type: object
+      required:
+        - entityType
+        - fileName
+        - previewToken
+        - expiresAt
+        - totalRows
+        - validRows
+        - invalidRows
+        - duplicateRows
+        - counts
+      properties:
+        entityType:
+          $ref: '#/components/schemas/ImportEntityType'
+        fileName:
+          type: string
+        previewToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        totalRows:
+          type: integer
+        validRows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportValidRow'
+        invalidRows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportInvalidRow'
+        duplicateRows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportDuplicateRow'
+        counts:
+          type: object
+          required: [total, valid, invalid, duplicate]
+          properties:
+            total:
+              type: integer
+            valid:
+              type: integer
+            invalid:
+              type: integer
+            duplicate:
+              type: integer
+
+    ImportCommitInput:
+      type: object
+      required: [token, confirmedRows]
+      properties:
+        token:
+          type: string
+        confirmedRows:
+          type: array
+          items:
+            type: object
+            required: [row]
+            properties:
+              row:
+                type: integer
+              values:
+                type: object
+                additionalProperties:
+                  type: string
+
+    ImportCommitResult:
+      type: object
+      required: [previewToken, entityType, imported, counts, audit]
+      properties:
+        previewToken:
+          type: string
+        entityType:
+          $ref: '#/components/schemas/ImportEntityType'
+        imported:
+          type: array
+          items:
+            type: object
+            required: [row, id]
+            properties:
+              row:
+                type: integer
+              id:
+                type: string
+        counts:
+          type: object
+          required: [confirmed, imported, skipped]
+          properties:
+            confirmed:
+              type: integer
+            imported:
+              type: integer
+            skipped:
+              type: integer
+        audit:
+          type: object
+          required: [id, actorId, committedAt, entityCounts, previewToken]
+          properties:
+            id:
+              type: string
+            actorId:
+              type: string
+            committedAt:
+              type: string
+              format: date-time
+            entityCounts:
+              type: object
+              additionalProperties:
+                type: integer
+            previewToken:
+              type: string
+
+    Notification:
+      type: object
+      required: [id, type, message, read, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [info, warning, alert]
+        message:
+          type: string
+        read:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        farmId:
+          type: string
+        recurringExpenseTemplateId:
+          type: string
+        occurrenceDate:
+          type: string
+          format: date
+
+    NotificationPage:
+      type: object
+      required:
+        - count
+        - unreadCount
+        - page
+        - pageSize
+        - totalPages
+        - nextPage
+        - previousPage
+        - results
+      properties:
+        count:
+          type: integer
+        unreadCount:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        totalPages:
+          type: integer
+        nextPage:
+          type: [integer, 'null']
+        previousPage:
+          type: [integer, 'null']
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+
+    UnreadCountResponse:
+      type: object
+      required: [unreadCount]
+      properties:
+        unreadCount:
+          type: integer
+
+    ReportingPeriod:
+      type: object
+      required: [id, name, startDate, endDate]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+
+    ReportFilters:
+      type: object
+      properties:
+        periodId:
+          type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+
+    DashboardKpis:
+      type: object
+      required:
+        - currentCycleSpend
+        - revenueToDate
+        - unsoldProduce
+        - upcomingActivities
+        - overdueActivities
+        - lowStockItemCount
+      properties:
+        currentCycleSpend:
+          type: number
+        revenueToDate:
+          type: number
+        unsoldProduce:
+          type: array
+          items:
+            type: object
+            required: [cycleId, quantity, unitId]
+            properties:
+              cycleId:
+                type: string
+              quantity:
+                type: number
+              unitId:
+                type: string
+        upcomingActivities:
+          type: integer
+        overdueActivities:
+          type: integer
+        lowStockItemCount:
+          type: integer
+
+    ReportName:
+      type: string
+      enum:
+        - activity-status
+        - inventory
+        - labour-usage
+        - equipment-usage
+        - budget-vs-actual
+
+    ExportFormat:
+      type: string
+      enum: [csv, xlsx, pdf]
+
+    ReportCell:
+      oneOf:
+        - type: string
+        - type: number
+        - type: boolean
+        - type: 'null'
+
+    ReportRow:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/ReportCell'
+
+    ReportResult:
+      oneOf:
+        - type: object
+          required: [counts, total]
+          properties:
+            counts:
+              type: object
+              additionalProperties:
+                type: integer
+            total:
+              type: integer
+        - type: object
+          required: [asOf, items]
+          properties:
+            asOf:
+              type: string
+              format: date
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReportRow'
+        - type: object
+          required: [groupBy, rows, totals]
+          properties:
+            groupBy:
+              type: string
+            rows:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReportRow'
+            totals:
+              type: object
+              additionalProperties:
+                type: number
+        - type: object
+          required: [overall, categories]
+          properties:
+            overall:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReportRow'
+            categories:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReportRow'
+
     Error:
       description: >
         Error envelope. Either `{detail, field?}` or a Django REST

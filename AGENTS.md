@@ -30,7 +30,7 @@ backend/              Django project, API app, migrations, and pytest suite
 frontend/             React/Vite app, services, and Vitest suite
 custom-agent/         Headless PM/engineer/QA issue orchestrator
 mcp-server/           Read-only backlog + issues MCP server
-openapi.yaml          Backend API contract
+backend/api/openapi.yaml Backend API contract, published at /openapi.yaml
 opencode.json         OpenCode config: permissions, MCP, instructions
 pyproject.toml        Python project metadata and dependencies
 README.md             Project overview and local setup
