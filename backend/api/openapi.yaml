@@ -492,7 +492,7 @@ paths:
           required: false
           description: Only return varieties of this crop.
           schema:
-            $ref: '#/components/schemas/ChatStreamEvent'
+            type: string
       responses:
         '200':
           description: Varieties.
@@ -2011,6 +2011,12 @@ paths:
             application/x-ndjson:
               schema:
                 type: string
+                format: binary
+                description: >
+                  UTF-8 newline-delimited JSON stream. Each line is a
+                  ChatStreamEvent. This operation is omitted from the
+                  generated SDK because that client buffers responses; the
+                  frontend uses its handwritten streaming transport.
         '401':
           $ref: '#/components/responses/Unauthorized'
 

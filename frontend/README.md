@@ -48,17 +48,19 @@ consumes it via `useServices()` from `src/services/servicesContext.ts`.
 The backend-maintained OpenAPI schema is published at
 `http://localhost:8000/openapi.yaml`; its checked-in source is
 `backend/api/openapi.yaml`. Run `npm run api:generate` from `frontend/` after
-the backend contract changes. The command reads the local endpoint when it is
-available and otherwise uses its checked-in schema file, so offline
-regeneration, builds, and tests do not require a running backend. To generate
-against another deployment, set `AGRIVANTA_OPENAPI_URL` to its schema URL
-before running the command.
+the backend contract changes. By default, the command always uses the checked-in backend schema for
+deterministic output; it never probes localhost or otherwise depends on a
+running backend. To explicitly generate against another deployment, set
+`AGRIVANTA_OPENAPI_URL` to its schema URL before running the command.
 
 Generated TypeScript schemas and endpoint operations are written to
 `src/services/generated/` and committed. The services layer imports generated
 DTOs for all frontend domains, including chat, imports, notifications, and
 reporting; transport interfaces and runtime response validation remain
-handwritten.
+handwritten. The `/chat` operation is deliberately omitted from generated SDK
+bindings because the generated client buffers responses; the frontend retains
+its handwritten NDJSON streaming transport. Chat event and answer DTOs remain
+generated from the backend schema.
 
 ## Requirements
 

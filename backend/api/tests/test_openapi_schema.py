@@ -10,7 +10,7 @@ def test_openapi_endpoint_publishes_backend_schema():
     assert response.status_code == 200
     assert response["Content-Type"] == "application/yaml; charset=utf-8"
     assert response.content == schema_path.read_bytes()
-    schema = response.content.decode()
+    schema = response.content.decode().replace("\r\n", "\n")
     for service_path in (
         "  /chat:",
         "  /imports/preview:",
@@ -21,6 +21,16 @@ def test_openapi_endpoint_publishes_backend_schema():
         "  /reports/{reportName}:",
     ):
         assert service_path in schema
+    assert (
+        "- name: crop\n"
+        "          in: query\n"
+        "          required: false\n"
+        "          description: Only return varieties of this crop.\n"
+        "          schema:\n"
+        "            type: string"
+    ) in schema
+    assert "format: binary" in schema
+    assert "Each line is a\n                  ChatStreamEvent." in schema
 
 
 def test_openapi_endpoint_is_read_only():

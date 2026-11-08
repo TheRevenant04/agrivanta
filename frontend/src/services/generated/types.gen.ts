@@ -1412,7 +1412,7 @@ export type ListVarietiesData = {
         /**
          * Only return varieties of this crop.
          */
-        crop?: ChatStreamEvent;
+        crop?: string;
     };
     url: '/varieties';
 };
@@ -3630,31 +3630,6 @@ export type CreateSaleResponses = {
 };
 
 export type CreateSaleResponse = CreateSaleResponses[keyof CreateSaleResponses];
-
-export type AskChatData = {
-    body: ChatQuestion;
-    path?: never;
-    query?: never;
-    url: '/chat';
-};
-
-export type AskChatErrors = {
-    /**
-     * Missing or expired bearer token. The frontend clears the session and redirects to login.
-     */
-    401: Error;
-};
-
-export type AskChatError = AskChatErrors[keyof AskChatErrors];
-
-export type AskChatResponses = {
-    /**
-     * Newline-delimited JSON token, final-answer, or error events.
-     */
-    200: string;
-};
-
-export type AskChatResponse = AskChatResponses[keyof AskChatResponses];
 
 export type PreviewImportData = {
     body: ImportPreviewInput;

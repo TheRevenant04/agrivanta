@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { unlink, writeFile } from 'node:fs/promises';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 
 const frontendDirectory = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -14,39 +14,42 @@ const localSchema = path.resolve(
   'api',
   'openapi.yaml',
 );
-const downloadedSchema = path.join(
+const generatedSchema = path.join(
   frontendDirectory,
   `.api-schema-input-${process.pid}.yaml`,
 );
-const defaultSchemaUrl = 'http://localhost:8000/openapi.yaml';
 
 async function main() {
-  let input = localSchema;
-  let removeDownloadedSchema = false;
-  const schemaUrl = process.env.AGRIVANTA_OPENAPI_URL ?? defaultSchemaUrl;
-
-  try {
-    const response = await fetch(schemaUrl, {
-      signal: AbortSignal.timeout(2000),
-    });
+  const schemaUrl = process.env.AGRIVANTA_OPENAPI_URL;
+  let schema;
+  if (schemaUrl) {
+    const response = await fetch(schemaUrl);
     if (!response.ok) {
       throw new Error(
         `Could not download OpenAPI schema (${response.status} ${response.statusText}).`,
       );
     }
-    await writeFile(downloadedSchema, await response.text(), {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
-    input = downloadedSchema;
-    removeDownloadedSchema = true;
-  } catch (error) {
-    if (process.env.AGRIVANTA_OPENAPI_URL) throw error;
-    console.warn(
-      `Could not reach ${defaultSchemaUrl}; generating from the checked-in backend schema.`,
-    );
+    schema = await response.text();
+  } else {
+    schema = await readFile(localSchema, 'utf8');
   }
 
+  const lines = schema.split(/\r?\n/);
+  const chatPathStart = lines.indexOf('  /chat:');
+  if (chatPathStart !== -1) {
+    const chatPathEnd = lines.findIndex(
+      (line, index) =>
+        index > chatPathStart &&
+        (line.startsWith('  /') || line === 'components:'),
+    );
+    if (chatPathEnd === -1) {
+      throw new Error('Could not locate the end of the /chat OpenAPI path.');
+    }
+    lines.splice(chatPathStart, chatPathEnd - chatPathStart);
+    schema = lines.join('\n');
+  }
+
+  await writeFile(generatedSchema, schema, { encoding: 'utf8', flag: 'wx' });
   try {
     const result = spawnSync(
       process.execPath,
@@ -60,7 +63,7 @@ async function main() {
           'run.js',
         ),
         '-i',
-        input,
+        generatedSchema,
         '-o',
         'src/services/generated',
         '--no-log-file',
@@ -73,7 +76,7 @@ async function main() {
     if (result.error) throw result.error;
     if (result.status !== 0) process.exitCode = result.status ?? 1;
   } finally {
-    if (removeDownloadedSchema) await unlink(downloadedSchema);
+    await unlink(generatedSchema);
   }
 }
 

@@ -400,13 +400,14 @@ export type CropCycle = Pick<
   | 'id'
   | 'fieldId'
   | 'cropId'
+  | 'varietyId'
   | 'startDate'
   | 'endDate'
   | 'status'
   | 'expectedYield'
   | 'expectedPrice'
 > &
-  Partial<Pick<ApiCropCycle, 'cycleType'>> & { varietyId: string };
+  Partial<Pick<ApiCropCycle, 'cycleType'>>;
 export type CropCycleInput = Pick<
   ApiCropCycleInput,
   'fieldId' | 'cropId' | 'startDate' | 'endDate'
