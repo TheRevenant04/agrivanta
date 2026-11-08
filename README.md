@@ -3,7 +3,9 @@
 Agrivanta is a responsive farm-operations and financial-reporting application
 for commercially managed crop farms. It brings farm setup, crop cycles,
 activities, inventory, expenses, harvests, sales, profitability, and dashboard
-KPIs together in one web application.
+KPIs together in one web application. It also includes CSV/Excel imports,
+in-app notifications, predefined reports and exports, and an evidence-backed
+read-only AI chat interface.
 
 The repository currently contains a Django REST Framework backend and a React
 18 + TypeScript frontend. The frontend can run against browser-based mock
@@ -36,6 +38,8 @@ non-development deployment.
 The backend-maintained OpenAPI contract is available at
 `http://localhost:8000/openapi.yaml` and is stored in
 [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
+`http://localhost:8000/healthz` is the liveness endpoint;
+`http://localhost:8000/readyz` checks database readiness.
 
 ## Local development with Docker Compose
 
@@ -52,7 +56,15 @@ Redis, the Django development server, and a Celery worker. The server is
 available at `http://localhost:8000/api/`; its health endpoint is
 `http://localhost:8000/healthz`. Compose waits for PostgreSQL and Redis health
 checks before starting Django, and for Django to become healthy before starting
-the worker.
+the worker. Django is published on `127.0.0.1:8000`; the frontend is not
+containerized and is started separately as described below.
+
+Compose defaults `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` to
+`agrivanta`; override them in the shell or Compose environment when needed.
+The default credentials and debug configuration are for local development
+only. PostgreSQL and Redis are not published to the host by this Compose file.
+The stack starts a Celery worker, not a Celery beat scheduler, so configured
+periodic tasks are not automatically scheduled by Compose.
 
 PDF report exports are not available in the default Compose image: they
 require the optional Playwright dependency and a Chromium-compatible browser,
@@ -105,6 +117,15 @@ npm run format:check
 npm run test
 npm run build
 ```
+
+After changing the backend OpenAPI contract, run `npm run api:generate` in
+`frontend/` and commit the regenerated client files. See the frontend guide for
+the optional schema URL and why chat uses a separate streaming transport.
+AI chat requires the HTTP client; mock services do not implement it.
+Generated answers use the backend's OpenAI adapter, configured with
+`OPENAI_API_KEY` and optionally `OPENAI_MODEL`. The default Compose file does
+not pass these variables to the web container; configure them separately in
+the container environment to use provider-backed answers. Do not commit keys.
 
 See [`frontend/README.md`](frontend/README.md) for environment details,
 available scripts, and frontend architecture.

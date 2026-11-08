@@ -14,11 +14,14 @@ The product vision is broader than the currently implemented features.
 
 Current implementation: a Django 5.2 + DRF backend with farm-scoped
 operations, inventory, financial, reporting, notification, and dashboard
-APIs; a React 18 + TypeScript (Vite) frontend; and backend/frontend test
-suites. Local backend development uses SQLite by default, with PostgreSQL
-available through environment configuration. Celery/Redis and the AI analyst
-remain in the product plan/backlog; do not describe them as implemented.
-There is currently no GitHub Actions CI workflow.
+APIs and a read-only AI chat endpoint; a React 18 + TypeScript (Vite)
+frontend; and backend/frontend test suites. Local backend development uses
+SQLite by default, with PostgreSQL available through environment configuration.
+The development Compose stack runs PostgreSQL, Redis, Django, and a Celery
+worker. Celery tasks and a beat schedule exist, but Compose does not start
+Celery beat. The AI chat UI and endpoint are implemented; consult the plan and
+open issues for capabilities not yet delivered. There is currently no GitHub
+Actions CI workflow.
 
 ## Repository layout
 
@@ -31,6 +34,7 @@ frontend/             React/Vite app, services, and Vitest suite
 custom-agent/         Headless PM/engineer/QA issue orchestrator
 mcp-server/           Read-only backlog + issues MCP server
 backend/api/openapi.yaml Backend API contract, published at /openapi.yaml
+docker-compose.yml    Local PostgreSQL, Redis, Django, and Celery stack
 opencode.json         OpenCode config: permissions, MCP, instructions
 pyproject.toml        Python project metadata and dependencies
 README.md             Project overview and local setup
@@ -70,8 +74,9 @@ Summary of the non-negotiables:
 1. Inspect before acting: `git status --short --branch`, then read the
    relevant `_docs` files and any `AGENTS.md` in subdirectories.
 2. Keep changes limited to the task's scope; stage only intended files.
-3. Run available checks before committing (currently none are configured —
-   say so honestly rather than implying checks passed).
+3. Run relevant backend/frontend checks before committing. No GitHub Actions
+   checks are configured; distinguish local checks from hosted CI and report
+   any checks that could not be run.
 4. Report the commit hash, subject, and checks run. Do not claim success
    for work that did not complete.
 
@@ -94,6 +99,7 @@ npm run lint
 npm run format:check
 npm run test
 npm run build
+npm run api:generate
 ```
 
 The frontend defaults to mock services. Set `VITE_API_CLIENT=http` and
