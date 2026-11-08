@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { PAYMENT_TYPES } from '../services/expensePaymentRules';
 import { useServices } from '../services/servicesContext';
@@ -108,26 +109,29 @@ export function PaymentsPage() {
   }
 
   return (
-    <section>
-      <h1>Payments</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Payments</h1>
+        <p>Record money paid and received against expenses and sales.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
 
       {loaded && payments.length === 0 && !formOpen ? (
         <EmptyState message="No payments yet.">
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add payment
-          </button>
+          </Button>
         </EmptyState>
       ) : null}
 
       {payments.length > 0 && !formOpen ? (
-        <>
-          <ul>
+        <div className="space-y-4">
+          <ul className="record-list">
             {payments.map((payment) => (
               <li key={payment.id}>
-                <span>{payment.type}</span>
+                <span className="font-medium capitalize">{payment.type}</span>
                 <span>{payment.amount}</span>
                 <span>{payment.date}</span>
                 {payment.linkedExpenseId ? (
@@ -140,14 +144,19 @@ export function PaymentsPage() {
               </li>
             ))}
           </ul>
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add payment
-          </button>
-        </>
+          </Button>
+        </div>
       ) : null}
 
       {formOpen ? (
-        <form aria-label="Add payment" onSubmit={handleSubmit} noValidate>
+        <form
+          className="page-form"
+          aria-label="Add payment"
+          onSubmit={handleSubmit}
+          noValidate
+        >
           {formError ? <p role="alert">{formError}</p> : null}
 
           <div>
@@ -241,12 +250,14 @@ export function PaymentsPage() {
             />
           </div>
 
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Saving...' : 'Save payment'}
-          </button>
-          <button type="button" onClick={resetForm}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving...' : 'Save payment'}
+            </Button>
+            <Button type="button" variant="outline" onClick={resetForm}>
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
     </section>

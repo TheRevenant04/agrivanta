@@ -1,7 +1,8 @@
 import { useRef, useState, type FormEvent } from 'react';
+import { cn } from '@/lib/utils';
+import { Button } from '../components/ui/button';
 import { useServices } from '../services/servicesContext';
 import type { ChatEvidence, ChatEvidenceItem } from '../services/types';
-import './ChatPage.css';
 
 type Message = {
   id: number;
@@ -21,27 +22,36 @@ const EVIDENCE_SECTIONS = [
 
 function EvidencePanel({ evidence }: { evidence: ChatEvidence }) {
   return (
-    <details className="chat-evidence">
-      <summary>Evidence</summary>
-      {EVIDENCE_SECTIONS.map(({ key, title }) => {
-        const items = evidence[key] as ChatEvidenceItem[];
-        return (
-          <section key={key} aria-label={title}>
-            <h3>{title}</h3>
-            {items.length > 0 ? (
-              <ul>
-                {items.map((item, index) => (
-                  <li key={`${key}-${index}`}>
-                    <pre>{JSON.stringify(item, null, 2)}</pre>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>None returned.</p>
-            )}
-          </section>
-        );
-      })}
+    <details className="mt-4 border-t pt-3">
+      <summary className="cursor-pointer text-sm font-medium text-foreground">
+        Evidence
+      </summary>
+      <div className="mt-4 space-y-5">
+        {EVIDENCE_SECTIONS.map(({ key, title }) => {
+          const items = evidence[key] as ChatEvidenceItem[];
+          return (
+            <section key={key} aria-label={title} className="space-y-2">
+              <h3>{title}</h3>
+              {items.length > 0 ? (
+                <ul className="space-y-2">
+                  {items.map((item, index) => (
+                    <li
+                      key={`${key}-${index}`}
+                      className="overflow-x-auto rounded-lg border bg-muted/40 p-3"
+                    >
+                      <pre className="text-xs text-foreground">
+                        {JSON.stringify(item, null, 2)}
+                      </pre>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>None returned.</p>
+              )}
+            </section>
+          );
+        })}
+      </div>
     </details>
   );
 }
@@ -113,12 +123,14 @@ export function ChatPage() {
   }
 
   return (
-    <div className="chat-page">
-      <h1>AI analyst</h1>
-      <p>Ask a question about your farm records.</p>
+    <div className="mx-auto w-full max-w-3xl space-y-6">
+      <div className="space-y-1">
+        <h1>AI analyst</h1>
+        <p>Ask a question about your farm records.</p>
+      </div>
 
       <section
-        className="chat-conversation"
+        className="min-h-64 space-y-4 rounded-xl border bg-card p-4 text-card-foreground shadow-sm sm:p-6"
         aria-label="Conversation"
         aria-live="polite"
         aria-busy={pending}
@@ -128,22 +140,37 @@ export function ChatPage() {
         ) : (
           messages.map((message) => (
             <article
-              className={`chat-message chat-message-${message.role}`}
+              className={cn(
+                'rounded-xl border p-4',
+                message.role === 'user'
+                  ? 'border-transparent bg-secondary text-secondary-foreground'
+                  : 'bg-background',
+              )}
               key={message.id}
               aria-label={
                 message.role === 'user' ? 'Your question' : 'AI answer'
               }
             >
-              <h2>{message.role === 'user' ? 'You' : 'AI analyst'}</h2>
+              <h2 className="text-sm">
+                {message.role === 'user' ? 'You' : 'AI analyst'}
+              </h2>
               {message.content && (
-                <p className="chat-message-content">{message.content}</p>
+                <p className="chat-message-content mt-2 whitespace-pre-wrap text-foreground">
+                  {message.content}
+                </p>
               )}
               {message.role === 'assistant' &&
                 message.loading &&
                 !message.content && (
-                  <p role="status">Waiting for the answer…</p>
+                  <p role="status" className="mt-2">
+                    Waiting for the answer…
+                  </p>
                 )}
-              {message.error && <p role="alert">{message.error}</p>}
+              {message.error && (
+                <p role="alert" className="mt-2">
+                  {message.error}
+                </p>
+              )}
               {message.evidence && (
                 <EvidencePanel evidence={message.evidence} />
               )}
@@ -152,19 +179,21 @@ export function ChatPage() {
         )}
       </section>
 
-      <form className="chat-question-form" onSubmit={submitQuestion}>
-        <label htmlFor="chat-question">Your question</label>
-        <textarea
-          id="chat-question"
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          rows={3}
-          maxLength={4000}
-          disabled={pending}
-        />
-        <button type="submit" disabled={pending || !question.trim()}>
+      <form className="page-form" onSubmit={submitQuestion}>
+        <div>
+          <label htmlFor="chat-question">Your question</label>
+          <textarea
+            id="chat-question"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            rows={3}
+            maxLength={4000}
+            disabled={pending}
+          />
+        </div>
+        <Button type="submit" disabled={pending || !question.trim()}>
           {pending ? 'Answering…' : 'Send question'}
-        </button>
+        </Button>
       </form>
     </div>
   );

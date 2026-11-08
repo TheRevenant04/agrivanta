@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { useServices } from '../services/servicesContext';
 import type { Unit, UnitConversion } from '../services/types';
@@ -133,220 +134,244 @@ export function ConversionsPage() {
   }
 
   return (
-    <section>
-      <h1>Conversions</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Conversions</h1>
+        <p>Define unit conversion rules and convert quantities.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
 
-      <h2>Conversion rules</h2>
+      <div className="space-y-4">
+        <h2>Conversion rules</h2>
 
-      {loaded && units.length === 0 ? (
-        <EmptyState message="No units yet. Create a unit before adding conversion rules.">
-          <Link to="/units">Add unit</Link>
-        </EmptyState>
-      ) : (
-        <>
-          {ruleConfirmation ? <p role="status">{ruleConfirmation}</p> : null}
+        {loaded && units.length === 0 ? (
+          <EmptyState message="No units yet. Create a unit before adding conversion rules.">
+            <Button asChild>
+              <Link to="/units">Add unit</Link>
+            </Button>
+          </EmptyState>
+        ) : (
+          <>
+            {ruleConfirmation ? <p role="status">{ruleConfirmation}</p> : null}
 
-          {loaded && rules.length === 0 && !ruleFormOpen ? (
-            <EmptyState message="No conversion rules yet.">
-              <button type="button" onClick={openRuleForm}>
-                Add conversion rule
-              </button>
-            </EmptyState>
-          ) : null}
+            {loaded && rules.length === 0 && !ruleFormOpen ? (
+              <EmptyState message="No conversion rules yet.">
+                <Button type="button" onClick={openRuleForm}>
+                  Add conversion rule
+                </Button>
+              </EmptyState>
+            ) : null}
 
-          {rules.length > 0 && !ruleFormOpen ? (
-            <>
-              <ul>
-                {rules.map((rule) => (
-                  <li key={rule.id}>
-                    <span>{unitName(rule.fromUnitId)}</span>
-                    <span>{unitName(rule.toUnitId)}</span>
-                    <span>{rule.factor}</span>
-                  </li>
-                ))}
-              </ul>
-              <button type="button" onClick={openRuleForm}>
-                Add conversion rule
-              </button>
-            </>
-          ) : null}
+            {rules.length > 0 && !ruleFormOpen ? (
+              <div className="space-y-4">
+                <ul className="record-list">
+                  {rules.map((rule) => (
+                    <li key={rule.id}>
+                      <span className="font-medium">
+                        {unitName(rule.fromUnitId)} → {unitName(rule.toUnitId)}
+                      </span>
+                      <span>Factor: {rule.factor}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Button type="button" onClick={openRuleForm}>
+                  Add conversion rule
+                </Button>
+              </div>
+            ) : null}
 
-          {ruleFormOpen ? (
-            <form
-              aria-label="Add conversion rule"
-              onSubmit={handleRuleSubmit}
-              noValidate
+            {ruleFormOpen ? (
+              <form
+                className="page-form"
+                aria-label="Add conversion rule"
+                onSubmit={handleRuleSubmit}
+                noValidate
+              >
+                {ruleFormError ? <p role="alert">{ruleFormError}</p> : null}
+
+                <div>
+                  <label htmlFor="conversion-from">From unit</label>
+                  <select
+                    id="conversion-from"
+                    name="fromUnitId"
+                    value={fromUnitId}
+                    onChange={(event) => setFromUnitId(event.target.value)}
+                    aria-invalid={ruleErrors.fromUnitId ? true : undefined}
+                    aria-describedby={
+                      ruleErrors.fromUnitId
+                        ? 'conversion-from-error'
+                        : undefined
+                    }
+                  >
+                    <option value="">Select a unit…</option>
+                    {units.map((unit) => (
+                      <option key={unit.id} value={unit.id}>
+                        {unit.name}
+                      </option>
+                    ))}
+                  </select>
+                  {ruleErrors.fromUnitId ? (
+                    <p role="alert" id="conversion-from-error">
+                      {ruleErrors.fromUnitId}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label htmlFor="conversion-to">To unit</label>
+                  <select
+                    id="conversion-to"
+                    name="toUnitId"
+                    value={toUnitId}
+                    onChange={(event) => setToUnitId(event.target.value)}
+                    aria-invalid={ruleErrors.toUnitId ? true : undefined}
+                    aria-describedby={
+                      ruleErrors.toUnitId ? 'conversion-to-error' : undefined
+                    }
+                  >
+                    <option value="">Select a unit…</option>
+                    {units.map((unit) => (
+                      <option key={unit.id} value={unit.id}>
+                        {unit.name}
+                      </option>
+                    ))}
+                  </select>
+                  {ruleErrors.toUnitId ? (
+                    <p role="alert" id="conversion-to-error">
+                      {ruleErrors.toUnitId}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label htmlFor="conversion-factor">Factor</label>
+                  <input
+                    id="conversion-factor"
+                    name="factor"
+                    inputMode="decimal"
+                    value={factor}
+                    onChange={(event) => setFactor(event.target.value)}
+                    aria-invalid={ruleErrors.factor ? true : undefined}
+                    aria-describedby={
+                      ruleErrors.factor ? 'conversion-factor-error' : undefined
+                    }
+                  />
+                  {ruleErrors.factor ? (
+                    <p role="alert" id="conversion-factor-error">
+                      {ruleErrors.factor}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" disabled={submittingRule}>
+                    {submittingRule ? 'Saving…' : 'Save conversion rule'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setRuleFormOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : null}
+          </>
+        )}
+      </div>
+
+      <div className="space-y-4">
+        <h2>Convert a quantity</h2>
+
+        <form
+          className="page-form"
+          aria-label="Convert a quantity"
+          onSubmit={handleConvert}
+          noValidate
+        >
+          {convertFormError ? <p role="alert">{convertFormError}</p> : null}
+
+          <div>
+            <label htmlFor="convert-from">Convert from</label>
+            <select
+              id="convert-from"
+              name="convertFrom"
+              value={convertFromId}
+              onChange={(event) => setConvertFromId(event.target.value)}
+              aria-invalid={convertErrors.fromUnitId ? true : undefined}
+              aria-describedby={
+                convertErrors.fromUnitId ? 'convert-from-error' : undefined
+              }
             >
-              {ruleFormError ? <p role="alert">{ruleFormError}</p> : null}
+              <option value="">Select a unit…</option>
+              {units.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {unit.name}
+                </option>
+              ))}
+            </select>
+            {convertErrors.fromUnitId ? (
+              <p role="alert" id="convert-from-error">
+                {convertErrors.fromUnitId}
+              </p>
+            ) : null}
+          </div>
 
-              <div>
-                <label htmlFor="conversion-from">From unit</label>
-                <select
-                  id="conversion-from"
-                  name="fromUnitId"
-                  value={fromUnitId}
-                  onChange={(event) => setFromUnitId(event.target.value)}
-                  aria-invalid={ruleErrors.fromUnitId ? true : undefined}
-                  aria-describedby={
-                    ruleErrors.fromUnitId ? 'conversion-from-error' : undefined
-                  }
-                >
-                  <option value="">Select a unit…</option>
-                  {units.map((unit) => (
-                    <option key={unit.id} value={unit.id}>
-                      {unit.name}
-                    </option>
-                  ))}
-                </select>
-                {ruleErrors.fromUnitId ? (
-                  <p role="alert" id="conversion-from-error">
-                    {ruleErrors.fromUnitId}
-                  </p>
-                ) : null}
-              </div>
+          <div>
+            <label htmlFor="convert-to">Convert to</label>
+            <select
+              id="convert-to"
+              name="convertTo"
+              value={convertToId}
+              onChange={(event) => setConvertToId(event.target.value)}
+              aria-invalid={convertErrors.toUnitId ? true : undefined}
+              aria-describedby={
+                convertErrors.toUnitId ? 'convert-to-error' : undefined
+              }
+            >
+              <option value="">Select a unit…</option>
+              {units.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  {unit.name}
+                </option>
+              ))}
+            </select>
+            {convertErrors.toUnitId ? (
+              <p role="alert" id="convert-to-error">
+                {convertErrors.toUnitId}
+              </p>
+            ) : null}
+          </div>
 
-              <div>
-                <label htmlFor="conversion-to">To unit</label>
-                <select
-                  id="conversion-to"
-                  name="toUnitId"
-                  value={toUnitId}
-                  onChange={(event) => setToUnitId(event.target.value)}
-                  aria-invalid={ruleErrors.toUnitId ? true : undefined}
-                  aria-describedby={
-                    ruleErrors.toUnitId ? 'conversion-to-error' : undefined
-                  }
-                >
-                  <option value="">Select a unit…</option>
-                  {units.map((unit) => (
-                    <option key={unit.id} value={unit.id}>
-                      {unit.name}
-                    </option>
-                  ))}
-                </select>
-                {ruleErrors.toUnitId ? (
-                  <p role="alert" id="conversion-to-error">
-                    {ruleErrors.toUnitId}
-                  </p>
-                ) : null}
-              </div>
+          <div>
+            <label htmlFor="convert-quantity">Quantity</label>
+            <input
+              id="convert-quantity"
+              name="quantity"
+              inputMode="decimal"
+              value={quantity}
+              onChange={(event) => setQuantity(event.target.value)}
+              aria-invalid={convertErrors.quantity ? true : undefined}
+              aria-describedby={
+                convertErrors.quantity ? 'convert-quantity-error' : undefined
+              }
+            />
+            {convertErrors.quantity ? (
+              <p role="alert" id="convert-quantity-error">
+                {convertErrors.quantity}
+              </p>
+            ) : null}
+          </div>
 
-              <div>
-                <label htmlFor="conversion-factor">Factor</label>
-                <input
-                  id="conversion-factor"
-                  name="factor"
-                  inputMode="decimal"
-                  value={factor}
-                  onChange={(event) => setFactor(event.target.value)}
-                  aria-invalid={ruleErrors.factor ? true : undefined}
-                  aria-describedby={
-                    ruleErrors.factor ? 'conversion-factor-error' : undefined
-                  }
-                />
-                {ruleErrors.factor ? (
-                  <p role="alert" id="conversion-factor-error">
-                    {ruleErrors.factor}
-                  </p>
-                ) : null}
-              </div>
+          <Button type="submit" disabled={converting}>
+            {converting ? 'Converting…' : 'Convert'}
+          </Button>
 
-              <button type="submit" disabled={submittingRule}>
-                {submittingRule ? 'Saving…' : 'Save conversion rule'}
-              </button>
-              <button type="button" onClick={() => setRuleFormOpen(false)}>
-                Cancel
-              </button>
-            </form>
-          ) : null}
-        </>
-      )}
-
-      <h2>Convert a quantity</h2>
-
-      <form aria-label="Convert a quantity" onSubmit={handleConvert} noValidate>
-        {convertFormError ? <p role="alert">{convertFormError}</p> : null}
-
-        <div>
-          <label htmlFor="convert-from">Convert from</label>
-          <select
-            id="convert-from"
-            name="convertFrom"
-            value={convertFromId}
-            onChange={(event) => setConvertFromId(event.target.value)}
-            aria-invalid={convertErrors.fromUnitId ? true : undefined}
-            aria-describedby={
-              convertErrors.fromUnitId ? 'convert-from-error' : undefined
-            }
-          >
-            <option value="">Select a unit…</option>
-            {units.map((unit) => (
-              <option key={unit.id} value={unit.id}>
-                {unit.name}
-              </option>
-            ))}
-          </select>
-          {convertErrors.fromUnitId ? (
-            <p role="alert" id="convert-from-error">
-              {convertErrors.fromUnitId}
-            </p>
-          ) : null}
-        </div>
-
-        <div>
-          <label htmlFor="convert-to">Convert to</label>
-          <select
-            id="convert-to"
-            name="convertTo"
-            value={convertToId}
-            onChange={(event) => setConvertToId(event.target.value)}
-            aria-invalid={convertErrors.toUnitId ? true : undefined}
-            aria-describedby={
-              convertErrors.toUnitId ? 'convert-to-error' : undefined
-            }
-          >
-            <option value="">Select a unit…</option>
-            {units.map((unit) => (
-              <option key={unit.id} value={unit.id}>
-                {unit.name}
-              </option>
-            ))}
-          </select>
-          {convertErrors.toUnitId ? (
-            <p role="alert" id="convert-to-error">
-              {convertErrors.toUnitId}
-            </p>
-          ) : null}
-        </div>
-
-        <div>
-          <label htmlFor="convert-quantity">Quantity</label>
-          <input
-            id="convert-quantity"
-            name="quantity"
-            inputMode="decimal"
-            value={quantity}
-            onChange={(event) => setQuantity(event.target.value)}
-            aria-invalid={convertErrors.quantity ? true : undefined}
-            aria-describedby={
-              convertErrors.quantity ? 'convert-quantity-error' : undefined
-            }
-          />
-          {convertErrors.quantity ? (
-            <p role="alert" id="convert-quantity-error">
-              {convertErrors.quantity}
-            </p>
-          ) : null}
-        </div>
-
-        <button type="submit" disabled={converting}>
-          {converting ? 'Converting…' : 'Convert'}
-        </button>
-
-        {result ? <p role="status">{result}</p> : null}
-      </form>
+          {result ? <p role="status">{result}</p> : null}
+        </form>
+      </div>
     </section>
   );
 }

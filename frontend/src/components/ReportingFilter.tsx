@@ -1,3 +1,5 @@
+import { useId } from 'react';
+import { Label } from '@/components/ui/label';
 import type { Selection } from './useReportingOptions';
 
 export function ReportingFilter({
@@ -11,10 +13,13 @@ export function ReportingFilter({
   value: string;
   onChange: (selection: Selection) => void;
 }) {
+  const id = useId();
+
   return (
-    <label>
-      Period or season
+    <div>
+      <Label htmlFor={id}>Period or season</Label>
       <select
+        id={id}
         value={value}
         onChange={(event) => {
           const selection = options.find(
@@ -29,6 +34,6 @@ export function ReportingFilter({
           </option>
         ))}
       </select>
-    </label>
+    </div>
   );
 }

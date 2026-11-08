@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import {
   computeHarvestedTotal,
@@ -147,8 +148,11 @@ export function HarvestsPage() {
 
   if (loaded && cycles.length === 0) {
     return (
-      <section>
-        <h1>Harvests</h1>
+      <section className="page-section">
+        <div className="space-y-1">
+          <h1>Harvests</h1>
+          <p>Record harvested quantities against open crop cycles.</p>
+        </div>
         {loadError ? <p role="alert">{loadError}</p> : null}
         <EmptyState message="No crop cycles yet.">
           <p>Create a crop cycle before recording harvests.</p>
@@ -158,13 +162,21 @@ export function HarvestsPage() {
   }
 
   return (
-    <section>
-      <h1>Harvests</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Harvests</h1>
+        <p>Record harvested quantities against open crop cycles.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
 
-      <form aria-label="Record harvest" onSubmit={handleSubmit} noValidate>
+      <form
+        className="page-form"
+        aria-label="Record harvest"
+        onSubmit={handleSubmit}
+        noValidate
+      >
         {formError ? <p role="alert">{formError}</p> : null}
 
         <div>
@@ -264,13 +276,13 @@ export function HarvestsPage() {
           ) : null}
         </div>
 
-        <button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting}>
           {submitting ? 'Saving…' : 'Save harvest'}
-        </button>
+        </Button>
       </form>
 
       {selectedCycle ? (
-        <>
+        <div className="space-y-4">
           <h2>Harvests for {selectedCycle.label}</h2>
 
           {totalError ? <p role="alert">{totalError}</p> : null}
@@ -283,18 +295,19 @@ export function HarvestsPage() {
 
           {harvests.length === 0 ? (
             <EmptyState message="No harvests for this cycle yet.">
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => quantityRef.current?.focus()}
               >
                 Record harvest
-              </button>
+              </Button>
             </EmptyState>
           ) : (
-            <ul>
+            <ul className="record-list">
               {harvests.map((harvest) => (
                 <li key={harvest.id}>
-                  <span>
+                  <span className="font-medium">
                     {formatAmount(harvest.quantity)} {unitName(harvest.unitId)}
                   </span>
                   <span>{harvest.date}</span>
@@ -302,7 +315,7 @@ export function HarvestsPage() {
               ))}
             </ul>
           )}
-        </>
+        </div>
       ) : (
         <p>Select a crop cycle to see its harvests.</p>
       )}

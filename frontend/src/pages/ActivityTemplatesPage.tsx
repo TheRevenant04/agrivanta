@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { ACTIVITY_CATEGORIES } from '../services/activityPlanningRules';
 import { useServices } from '../services/servicesContext';
@@ -89,39 +90,47 @@ export function ActivityTemplatesPage() {
   }
 
   return (
-    <section>
-      <h1>Activity templates</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Activity templates</h1>
+        <p>Manage the activity types available when planning work.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
 
       {loaded && types.length === 0 && !formOpen ? (
         <EmptyState message="No activity templates yet.">
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add template
-          </button>
+          </Button>
         </EmptyState>
       ) : null}
 
       {types.length > 0 && !formOpen ? (
-        <>
-          <ul>
+        <div className="space-y-4">
+          <ul className="record-list">
             {types.map((activityType) => (
               <li key={activityType.id}>
-                <span>{activityType.name}</span>
-                <span>{activityType.category}</span>
-                {activityType.standard ? <span>standard</span> : null}
+                <span className="font-medium">{activityType.name}</span>
+                <span className="capitalize">{activityType.category}</span>
+                {activityType.standard ? (
+                  <span className="w-fit rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                    standard
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add template
-          </button>
-        </>
+          </Button>
+        </div>
       ) : null}
 
       {formOpen ? (
         <form
+          className="page-form"
           aria-label="Add template"
           onSubmit={(event) => void handleSubmit(event)}
           noValidate
@@ -170,12 +179,14 @@ export function ActivityTemplatesPage() {
             ) : null}
           </div>
 
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save template'}
-          </button>
-          <button type="button" onClick={resetForm}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Save template'}
+            </Button>
+            <Button type="button" variant="outline" onClick={resetForm}>
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
     </section>

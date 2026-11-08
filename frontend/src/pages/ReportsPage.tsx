@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ReportingFilter } from '../components/ReportingFilter';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardHeader } from '../components/ui/card';
 import {
   useReportingOptions,
   type Selection,
@@ -84,9 +86,14 @@ export function ReportsPage() {
   }
 
   return (
-    <section>
-      <h1>Reports</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Reports</h1>
+        <p>Generate operational and financial reports for a period.</p>
+      </div>
+
       <form
+        className="page-form"
         onSubmit={(event) => {
           event.preventDefault();
           setResult(null);
@@ -95,9 +102,10 @@ export function ReportsPage() {
           setApplied({ name, selection: selected });
         }}
       >
-        <label>
-          Report
+        <div>
+          <label htmlFor="report-name">Report</label>
           <select
+            id="report-name"
             value={name}
             onChange={(event) => setName(event.target.value as ReportName)}
           >
@@ -107,39 +115,48 @@ export function ReportsPage() {
               </option>
             ))}
           </select>
-        </label>
+        </div>
         <ReportingFilter
           options={options}
           names={names}
           value={selected.key}
           onChange={setSelection}
         />
-        <button type="submit">Apply filters</button>
+        <Button type="submit">Apply filters</Button>
       </form>
+
       {optionsError && <p role="alert">{optionsError}</p>}
       {error && <p role="alert">{error}</p>}
       {loading && <p>Loading report…</p>}
+
       {result && applied && (
-        <>
-          <h2>
-            {REPORTS.find((report) => report.name === applied.name)?.label}
-          </h2>
-          <p>
-            {names[applied.selection.key] ?? 'Year to date'} (
-            {applied.selection.startDate} – {applied.selection.endDate})
-          </p>
+        <div className="space-y-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2>
+                {REPORTS.find((report) => report.name === applied.name)?.label}
+              </h2>
+              <p>
+                {names[applied.selection.key] ?? 'Year to date'} (
+                {applied.selection.startDate} – {applied.selection.endDate})
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(['csv', 'xlsx', 'pdf'] as const).map((format) => (
+                <Button
+                  key={format}
+                  type="button"
+                  variant="outline"
+                  disabled={exporting}
+                  onClick={() => void download(format)}
+                >
+                  Export {format === 'xlsx' ? 'Excel' : format.toUpperCase()}
+                </Button>
+              ))}
+            </div>
+          </div>
           <ReportTables result={result} />
-          {(['csv', 'xlsx', 'pdf'] as const).map((format) => (
-            <button
-              key={format}
-              type="button"
-              disabled={exporting}
-              onClick={() => void download(format)}
-            >
-              Export {format === 'xlsx' ? 'Excel' : format.toUpperCase()}
-            </button>
-          ))}
-        </>
+        </div>
       )}
     </section>
   );
@@ -150,29 +167,35 @@ function Table({ title, rows }: { title: string; rows: ReportRow[] }) {
     return <p>No {title.toLowerCase()} data for this period.</p>;
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   return (
-    <section>
-      <h3>{title}</h3>
-      <table>
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th key={column}>{column}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index}>
-              {columns.map((column) => (
-                <td key={column}>
-                  {row[column] == null ? '—' : String(row[column])}
-                </td>
+    <Card>
+      <CardHeader>
+        <h3>{title}</h3>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={index}>
+                  {columns.map((column) => (
+                    <td key={column}>
+                      {row[column] == null ? '—' : String(row[column])}
+                    </td>
+                  ))}
+                </tr>
               ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

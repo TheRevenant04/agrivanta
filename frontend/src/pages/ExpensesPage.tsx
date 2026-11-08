@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { EXPENSE_CATEGORIES } from '../services/expensePaymentRules';
 import { useServices } from '../services/servicesContext';
@@ -148,8 +149,11 @@ export function ExpensesPage() {
   }
 
   return (
-    <section>
-      <h1>Expenses</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Expenses</h1>
+        <p>Record draft expenses, attach receipts, and post to the ledger.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {actionError ? <p role="alert">{actionError}</p> : null}
@@ -157,63 +161,73 @@ export function ExpensesPage() {
 
       {loaded && expenses.length === 0 && !formOpen ? (
         <EmptyState message="No expenses yet.">
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add expense
-          </button>
+          </Button>
         </EmptyState>
       ) : null}
 
       {expenses.length > 0 && !formOpen ? (
-        <>
-          <ul>
+        <div className="space-y-4">
+          <ul className="record-list">
             {expenses.map((expense) => (
-              <li key={expense.id} data-status={expense.status}>
-                <span>{expense.category}</span>
+              <li key={expense.id}>
+                <span className="font-medium capitalize">
+                  {expense.category}
+                </span>
                 <span>{expense.amount}</span>
                 <span>{expense.date}</span>
                 {expense.supplier ? <span>{expense.supplier}</span> : null}
-                <span>{expense.status === 'draft' ? 'draft' : 'posted'}</span>
+                <span data-status={expense.status}>
+                  {expense.status === 'draft' ? 'draft' : 'posted'}
+                </span>
                 {expense.attachments?.length ? (
                   <span>
                     {expense.attachments[expense.attachments.length - 1].name}
                   </span>
                 ) : null}
                 {expense.status === 'draft' ? (
-                  <>
-                    <button
+                  <div className="flex flex-wrap gap-2">
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="sm"
                       aria-label={`Edit expense ${expense.id}`}
                       onClick={() => openEdit(expense)}
                     >
                       Edit
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="sm"
                       aria-label={`Delete expense ${expense.id}`}
                       onClick={() => handleDelete(expense)}
                     >
                       Delete
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
+                      size="sm"
                       aria-label={`Post expense ${expense.id}`}
                       onClick={() => handlePost(expense)}
                     >
                       Post
-                    </button>
-                  </>
+                    </Button>
+                  </div>
                 ) : null}
               </li>
             ))}
           </ul>
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add expense
-          </button>
-        </>
+          </Button>
+        </div>
       ) : null}
 
       {formOpen ? (
         <form
+          className="page-form"
           aria-label={editingId ? 'Edit expense' : 'Add expense'}
           onSubmit={handleSubmit}
           noValidate
@@ -307,12 +321,14 @@ export function ExpensesPage() {
             />
           </div>
 
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Saving...' : 'Save expense'}
-          </button>
-          <button type="button" onClick={resetForm}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving...' : 'Save expense'}
+            </Button>
+            <Button type="button" variant="outline" onClick={resetForm}>
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
     </section>

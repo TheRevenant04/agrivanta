@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { useServices } from '../services/servicesContext';
 import type { Crop, CropCycle, Field, Variety } from '../services/types';
@@ -257,21 +258,26 @@ export function CropCyclesPage() {
   const cropVarieties = varieties.filter((item) => item.cropId === cropId);
 
   return (
-    <section>
-      <h1>Crop cycles</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Crop cycles</h1>
+        <p>Review field cycles, update forecasts, and close finished cycles.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
 
       {loaded && fields.length === 0 ? (
         <EmptyState message="No fields yet.">
-          <Link to="/fields">Set up fields</Link>
+          <Button asChild>
+            <Link to="/fields">Set up fields</Link>
+          </Button>
         </EmptyState>
       ) : null}
 
       {selectedFieldId ? (
         <>
-          <div>
+          <div className="max-w-sm">
             <label htmlFor="cycle-field-filter">Show cycles for field</label>
             <select
               id="cycle-field-filter"
@@ -293,21 +299,23 @@ export function CropCyclesPage() {
 
           {cycles && cycles.length === 0 && !formOpen ? (
             <EmptyState message="No crop cycles for this field yet.">
-              <button type="button" onClick={openCreate}>
+              <Button type="button" onClick={openCreate}>
                 Add crop cycle
-              </button>
+              </Button>
             </EmptyState>
           ) : null}
 
           {cycles && cycles.length > 0 && !formOpen ? (
-            <>
-              <ul>
+            <div className="space-y-4">
+              <ul className="record-list">
                 {cycles.map((cycle) => {
                   const label = cycleLabel(cycle, crops, varieties);
 
                   return (
                     <li key={cycle.id}>
-                      <span>{cropNameOf(cycle, crops)}</span>
+                      <span className="font-medium">
+                        {cropNameOf(cycle, crops)}
+                      </span>
                       <span>{varietyNameOf(cycle, varieties)}</span>
                       <span>Start: {cycle.startDate}</span>
                       <span>
@@ -319,32 +327,40 @@ export function CropCyclesPage() {
                       {cycle.expectedPrice !== undefined ? (
                         <span>Expected price: {cycle.expectedPrice}</span>
                       ) : null}
-                      <span>{cycle.status}</span>
+                      <span data-status={cycle.status}>{cycle.status}</span>
                       {cycle.status === 'open' ? (
                         <>
-                          <button type="button" onClick={() => openEdit(cycle)}>
-                            Edit {label}
-                          </button>
-                          <button
+                          <Button
                             type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEdit(cycle)}
+                          >
+                            Edit {label}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
                             onClick={() => openCloseConfirmation(cycle)}
                           >
                             Close {label}
-                          </button>
+                          </Button>
                         </>
                       ) : null}
                     </li>
                   );
                 })}
               </ul>
-              <button type="button" onClick={openCreate}>
+              <Button type="button" onClick={openCreate}>
                 Add crop cycle
-              </button>
-            </>
+              </Button>
+            </div>
           ) : null}
 
           {formOpen ? (
             <form
+              className="page-form"
               aria-label={editingId ? 'Edit crop cycle' : 'Add crop cycle'}
               onSubmit={handleSubmit}
               noValidate
@@ -528,35 +544,50 @@ export function CropCyclesPage() {
                 ) : null}
               </div>
 
-              <button type="submit" disabled={submitting}>
-                {submitting ? 'Saving…' : 'Save crop cycle'}
-              </button>
-              <button type="button" onClick={resetForm}>
-                Cancel
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? 'Saving…' : 'Save crop cycle'}
+                </Button>
+                <Button type="button" variant="outline" onClick={resetForm}>
+                  Cancel
+                </Button>
+              </div>
             </form>
           ) : null}
         </>
       ) : null}
 
       {closingCycle ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Close ${cycleLabel(closingCycle, crops, varieties)}`}
-        >
-          <h2>Close crop cycle?</h2>
-          <p>
-            <strong>{cycleLabel(closingCycle, crops, varieties)}</strong> will
-            be marked closed. Closed crop cycles cannot be edited.
-          </p>
-          {dialogError ? <p role="alert">{dialogError}</p> : null}
-          <button type="button" onClick={confirmClose} disabled={submitting}>
-            Confirm close
-          </button>
-          <button type="button" onClick={() => setClosingCycle(null)}>
-            Keep cycle open
-          </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Close ${cycleLabel(closingCycle, crops, varieties)}`}
+            className="w-full max-w-md space-y-4 rounded-xl border bg-background p-6 shadow-xl"
+          >
+            <h2>Close crop cycle?</h2>
+            <p>
+              <strong>{cycleLabel(closingCycle, crops, varieties)}</strong> will
+              be marked closed. Closed crop cycles cannot be edited.
+            </p>
+            {dialogError ? <p role="alert">{dialogError}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={confirmClose}
+                disabled={submitting}
+              >
+                Confirm close
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setClosingCycle(null)}
+              >
+                Keep cycle open
+              </Button>
+            </div>
+          </div>
         </div>
       ) : null}
     </section>

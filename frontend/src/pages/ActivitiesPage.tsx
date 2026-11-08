@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import {
   INVENTORY_ITEM_OPTIONS,
@@ -251,14 +252,17 @@ export function ActivitiesPage() {
   const listVisible = !formOpen && needsActivityId === null;
 
   return (
-    <section>
-      <h1>Activities</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Activities</h1>
+        <p>Plan work, track status, and capture resource needs by cycle.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
       {statusError ? <p role="alert">{statusError}</p> : null}
 
-      <div>
+      <div className="max-w-sm">
         <label htmlFor="activity-cycle-filter">Crop cycle</label>
         <select
           id="activity-cycle-filter"
@@ -282,26 +286,29 @@ export function ActivitiesPage() {
               : 'No activities yet.'
           }
         >
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Create activity
-          </button>
+          </Button>
         </EmptyState>
       ) : null}
 
       {activities.length > 0 && listVisible ? (
-        <>
-          <ul>
+        <div className="space-y-4">
+          <ul className="record-list">
             {activities.map((activity) => (
               <li key={activity.id}>
-                <span>{typeNameOf(activity)}</span>
+                <span className="font-medium">{typeNameOf(activity)}</span>
                 <span>{activity.plannedDate}</span>
                 <span data-status={activity.status}>
                   {statusLabel(activity.status)}
                 </span>
                 {activity.resourceNeeds.inputs.length > 0 ? (
-                  <ul>
+                  <ul className="flex flex-wrap gap-1.5">
                     {activity.resourceNeeds.inputs.map((item) => (
-                      <li key={item.id}>
+                      <li
+                        key={item.id}
+                        className="rounded-md border bg-muted/50 px-2 py-0.5 text-xs text-foreground"
+                      >
                         {item.quantity} × {item.itemName}
                       </li>
                     ))}
@@ -315,40 +322,57 @@ export function ActivitiesPage() {
                 {activity.resourceNeeds.equipment ? (
                   <span>Equipment: {activity.resourceNeeds.equipment}</span>
                 ) : null}
-                {activity.status === 'planned' ||
-                activity.status === 'overdue' ? (
-                  <button
+                <div className="flex flex-wrap gap-2">
+                  {activity.status === 'planned' ||
+                  activity.status === 'overdue' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void moveStatus(activity, 'in_progress')}
+                    >
+                      Start {typeNameOf(activity)}
+                    </Button>
+                  ) : null}
+                  {activity.status === 'in_progress' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void moveStatus(activity, 'completed')}
+                    >
+                      Complete {typeNameOf(activity)}
+                    </Button>
+                  ) : null}
+                  <Button
                     type="button"
-                    onClick={() => void moveStatus(activity, 'in_progress')}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openEdit(activity)}
                   >
-                    Start {typeNameOf(activity)}
-                  </button>
-                ) : null}
-                {activity.status === 'in_progress' ? (
-                  <button
+                    Edit {typeNameOf(activity)}
+                  </Button>
+                  <Button
                     type="button"
-                    onClick={() => void moveStatus(activity, 'completed')}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openNeeds(activity)}
                   >
-                    Complete {typeNameOf(activity)}
-                  </button>
-                ) : null}
-                <button type="button" onClick={() => openEdit(activity)}>
-                  Edit {typeNameOf(activity)}
-                </button>
-                <button type="button" onClick={() => openNeeds(activity)}>
-                  Edit needs {typeNameOf(activity)}
-                </button>
+                    Edit needs {typeNameOf(activity)}
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Create activity
-          </button>
-        </>
+          </Button>
+        </div>
       ) : null}
 
       {formOpen ? (
         <form
+          className="page-form"
           aria-label={editingId ? 'Edit activity' : 'Add activity'}
           onSubmit={(event) => void handleSubmit(event)}
           noValidate
@@ -437,17 +461,20 @@ export function ActivitiesPage() {
             />
           </div>
 
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save activity'}
-          </button>
-          <button type="button" onClick={resetForm}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Save activity'}
+            </Button>
+            <Button type="button" variant="outline" onClick={resetForm}>
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
 
       {needsActivityId ? (
         <form
+          className="page-form"
           aria-label="Edit resource needs"
           onSubmit={(event) => void handleNeedsSubmit(event)}
           noValidate
@@ -502,8 +529,10 @@ export function ActivitiesPage() {
                 }
               />
 
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() =>
                   setNeedRows((current) =>
                     current.filter((_, i) => i !== index),
@@ -511,7 +540,7 @@ export function ActivitiesPage() {
                 }
               >
                 Remove row {index + 1}
-              </button>
+              </Button>
             </div>
           ))}
 
@@ -521,8 +550,9 @@ export function ActivitiesPage() {
             </p>
           ) : null}
 
-          <button
+          <Button
             type="button"
+            variant="outline"
             onClick={() =>
               setNeedRows((current) => [
                 ...current,
@@ -531,7 +561,7 @@ export function ActivitiesPage() {
             }
           >
             Add input row
-          </button>
+          </Button>
 
           <div>
             <label htmlFor="need-labour-hours">Labour hours</label>
@@ -561,12 +591,14 @@ export function ActivitiesPage() {
             />
           </div>
 
-          <button type="submit" disabled={needsSubmitting}>
-            {needsSubmitting ? 'Saving…' : 'Save resource needs'}
-          </button>
-          <button type="button" onClick={resetNeeds}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={needsSubmitting}>
+              {needsSubmitting ? 'Saving…' : 'Save resource needs'}
+            </Button>
+            <Button type="button" variant="outline" onClick={resetNeeds}>
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
     </section>

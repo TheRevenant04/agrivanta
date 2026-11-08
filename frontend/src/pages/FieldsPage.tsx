@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { useServices } from '../services/servicesContext';
 import type { Field } from '../services/types';
@@ -106,41 +107,50 @@ export function FieldsPage() {
   }
 
   return (
-    <section>
-      <h1>Fields</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Fields</h1>
+        <p>Track the farm's fields and their areas.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
 
       {loaded && fields.length === 0 && !formOpen ? (
         <EmptyState message="No fields yet.">
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add field
-          </button>
+          </Button>
         </EmptyState>
       ) : null}
 
       {fields.length > 0 && !formOpen ? (
-        <>
-          <ul>
+        <div className="space-y-4">
+          <ul className="record-list">
             {fields.map((field) => (
               <li key={field.id}>
-                <span>{field.name}</span>
+                <span className="font-medium">{field.name}</span>
                 <span>{field.area}</span>
-                <button type="button" onClick={() => openEdit(field)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openEdit(field)}
+                >
                   Edit {field.name}
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add field
-          </button>
-        </>
+          </Button>
+        </div>
       ) : null}
 
       {formOpen ? (
         <form
+          className="page-form"
           aria-label={editingId ? 'Edit field' : 'Add field'}
           onSubmit={handleSubmit}
           noValidate
@@ -192,12 +202,14 @@ export function FieldsPage() {
             />
           </div>
 
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save field'}
-          </button>
-          <button type="button" onClick={resetForm}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Save field'}
+            </Button>
+            <Button type="button" variant="outline" onClick={resetForm}>
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
     </section>
