@@ -10,6 +10,7 @@ urlpatterns = [
     path("auth/logout", views.LogoutView.as_view()),
     path("auth/me", views.MeView.as_view()),
     path("farm", views.FarmView.as_view()),
+    path("farm-setup/status", views.FarmSetupStatusView.as_view()),
     path("seasons", views.SeasonListView.as_view()),
     path("seasons/<str:season_id>", views.SeasonDetailView.as_view()),
     path("reporting-periods", views.ReportingPeriodListView.as_view()),

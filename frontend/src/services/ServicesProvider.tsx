@@ -57,6 +57,7 @@ function withUnauthorizedHandling(
   return {
     ...services,
     auth,
+    setupStatus: guardDomain(services.setupStatus),
     farm: guardDomain(services.farm),
     fields: guardDomain(services.fields),
     crops: guardDomain(services.crops),

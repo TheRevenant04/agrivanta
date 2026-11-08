@@ -647,6 +647,27 @@ class FarmView(APIView):
         return Response(serialize_farm(farm))
 
 
+class FarmSetupStatusView(APIView):
+    def get(self, request):
+        farm = get_farm(request.user)
+        steps = {
+            "farm": bool(farm.name.strip() and len(farm.reporting_currency) == 3),
+            "fields": farm.fields.exists(),
+            "crops": farm.crops.filter(varieties__farm=farm).exists(),
+            "initialCycle": farm.crop_cycles.exists(),
+        }
+        next_step = next(
+            (step for step, complete in steps.items() if not complete), None
+        )
+        return Response(
+            {
+                "steps": steps,
+                "complete": next_step is None,
+                "nextStep": next_step,
+            }
+        )
+
+
 class AuditEventListView(APIView):
     permission_classes = [IsAuthenticated]
 

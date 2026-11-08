@@ -6,6 +6,7 @@ import type {
   CropInput,
   Farm,
   FarmInput,
+  FarmSetupStatus,
   FarmSetupServices,
   Field,
   FieldInput,
@@ -40,6 +41,11 @@ export function createFarmSetupHttp(
   request: ServiceRequest,
 ): FarmSetupServices {
   return {
+    setupStatus: {
+      get: () =>
+        request<FarmSetupStatus>('/farm-setup/status', { method: 'GET' }, true),
+    },
+
     farm: {
       get: () => request<Farm>('/farm', { method: 'GET' }, true),
       update: (input: FarmInput) => request<Farm>('/farm', put(input), true),

@@ -111,6 +111,7 @@ export function createCropCycleMock(
       fieldId,
       cropId,
       varietyId,
+      ...(input.cycleType ? { cycleType: input.cycleType } : {}),
       startDate,
       ...(endDate ? { endDate } : {}),
       ...(expectedYield !== undefined ? { expectedYield } : {}),

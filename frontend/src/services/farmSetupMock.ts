@@ -16,6 +16,7 @@ import {
   type CropInput,
   type Farm,
   type FarmInput,
+  type FarmSetupStatus,
   type FarmSetupServices,
   type Field,
   type FieldInput,
@@ -48,6 +49,7 @@ export interface FarmSetupMockOptions {
    * wires this to the stored session.
    */
   requireAuth?: () => void;
+  hasInitialCycle?: () => Promise<boolean>;
 }
 
 /** The farm every mock business starts with. */
@@ -80,6 +82,9 @@ export function createFarmSetupMock(
     seed.farm === undefined
       ? { ...DEFAULT_FARM }
       : seed.farm && { ...seed.farm };
+  let farmConfigured = Boolean(
+    farm?.name.trim() && farm.reportingCurrency.length === 3,
+  );
 
   const fields: Field[] = (seed.fields ?? []).map((item) => ({ ...item }));
   const crops: Crop[] = (seed.crops ?? []).map((item) => ({ ...item }));
@@ -178,6 +183,28 @@ export function createFarmSetupMock(
   }
 
   return {
+    setupStatus: {
+      async get(): Promise<FarmSetupStatus> {
+        requireAuth();
+        const steps = {
+          farm: farmConfigured,
+          fields: fields.length > 0,
+          crops: crops.some((crop) =>
+            varieties.some((variety) => variety.cropId === crop.id),
+          ),
+          initialCycle: (await options.hasInitialCycle?.()) ?? false,
+        };
+        const nextStep =
+          (Object.entries(steps).find(([, complete]) => !complete)?.[0] as
+            keyof typeof steps | undefined) ?? null;
+        return {
+          steps,
+          complete: nextStep === null,
+          nextStep,
+        };
+      },
+    },
+
     farm: {
       async get() {
         requireAuth();
@@ -206,6 +233,7 @@ export function createFarmSetupMock(
           name,
           reportingCurrency: input.reportingCurrency.trim().toUpperCase(),
         };
+        farmConfigured = true;
         return copy(farm);
       },
     },
