@@ -1,5 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { AuthLayout } from '@/components/AuthLayout';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useAuth } from '../auth/authContext';
 import { toErrorMessage } from '../lib/errors';
 import { useServices } from '../services/servicesContext';
@@ -34,57 +38,77 @@ export function LoginPage() {
   }
 
   return (
-    <main>
-      <h1>Sign in</h1>
-      <p>Sign in to manage your farm.</p>
-
-      {message ? <p role="status">{message}</p> : null}
+    <AuthLayout
+      title="Sign in"
+      description="Sign in to manage your farm."
+      footer={
+        <span>
+          New to Agrivanta?{' '}
+          <Link
+            to="/register"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Create an account
+          </Link>
+        </span>
+      }
+    >
+      {message ? (
+        <p
+          role="status"
+          className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
+        >
+          {message}
+        </p>
+      ) : null}
 
       <form aria-label="Sign in" onSubmit={handleSubmit} noValidate>
         {error ? (
-          <p role="alert" id="login-error">
+          <p
+            role="alert"
+            id="login-error"
+            className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
             {error}
           </p>
         ) : null}
 
-        <div>
-          <label htmlFor="login-email">Email</label>
-          <input
-            id="login-email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? 'login-error' : undefined}
-            required
-          />
-        </div>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="login-email">Email</Label>
+            <Input
+              id="login-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'login-error' : undefined}
+              required
+            />
+          </div>
 
-        <div>
-          <label htmlFor="login-password">Password</label>
-          <input
-            id="login-password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? 'login-error' : undefined}
-            required
-          />
-        </div>
+          <div className="space-y-2">
+            <Label htmlFor="login-password">Password</Label>
+            <Input
+              id="login-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'login-error' : undefined}
+              required
+            />
+          </div>
 
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'Signing in…' : 'Sign in'}
-        </button>
+          <Button type="submit" className="w-full" disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Sign in'}
+          </Button>
+        </div>
       </form>
-
-      <p>
-        <Link to="/register">Create an account</Link>
-      </p>
-    </main>
+    </AuthLayout>
   );
 }
