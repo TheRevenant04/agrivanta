@@ -4,6 +4,7 @@ import { createFarmSetupHttp } from './farmSetupHttp';
 import { createHarvestSaleHttp } from './harvestSaleHttp';
 import { createExpensePaymentHttp } from './expensePaymentHttp';
 import { createInventoryHttp } from './inventoryHttp';
+import { createImportHttp } from './importHttp';
 import { createActivityPlanningHttp } from './activityPlanningHttp';
 // Crop cycle domain (issue #45).
 import { createCropCycleHttp } from './cropCycleHttp';
@@ -137,6 +138,7 @@ export function createHttpServices(
     path: string,
     file: File,
     authenticated: boolean,
+    fields: Record<string, string> = {},
   ): Promise<T> {
     const headers: Record<string, string> = {};
 
@@ -152,6 +154,9 @@ export function createHttpServices(
 
     const form = new FormData();
     form.append('file', file);
+    for (const [name, value] of Object.entries(fields)) {
+      form.append(name, value);
+    }
 
     const response = await fetchFn(joinUrl(options.baseUrl, path), {
       method: 'POST',
@@ -225,6 +230,7 @@ export function createHttpServices(
     ...createHarvestSaleHttp(request),
     // Expense and payment domains (issue #49)
     ...createExpensePaymentHttp(request, upload),
+    ...createImportHttp(request, upload),
     // Inventory domain (issue #47) shares the same plumbing too.
     ...createInventoryHttp(request),
     // Activity planning domains (issue #46) share the same plumbing.

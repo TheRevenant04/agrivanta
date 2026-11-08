@@ -315,6 +315,95 @@ export interface ExpensePaymentServices {
 }
 
 // ---------------------------------------------------------------------------
+// CSV and Excel imports (issues #34, #35, #50)
+// ---------------------------------------------------------------------------
+
+export type ImportEntityType = 'expenses' | 'inventory_movements';
+
+export interface ImportRowError {
+  field: string;
+  message: string;
+}
+
+export interface ImportValidRow {
+  row: number;
+  date?: string | null;
+  category?: string;
+  amount?: number;
+  supplier?: string | null;
+  notes?: string | null;
+  cycleId?: string | null;
+  item?: string;
+  itemId?: string;
+  type?: string;
+  quantity?: number;
+  note?: string | null;
+}
+
+export interface ImportInvalidRow {
+  row: number;
+  errors: ImportRowError[];
+}
+
+export interface ImportDuplicateRow {
+  row: number;
+  reason: string;
+  key: Record<string, unknown>;
+}
+
+export interface ImportPreview {
+  entityType: ImportEntityType;
+  fileName: string;
+  previewToken: string;
+  expiresAt: string;
+  totalRows: number;
+  validRows: ImportValidRow[];
+  invalidRows: ImportInvalidRow[];
+  duplicateRows: ImportDuplicateRow[];
+  counts: {
+    total: number;
+    valid: number;
+    invalid: number;
+    duplicate: number;
+  };
+}
+
+export interface ImportCommitInput {
+  token: string;
+  confirmedRows: Array<{
+    row: number;
+    values?: Record<string, string>;
+  }>;
+}
+
+export interface ImportCommitResult {
+  previewToken: string;
+  entityType: ImportEntityType;
+  imported: Array<{ row: number; id: string }>;
+  counts: {
+    confirmed: number;
+    imported: number;
+    skipped: number;
+  };
+  audit: {
+    id: string;
+    actorId: string;
+    committedAt: string;
+    entityCounts: Record<string, number>;
+    previewToken: string;
+  };
+}
+
+export interface ImportService {
+  preview(entityType: ImportEntityType, file: File): Promise<ImportPreview>;
+  commit(input: ImportCommitInput): Promise<ImportCommitResult>;
+}
+
+export interface ImportServices {
+  imports: ImportService;
+}
+
+// ---------------------------------------------------------------------------
 // Inventory services (issue #47)
 // ---------------------------------------------------------------------------
 
@@ -329,6 +418,7 @@ export interface AgrivantaServices
     ActivityPlanningServices,
     InventoryServices,
     ExpensePaymentServices,
+    ImportServices,
     HarvestSaleServices {
   auth: AuthService;
   /** Crop cycle domain (issue #45). */
