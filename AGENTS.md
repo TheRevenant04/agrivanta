@@ -15,11 +15,12 @@ The product vision is broader than the currently implemented features.
 Current implementation: a Django 5.2 + DRF backend with farm-scoped
 operations, inventory, financial, reporting, notification, and dashboard
 APIs and a read-only AI chat endpoint; a React 18 + TypeScript (Vite)
-frontend; and backend/frontend test suites. Local backend development uses
+frontend styled with Tailwind CSS v4 and shadcn/ui; and backend/frontend test
+suites. Local backend development uses
 SQLite by default, with PostgreSQL available through environment configuration.
-The development Compose stack runs PostgreSQL, Redis, Django, and a Celery
-worker. Celery tasks and a beat schedule exist, but Compose does not start
-Celery beat. The AI chat UI and endpoint are implemented; consult the plan and
+The development Compose stack runs PostgreSQL, Redis, Django, the Vite
+frontend development server, and a Celery worker. Celery tasks and a beat
+schedule exist, but Compose does not start Celery beat. The AI chat UI and endpoint are implemented; consult the plan and
 open issues for capabilities not yet delivered. There is currently no GitHub
 Actions CI workflow.
 
@@ -34,7 +35,7 @@ frontend/             React/Vite app, services, and Vitest suite
 custom-agent/         Headless PM/engineer/QA issue orchestrator
 mcp-server/           Read-only backlog + issues MCP server
 backend/api/openapi.yaml Backend API contract, published at /openapi.yaml
-docker-compose.yml    Local PostgreSQL, Redis, Django, and Celery stack
+docker-compose.yml    Local PostgreSQL, Redis, Django, frontend, and Celery stack
 opencode.json         OpenCode config: permissions, MCP, instructions
 pyproject.toml        Python project metadata and dependencies
 README.md             Project overview and local setup
@@ -104,8 +105,8 @@ npm run api:generate
 
 The frontend defaults to mock services. Set `VITE_API_CLIENT=http` and
 `VITE_API_BASE_URL=http://localhost:8000/api` in `frontend/.env` to use the
-local backend. Backend tests use `uv run pytest`; frontend tests use Vitest
-through `npm run test`.
+local backend; Compose sets both automatically. Backend tests use
+`uv run pytest`; frontend tests use Vitest through `npm run test`.
 
 ## Process
 

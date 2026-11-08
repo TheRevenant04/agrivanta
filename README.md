@@ -45,19 +45,22 @@ The backend-maintained OpenAPI contract is available at
 
 Install Docker Desktop (Windows/macOS) or Docker Engine with the Docker Compose
 v2 plugin, then run these commands from the repository root. No local Python,
-PostgreSQL, or Redis installation is needed for this stack.
+Node.js, PostgreSQL, or Redis installation is needed for this stack.
 
 ```bash
 docker compose up --build
 ```
 
-This builds the backend image, runs database migrations, and starts PostgreSQL,
-Redis, the Django development server, and a Celery worker. The server is
-available at `http://localhost:8000/api/`; its health endpoint is
-`http://localhost:8000/healthz`. Compose waits for PostgreSQL and Redis health
-checks before starting Django, and for Django to become healthy before starting
-the worker. Django is published on `127.0.0.1:8000`; the frontend is not
-containerized and is started separately as described below.
+This builds the backend and frontend images, runs database migrations, and
+starts PostgreSQL, Redis, the Django development server, the Vite frontend
+development server, and a Celery worker. The API is available at
+`http://localhost:8000/api/` with its health endpoint at
+`http://localhost:8000/healthz`; the frontend is at `http://localhost:5173/`.
+Compose waits for PostgreSQL and Redis health checks before starting Django,
+for Django to become healthy before starting the worker and frontend, and
+configures the frontend to call the backend over HTTP instead of using mock
+services. Django and the frontend are published on loopback only
+(`127.0.0.1:8000` and `127.0.0.1:5173`).
 
 Compose defaults `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` to
 `agrivanta`; override them in the shell or Compose environment when needed.
@@ -71,10 +74,10 @@ require the optional Playwright dependency and a Chromium-compatible browser,
 which the image does not include. PDF export requests return `503` without
 these dependencies.
 
-In another terminal, follow the application and worker logs with:
+In another terminal, follow the application, frontend, and worker logs with:
 
 ```bash
-docker compose logs -f web celery-worker
+docker compose logs -f web frontend celery-worker
 ```
 
 Stop and remove the containers and network with:
@@ -94,14 +97,16 @@ uv run pytest
 
 ## Frontend
 
-In a separate terminal, from `frontend/`:
+The Compose stack already runs the frontend at `http://localhost:5173/`. To run
+it outside Docker, use a separate terminal from `frontend/`:
 
 ```bash
 npm ci
 npm run dev
 ```
 
-The frontend uses mock services by default and does not require the backend.
+The frontend uses React 18, TypeScript, Tailwind CSS v4, and shadcn/ui
+components. It uses mock services by default and does not require the backend.
 To use the local API, set the following in `frontend/.env`:
 
 ```dotenv

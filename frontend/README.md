@@ -44,6 +44,22 @@ consumes it via `useServices()` from `src/services/servicesContext.ts`.
 - `src/services/createServices.ts` — selects the implementation from
   `VITE_API_CLIENT`.
 
+### UI components and styling
+
+The app uses [Tailwind CSS](https://tailwindcss.com/) v4 with
+[shadcn/ui](https://ui.shadcn.com/) components. Tailwind is wired through the
+`@tailwindcss/vite` plugin; theme tokens and base styles live in
+`src/index.css`. Reusable primitives are in `src/components/ui/` and import the
+`@/` alias configured in `tsconfig.json` and `vite.config.ts`. The
+`components.json` file configures the shadcn CLI, and `cn()` in
+`src/lib/utils.ts` merges class names.
+
+Add another shadcn component from `frontend/` with:
+
+```bash
+npx shadcn@latest add <component>
+```
+
 ### OpenAPI types and client
 
 The backend-maintained OpenAPI schema is published at
@@ -86,6 +102,20 @@ npm ci
 `package-lock.json` and creates `frontend/node_modules/`. (Use
 `npm install` only when intentionally changing dependencies, so the
 lockfile stays in sync.)
+
+## Docker
+
+The repository [`docker-compose.yml`](../docker-compose.yml) builds and runs
+the frontend with the rest of the stack. From the repository root:
+
+```bash
+docker compose up --build
+```
+
+The frontend is available at `http://localhost:5173/` and is configured with
+`VITE_API_CLIENT=http` pointing at `http://localhost:8000/api`. Compose mounts
+the source for hot reload and keeps installed dependencies in a named volume,
+so no local Node.js installation is needed.
 
 ## Commands
 
