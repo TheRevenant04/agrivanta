@@ -144,6 +144,7 @@ describe('ImportWizardPage', () => {
               field: 'row',
               message: 'Row has more values than the headers define.',
             },
+            { field: 'amount', message: 'Amount must be a number.' },
           ],
         },
       ],
@@ -161,6 +162,9 @@ describe('ImportWizardPage', () => {
     ).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Skip invalid row 3' }));
+    fireEvent.change(screen.getByLabelText('Correct Amount for row 3'), {
+      target: { value: '25' },
+    });
 
     expect(
       screen.getByText('This invalid row will be skipped and not imported.'),
@@ -168,6 +172,9 @@ describe('ImportWizardPage', () => {
     expect(
       screen.getByRole('button', { name: 'Confirm import (1 selected)' }),
     ).toBeEnabled();
+    expect(
+      screen.getByRole('checkbox', { name: 'Import row 2' }),
+    ).toBeChecked();
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo skip row 3' }));
     expect(

@@ -252,7 +252,7 @@ export function ImportWizardPage() {
     );
     setSelectedRows((existing) => {
       const next = new Set(existing);
-      if (unresolved) {
+      if (unresolved || skippedRows.has(entry.row)) {
         next.delete(entry.row);
       } else {
         next.add(entry.row);
@@ -292,6 +292,7 @@ export function ImportWizardPage() {
       const result = await services.imports.commit({
         token: preview.previewToken,
         confirmedRows: [...selectedRows]
+          .filter((row) => !skippedRows.has(row))
           .sort((a, b) => a - b)
           .map((row) => ({
             row,
@@ -557,11 +558,16 @@ export function ImportWizardPage() {
                             </ul>
                             <button
                               type="button"
-                              onClick={() =>
+                              onClick={() => {
                                 setSkippedRows((existing) =>
                                   new Set(existing).add(entry.row),
-                                )
-                              }
+                                );
+                                setSelectedRows((existing) => {
+                                  const next = new Set(existing);
+                                  next.delete(entry.row);
+                                  return next;
+                                });
+                              }}
                             >
                               Skip invalid row {entry.row}
                             </button>
