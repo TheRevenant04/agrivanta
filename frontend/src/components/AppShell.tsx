@@ -3,6 +3,7 @@ import { NotificationBell } from './NotificationBell';
 
 const NAV_LINKS = [
   { to: '/dashboard', label: 'Dashboard' },
+  { to: '/chat', label: 'AI analyst' },
   { to: '/reports', label: 'Reports' },
   { to: '/farm', label: 'Farm' },
   { to: '/fields', label: 'Fields' },

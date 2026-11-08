@@ -2,6 +2,8 @@ export * from './types';
 export * from './sessionStore';
 export { createMockServices } from './mockServices';
 export { createHttpServices } from './httpServices';
+export { createChatHttp } from './chatHttp';
+export type { ChatStreamRequest } from './chatHttp';
 export type { FetchLike, HttpServicesOptions } from './httpServices';
 export {
   createServices,

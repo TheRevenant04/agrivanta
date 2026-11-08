@@ -41,6 +41,29 @@ export interface AuthService {
   me(): Promise<User>;
 }
 
+export type ChatEvidenceItem = Record<string, unknown>;
+
+export interface ChatEvidence {
+  figures: ChatEvidenceItem[];
+  reportingPeriods: ChatEvidenceItem[];
+  cropCycles: ChatEvidenceItem[];
+  calculationBasis: ChatEvidenceItem[];
+  toolResults?: ChatEvidenceItem[];
+}
+
+export interface ChatAnswer {
+  answer: string;
+  evidence: ChatEvidence;
+}
+
+export interface ChatService {
+  ask(question: string, onToken: (text: string) => void): Promise<ChatAnswer>;
+}
+
+export interface ChatServices {
+  chat: ChatService;
+}
+
 // ---------------------------------------------------------------------------
 // Farm setup domains (farm, fields, crops, varieties, units, conversions)
 // ---------------------------------------------------------------------------
@@ -423,7 +446,8 @@ export interface AgrivantaServices
     ImportServices,
     ReportingServices,
     HarvestSaleServices,
-    NotificationServices {
+    NotificationServices,
+    ChatServices {
   auth: AuthService;
   /** Crop cycle domain (issue #45). */
   cropCycles: CropCycleService;
