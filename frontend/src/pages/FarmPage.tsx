@@ -1,4 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { Button } from '../components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '../components/ui/card';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { useServices } from '../services/servicesContext';
 import type { Farm } from '../services/types';
@@ -79,30 +86,43 @@ export function FarmPage() {
   }
 
   return (
-    <section>
-      <h1>Farm</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Farm</h1>
+        <p>Manage the farm name and reporting currency.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
 
       {farm && !editing ? (
-        <>
-          <dl>
-            <dt>Farm name</dt>
-            <dd>{farm.name}</dd>
-            <dt>Reporting currency</dt>
-            <dd>{farm.reportingCurrency}</dd>
-          </dl>
+        <Card>
+          <CardHeader>
+            <CardTitle>Farm details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <dl>
+              <dt>Farm name</dt>
+              <dd>{farm.name}</dd>
+              <dt>Reporting currency</dt>
+              <dd>{farm.reportingCurrency}</dd>
+            </dl>
 
-          {confirmation ? <p role="status">{confirmation}</p> : null}
+            {confirmation ? <p role="status">{confirmation}</p> : null}
 
-          <button type="button" onClick={startEditing}>
-            Edit farm
-          </button>
-        </>
+            <Button type="button" onClick={startEditing}>
+              Edit farm
+            </Button>
+          </CardContent>
+        </Card>
       ) : null}
 
       {farm && editing ? (
-        <form aria-label="Edit farm" onSubmit={handleSubmit} noValidate>
+        <form
+          className="page-form"
+          aria-label="Edit farm"
+          onSubmit={handleSubmit}
+          noValidate
+        >
           {formError ? <p role="alert">{formError}</p> : null}
 
           <div>
@@ -141,12 +161,18 @@ export function FarmPage() {
             ) : null}
           </div>
 
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save farm'}
-          </button>
-          <button type="button" onClick={() => setEditing(false)}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Save farm'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
     </section>

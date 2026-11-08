@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Bell } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useServices } from '../services/servicesContext';
 import type { Notification } from '../services/types';
-import './NotificationBell.css';
+import { Button } from './ui/button';
 
 function newestFirst(notifications: Notification[]): Notification[] {
   return [...notifications].sort(
@@ -76,66 +78,73 @@ export function NotificationBell() {
   };
 
   return (
-    <div className="notification-bell">
-      <button
+    <div className="relative">
+      <Button
         aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ''}`}
         aria-expanded={isOpen}
         aria-controls="notification-panel"
-        className="notification-bell__toggle"
+        variant="ghost"
+        size="sm"
+        className="relative"
         onClick={togglePanel}
         type="button"
       >
-        <svg
-          aria-hidden="true"
-          className="notification-bell__icon"
-          viewBox="0 0 24 24"
-        >
-          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
-        </svg>
+        <Bell aria-hidden="true" />
         <span>Notifications</span>
         {unreadCount > 0 && (
           <span
             aria-label={`${unreadCount} unread notifications`}
-            className="notification-bell__badge"
+            className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-xs font-semibold leading-none text-destructive-foreground"
           >
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
-      </button>
+      </Button>
       {isOpen && (
         <section
           aria-label="Notifications"
-          className="notification-panel"
+          className="absolute right-0 top-full z-20 mt-2 max-h-96 min-w-80 overflow-y-auto rounded-xl border bg-popover p-2 text-popover-foreground shadow-lg"
           id="notification-panel"
         >
-          <h2>Notifications</h2>
+          <h2 className="px-3 pb-2 pt-2">Notifications</h2>
           {isLoading ? (
-            <p role="status">Loading notifications…</p>
+            <p role="status" className="px-3 pb-3">
+              Loading notifications…
+            </p>
           ) : hasError ? (
-            <div>
+            <div className="space-y-3 px-3 pb-3">
               <p role="alert">Unable to load notifications.</p>
-              <button onClick={() => void refreshNotifications()} type="button">
+              <Button
+                onClick={() => void refreshNotifications()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
                 Try again
-              </button>
+              </Button>
             </div>
           ) : notifications.length === 0 ? (
-            <p>No notifications yet.</p>
+            <p className="px-3 pb-3">No notifications yet.</p>
           ) : (
-            <ul className="notification-panel__list">
+            <ul className="space-y-1">
               {notifications.map((notification) => (
                 <li key={notification.id}>
                   <button
                     aria-label={`${notification.read ? 'Read' : 'Unread'} notification: ${notification.message}`}
-                    className={`notification-panel__item ${
+                    className={cn(
+                      'notification-panel__item grid h-auto w-full justify-start gap-1.5 whitespace-normal rounded-md border-0 bg-transparent px-3 py-2 text-left shadow-none hover:bg-accent hover:text-accent-foreground',
                       notification.read
-                        ? 'notification-panel__item--read'
-                        : 'notification-panel__item--unread'
-                    }`}
+                        ? 'notification-panel__item--read font-normal text-muted-foreground'
+                        : 'notification-panel__item--unread font-semibold text-foreground',
+                    )}
                     onClick={() => void markRead(notification)}
                     type="button"
                   >
                     <span>{notification.message}</span>
-                    <time dateTime={notification.createdAt}>
+                    <time
+                      className="text-xs font-normal text-muted-foreground"
+                      dateTime={notification.createdAt}
+                    >
                       {new Date(notification.createdAt).toLocaleString()}
                     </time>
                   </button>

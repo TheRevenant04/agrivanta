@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { isLowStock } from '../services/inventoryRules';
 import { useServices } from '../services/servicesContext';
@@ -10,7 +11,11 @@ type FormView = 'none' | 'item' | 'movement';
 
 /** Badge rendered for an item at or below its reorder level. */
 export function LowStockBadge() {
-  return <span>Low stock</span>;
+  return (
+    <span className="inline-flex items-center rounded-full border border-destructive/20 bg-destructive/10 px-2.5 py-0.5 text-xs font-medium text-destructive">
+      Low stock
+    </span>
+  );
 }
 
 /** Inventory list with item creation and stock movement entry. */
@@ -174,47 +179,63 @@ export function InventoryPage() {
   }
 
   return (
-    <section>
-      <h1>Inventory</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Inventory</h1>
+        <p>Track stock levels, reorder points, and movements.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
 
       {loaded && items.length === 0 && form === 'none' ? (
         <EmptyState message="No inventory items yet.">
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add inventory item
-          </button>
+          </Button>
         </EmptyState>
       ) : null}
 
       {items.length > 0 ? (
-        <>
-          <ul>
+        <div className="space-y-4">
+          <ul className="record-list">
             {items.map((item) => (
               <li key={item.id}>
-                <span>{item.name}</span>
+                <span className="font-medium">{item.name}</span>
                 <span>{unitName(item.unitId)}</span>
                 <span>Reorder level {item.reorderLevel}</span>
                 <span>Current quantity {item.currentQuantity}</span>
                 {isLowStock(item) ? <LowStockBadge /> : null}
-                <button type="button" onClick={() => openMovement(item)}>
-                  Record movement for {item.name}
-                </button>
-                <button type="button" onClick={() => openEdit(item)}>
-                  Edit {item.name}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openMovement(item)}
+                  >
+                    Record movement for {item.name}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openEdit(item)}
+                  >
+                    Edit {item.name}
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
-          <button type="button" onClick={openCreate}>
+          <Button type="button" onClick={openCreate}>
             Add inventory item
-          </button>
-        </>
+          </Button>
+        </div>
       ) : null}
 
       {form === 'item' ? (
         <form
+          className="page-form"
           aria-label={editingId ? 'Edit inventory item' : 'Add inventory item'}
           onSubmit={handleItemSubmit}
           noValidate
@@ -288,17 +309,20 @@ export function InventoryPage() {
             ) : null}
           </div>
 
-          <button type="submit" disabled={submittingItem}>
-            {submittingItem ? 'Saving…' : 'Save inventory item'}
-          </button>
-          <button type="button" onClick={closeForms}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submittingItem}>
+              {submittingItem ? 'Saving…' : 'Save inventory item'}
+            </Button>
+            <Button type="button" variant="outline" onClick={closeForms}>
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
 
       {form === 'movement' ? (
         <form
+          className="page-form"
           aria-label="Record movement"
           onSubmit={handleMovementSubmit}
           noValidate
@@ -365,12 +389,14 @@ export function InventoryPage() {
             ) : null}
           </div>
 
-          <button type="submit" disabled={submittingMovement}>
-            {submittingMovement ? 'Saving…' : 'Save movement'}
-          </button>
-          <button type="button" onClick={closeForms}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submittingMovement}>
+              {submittingMovement ? 'Saving…' : 'Save movement'}
+            </Button>
+            <Button type="button" variant="outline" onClick={closeForms}>
+              Cancel
+            </Button>
+          </div>
         </form>
       ) : null}
     </section>

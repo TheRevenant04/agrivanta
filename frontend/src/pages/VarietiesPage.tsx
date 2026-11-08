@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { useServices } from '../services/servicesContext';
 import type { Crop, Variety } from '../services/types';
@@ -127,24 +128,32 @@ export function VarietiesPage() {
 
   if (loaded && crops.length === 0) {
     return (
-      <section>
-        <h1>Varieties</h1>
+      <section className="page-section">
+        <div className="space-y-1">
+          <h1>Varieties</h1>
+          <p>Manage crop varieties.</p>
+        </div>
         {loadError ? <p role="alert">{loadError}</p> : null}
         <EmptyState message="No crops yet. Add a crop before adding varieties.">
-          <Link to="/crops">Add crop</Link>
+          <Button asChild>
+            <Link to="/crops">Add crop</Link>
+          </Button>
         </EmptyState>
       </section>
     );
   }
 
   return (
-    <section>
-      <h1>Varieties</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Varieties</h1>
+        <p>Manage crop varieties.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
 
-      <div>
+      <div className="max-w-sm">
         <label htmlFor="variety-crop">Crop</label>
         <select
           id="variety-crop"
@@ -166,7 +175,7 @@ export function VarietiesPage() {
 
       {selectedCrop ? (
         <>
-          <div>
+          <div className="max-w-sm">
             <label htmlFor="variety-select">Variety</label>
             <select
               id="variety-select"
@@ -184,29 +193,30 @@ export function VarietiesPage() {
 
           {cropVarieties.length === 0 && !formOpen ? (
             <EmptyState message={`No varieties for ${selectedCrop.name} yet.`}>
-              <button type="button" onClick={openCreate}>
+              <Button type="button" onClick={openCreate}>
                 Add variety
-              </button>
+              </Button>
             </EmptyState>
           ) : null}
 
           {cropVarieties.length > 0 && !formOpen ? (
-            <>
-              <ul>
+            <div className="space-y-4">
+              <ul className="record-list">
                 {cropVarieties.map((variety) => (
                   <li key={variety.id}>
-                    <span>{variety.name}</span>
+                    <span className="font-medium">{variety.name}</span>
                   </li>
                 ))}
               </ul>
-              <button type="button" onClick={openCreate}>
+              <Button type="button" onClick={openCreate}>
                 Add variety
-              </button>
-            </>
+              </Button>
+            </div>
           ) : null}
 
           {formOpen ? (
             <form
+              className="page-form"
               aria-label={editingId ? 'Edit variety' : 'Add variety'}
               onSubmit={handleSubmit}
               noValidate
@@ -238,12 +248,14 @@ export function VarietiesPage() {
                 </p>
               ) : null}
 
-              <button type="submit" disabled={submitting}>
-                {submitting ? 'Saving…' : 'Save variety'}
-              </button>
-              <button type="button" onClick={resetForm}>
-                Cancel
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? 'Saving…' : 'Save variety'}
+                </Button>
+                <Button type="button" variant="outline" onClick={resetForm}>
+                  Cancel
+                </Button>
+              </div>
             </form>
           ) : null}
         </>

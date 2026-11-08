@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { Button } from '../components/ui/button';
 import { toErrorMessage } from '../lib/errors';
 import { useAuth } from '../auth/authContext';
 import { useServices } from '../services/servicesContext';
@@ -342,15 +343,21 @@ export function GuidedSetupPage() {
   const isComplete = status?.complete ?? false;
 
   return (
-    <section aria-labelledby="guided-setup-title">
-      <h1 id="guided-setup-title">Guided farm setup</h1>
-      <p>Set up your farm, fields, crops, and first crop cycle.</p>
+    <section className="page-section" aria-labelledby="guided-setup-title">
+      <div className="space-y-1">
+        <h1 id="guided-setup-title">Guided farm setup</h1>
+        <p>Set up your farm, fields, crops, and first crop cycle.</p>
+      </div>
 
-      <ol aria-label="Setup steps">
+      <ol
+        aria-label="Setup steps"
+        className="flex flex-wrap gap-2 text-sm text-muted-foreground"
+      >
         {STEPS.map((step) => (
           <li
             key={step.id}
             aria-current={step.id === progress.currentStep ? 'step' : undefined}
+            className="rounded-full border px-3 py-1 aria-[current=step]:border-primary aria-[current=step]:bg-primary/10 aria-[current=step]:font-medium aria-[current=step]:text-primary"
           >
             {step.label}
             {status?.steps[step.id] ? ' — complete' : ''}
@@ -363,10 +370,12 @@ export function GuidedSetupPage() {
       ) : error && !status ? (
         <p role="alert">{error}</p>
       ) : isComplete ? (
-        <div>
+        <div className="space-y-4 rounded-xl border bg-card p-6 shadow-sm">
           <h2>Farm setup complete</h2>
           <p>Your farm is ready to use.</p>
-          <Link to="/dashboard">Go to dashboard</Link>
+          <Button asChild>
+            <Link to="/dashboard">Go to dashboard</Link>
+          </Button>
         </div>
       ) : (
         <>
@@ -374,7 +383,7 @@ export function GuidedSetupPage() {
             Step {stepIndex + 1} of {STEPS.length}: {activeStep.label}
           </h2>
           {error && <p role="alert">{error}</p>}
-          <form onSubmit={handleSubmit}>
+          <form className="page-form" onSubmit={handleSubmit}>
             {progress.currentStep === 'farm' && (
               <>
                 <label htmlFor="setup-farm-name">Farm name</label>
@@ -557,19 +566,24 @@ export function GuidedSetupPage() {
               </>
             )}
 
-            <div>
+            <div className="flex flex-wrap gap-2">
               {stepIndex > 0 && (
-                <button type="button" onClick={goBack} disabled={submitting}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={goBack}
+                  disabled={submitting}
+                >
                   Back
-                </button>
+                </Button>
               )}
-              <button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting}>
                 {submitting
                   ? 'Saving…'
                   : progress.currentStep === 'initialCycle'
                     ? 'Complete setup'
                     : 'Continue'}
-              </button>
+              </Button>
             </div>
           </form>
         </>

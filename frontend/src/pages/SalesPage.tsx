@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { EmptyState } from '../components/EmptyState';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { formatAmount } from '../services/harvestSaleRules';
 import { useServices } from '../services/servicesContext';
@@ -170,8 +171,11 @@ export function SalesPage() {
 
   if (loaded && cycles.length === 0) {
     return (
-      <section>
-        <h1>Sales</h1>
+      <section className="page-section">
+        <div className="space-y-1">
+          <h1>Sales</h1>
+          <p>Record sales against harvested crop quantities.</p>
+        </div>
         {loadError ? <p role="alert">{loadError}</p> : null}
         <EmptyState message="No crop cycles yet.">
           <p>Create a crop cycle before recording sales.</p>
@@ -181,13 +185,21 @@ export function SalesPage() {
   }
 
   return (
-    <section>
-      <h1>Sales</h1>
+    <section className="page-section">
+      <div className="space-y-1">
+        <h1>Sales</h1>
+        <p>Record sales against harvested crop quantities.</p>
+      </div>
 
       {loadError ? <p role="alert">{loadError}</p> : null}
       {confirmation ? <p role="status">{confirmation}</p> : null}
 
-      <form aria-label="Record sale" onSubmit={handleSubmit} noValidate>
+      <form
+        className="page-form"
+        aria-label="Record sale"
+        onSubmit={handleSubmit}
+        noValidate
+      >
         {formError ? <p role="alert">{formError}</p> : null}
 
         <div>
@@ -333,29 +345,32 @@ export function SalesPage() {
           ) : null}
         </div>
 
-        <button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting}>
           {submitting ? 'Saving…' : 'Save sale'}
-        </button>
+        </Button>
       </form>
 
       {selectedCycle ? (
-        <>
+        <div className="space-y-4">
           <h2>Sales for {selectedCycle.label}</h2>
 
           {cycleSales.length === 0 ? (
             <EmptyState message="No sales for this cycle yet.">
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => quantityRef.current?.focus()}
               >
                 Record sale
-              </button>
+              </Button>
             </EmptyState>
           ) : (
-            <ul>
+            <ul className="record-list">
               {cycleSales.map((sale) => (
                 <li key={sale.id}>
-                  <span>{customerName(sale.customerId)}</span>
+                  <span className="font-medium">
+                    {customerName(sale.customerId)}
+                  </span>
                   <span>
                     {formatAmount(sale.quantity)}{' '}
                     {unitName(
@@ -369,7 +384,7 @@ export function SalesPage() {
               ))}
             </ul>
           )}
-        </>
+        </div>
       ) : (
         <p>Select a crop cycle to see its sales.</p>
       )}

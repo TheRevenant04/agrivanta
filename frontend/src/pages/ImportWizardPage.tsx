@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent } from 'react';
+import { Button } from '../components/ui/button';
 import { apiFieldError, toErrorMessage } from '../lib/errors';
 import { useServices } from '../services/servicesContext';
 import type {
@@ -7,7 +8,6 @@ import type {
   ImportRowError,
   ImportValidRow,
 } from '../services/types';
-import './ImportWizardPage.css';
 
 type ImportField =
   | 'date'
@@ -316,8 +316,11 @@ export function ImportWizardPage() {
   const columns = FIELD_DEFINITIONS[entityType];
 
   return (
-    <section className="import-wizard">
-      <h1>Import records</h1>
+    <section className="page-section import-wizard">
+      <div className="space-y-1">
+        <h1>Import records</h1>
+        <p>Upload a CSV or Excel file, review rows, then confirm the import.</p>
+      </div>
 
       {importedCount !== null ? (
         <div className="import-success" role="status">
@@ -326,7 +329,7 @@ export function ImportWizardPage() {
             Successfully imported {importedCount}{' '}
             {importedCount === 1 ? 'row' : 'rows'}.
           </p>
-          <button
+          <Button
             type="button"
             onClick={() => {
               setImportedCount(null);
@@ -335,12 +338,12 @@ export function ImportWizardPage() {
             }}
           >
             Import another file
-          </button>
+          </Button>
         </div>
       ) : null}
 
       {importedCount === null && !preview ? (
-        <div>
+        <div className="page-form">
           <h2>Step 1: Choose a file</h2>
           <label>
             Records to import
@@ -360,7 +363,7 @@ export function ImportWizardPage() {
           </label>
           {file ? <p>Selected file: {file.name}</p> : null}
           {error ? <p role="alert">{error}</p> : null}
-          <button
+          <Button
             type="button"
             onClick={uploadFile}
             disabled={
@@ -368,12 +371,12 @@ export function ImportWizardPage() {
             }
           >
             {submitting ? 'Uploading…' : 'Upload and preview'}
-          </button>
+          </Button>
         </div>
       ) : null}
 
       {preview && importedCount === null ? (
-        <div>
+        <div className="page-form">
           <h2>Step 2: Review and confirm</h2>
           <p>File: {preview.fileName}</p>
           <p>
@@ -527,8 +530,10 @@ export function ImportWizardPage() {
                             <p role="status">
                               This invalid row will be skipped and not imported.
                             </p>
-                            <button
+                            <Button
                               type="button"
+                              variant="outline"
+                              size="sm"
                               onClick={() =>
                                 setSkippedRows((existing) => {
                                   const next = new Set(existing);
@@ -538,7 +543,7 @@ export function ImportWizardPage() {
                               }
                             >
                               Undo skip row {entry.row}
-                            </button>
+                            </Button>
                           </div>
                         ) : remainingErrors.length ? (
                           <>
@@ -556,8 +561,10 @@ export function ImportWizardPage() {
                                   </li>
                                 ))}
                             </ul>
-                            <button
+                            <Button
                               type="button"
+                              variant="outline"
+                              size="sm"
                               onClick={() => {
                                 setSkippedRows((existing) =>
                                   new Set(existing).add(entry.row),
@@ -570,7 +577,7 @@ export function ImportWizardPage() {
                               }}
                             >
                               Skip invalid row {entry.row}
-                            </button>
+                            </Button>
                           </>
                         ) : entry.status === 'invalid' ? (
                           'Corrected'
@@ -585,10 +592,15 @@ export function ImportWizardPage() {
             </table>
           </div>
           <div className="import-actions">
-            <button type="button" onClick={cancelPreview} disabled={submitting}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={cancelPreview}
+              disabled={submitting}
+            >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={confirmImport}
               disabled={submitting || hasInvalidRows || selectedRows.size === 0}
@@ -596,7 +608,7 @@ export function ImportWizardPage() {
               {submitting
                 ? 'Importing…'
                 : `Confirm import (${selectedRows.size} selected)`}
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
