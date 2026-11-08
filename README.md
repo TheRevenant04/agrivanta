@@ -54,6 +54,11 @@ available at `http://localhost:8000/api/`; its health endpoint is
 checks before starting Django, and for Django to become healthy before starting
 the worker.
 
+PDF report exports are not available in the default Compose image: they
+require the optional Playwright dependency and a Chromium-compatible browser,
+which the image does not include. PDF export requests return `503` without
+these dependencies.
+
 In another terminal, follow the application and worker logs with:
 
 ```bash
