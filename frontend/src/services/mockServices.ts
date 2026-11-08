@@ -147,6 +147,43 @@ export function createMockServices(
   });
 
   return {
+    reporting: {
+      async periods() {
+        requireUser();
+        return [];
+      },
+      async seasons() {
+        requireUser();
+        return [];
+      },
+      async dashboard() {
+        requireUser();
+        return {
+          currentCycleSpend: 0,
+          revenueToDate: 0,
+          unsoldProduce: [],
+          upcomingActivities: 0,
+          overdueActivities: 0,
+          lowStockItemCount: 0,
+        };
+      },
+      async report(name) {
+        requireUser();
+        if (name === 'activity-status')
+          return {
+            counts: { planned: 0, in_progress: 0, completed: 0, overdue: 0 },
+            total: 0,
+          };
+        if (name === 'inventory')
+          return { asOf: new Date().toISOString().slice(0, 10), items: [] };
+        if (name === 'budget-vs-actual') return { overall: [], categories: [] };
+        return { groupBy: 'cycle', rows: [], totals: { hours: 0, cost: 0 } };
+      },
+      async exportReport() {
+        requireUser();
+        throw new ApiError('Report exports require the HTTP API.', 501);
+      },
+    },
     auth: {
       async login(credentials: LoginCredentials) {
         const user = findByEmail(credentials.email);

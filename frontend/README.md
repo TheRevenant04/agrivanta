@@ -3,7 +3,7 @@
 The Agrivanta frontend is a Vite + React 18 + TypeScript application. It
 includes authentication and protected routes, a shared application shell,
 farm and crop-cycle setup, activity planning, inventory, expenses, payments,
-harvests, sales, unit conversions, and a dashboard.
+harvests, sales, unit conversions, a dashboard, and predefined reports.
 
 All backend access goes through the typed services layer in `src/services/`.
 The app can use browser-based mock services or an HTTP client that calls the
@@ -109,6 +109,13 @@ dashboard, farm, fields, crops, varieties, units, conversions, crop cycles,
 activities and activity templates, inventory, expenses, payments, harvests,
 and sales. Login and registration are available outside the protected
 application shell.
+
+The dashboard defaults to the current year to date. A saved reporting period
+or season selects its date range; trend points are separate KPI requests for
+sub-periods, not client-calculated financial totals. Reports use the same
+period or season selector and apply the chosen filters when requested. CSV,
+Excel, and PDF downloads use the backend export endpoints. In mock mode the
+dashboard and reports show empty data and exports require the HTTP API.
 
 Frontend tests live alongside the components and pages they cover. Vitest is
 configured with jsdom and React Testing Library; `npm run test` performs one

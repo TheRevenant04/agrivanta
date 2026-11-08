@@ -18,6 +18,7 @@ import { InventoryPage } from '../pages/InventoryPage';
 import { ImportWizardPage } from '../pages/ImportWizardPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
+import { ReportsPage } from '../pages/ReportsPage';
 import { SalesPage } from '../pages/SalesPage';
 import { UnitsPage } from '../pages/UnitsPage';
 import { VarietiesPage } from '../pages/VarietiesPage';
@@ -31,6 +32,7 @@ export function AppRoutes() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
             <Route path="/farm" element={<FarmPage />} />
             <Route path="/fields" element={<FieldsPage />} />
             <Route path="/crops" element={<CropsPage />} />

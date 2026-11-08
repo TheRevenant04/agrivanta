@@ -70,6 +70,7 @@ function withUnauthorizedHandling(
     expenses: guardDomain(services.expenses),
     payments: guardDomain(services.payments),
     imports: guardDomain(services.imports),
+    reporting: guardDomain(services.reporting),
     // Inventory domain (issue #47).
     items: guardDomain(services.items),
     movements: guardDomain(services.movements),
