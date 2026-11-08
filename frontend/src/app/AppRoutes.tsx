@@ -4,6 +4,7 @@ import { AppShell } from '../components/AppShell';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { ActivitiesPage } from '../pages/ActivitiesPage';
 import { ActivityTemplatesPage } from '../pages/ActivityTemplatesPage';
+import { ChatPage } from '../pages/ChatPage';
 // Crop cycle screens (issue #45).
 import { CropCyclesPage } from '../pages/CropCyclesPage';
 import { CropsPage } from '../pages/CropsPage';
@@ -32,6 +33,7 @@ export function AppRoutes() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/chat" element={<ChatPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/farm" element={<FarmPage />} />
             <Route path="/fields" element={<FieldsPage />} />

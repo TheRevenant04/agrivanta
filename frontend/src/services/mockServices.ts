@@ -263,6 +263,13 @@ export function createMockServices(
       requireAuth: requireUser,
     }),
 
+    chat: {
+      async ask() {
+        requireUser();
+        throw new ApiError('AI chat requires the HTTP API client.', 501);
+      },
+    },
+
     // Expense and payment domains (issue #49)
     ...createExpensePaymentMock({
       seed: options.expensePayments,

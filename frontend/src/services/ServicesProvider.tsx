@@ -80,6 +80,7 @@ function withUnauthorizedHandling(
     // Crop cycle domain (issue #45).
     cropCycles: guardDomain(services.cropCycles),
     notifications: guardDomain(services.notifications),
+    chat: guardDomain(services.chat),
   };
 }
 

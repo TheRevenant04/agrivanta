@@ -8,6 +8,7 @@ import { createImportHttp } from './importHttp';
 import { createReportingHttp } from './reportingHttp';
 import { createActivityPlanningHttp } from './activityPlanningHttp';
 import { createNotificationHttp } from './notificationHttp';
+import { createChatHttp } from './chatHttp';
 // Crop cycle domain (issue #45).
 import { createCropCycleHttp } from './cropCycleHttp';
 import {
@@ -190,6 +191,41 @@ export function createHttpServices(
     return (await response.json()) as T;
   }
 
+  async function requestStream(path: string, init: RequestInit) {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string> | undefined),
+    };
+    const token = store.getToken();
+
+    if (!token) {
+      throw new UnauthorizedError();
+    }
+
+    headers.Authorization = `Bearer ${token}`;
+
+    const response = await fetchFn(joinUrl(options.baseUrl, path), {
+      ...init,
+      headers,
+    });
+
+    if (response.status === 401) {
+      throw new UnauthorizedError();
+    }
+
+    if (!response.ok) {
+      const detail = await readErrorBody(response);
+      throw new ApiError(
+        detail.message ??
+          `Request to ${path} failed with status ${response.status}.`,
+        response.status,
+        detail.field,
+      );
+    }
+
+    return response;
+  }
+
   async function persistSession(session: AuthSession): Promise<AuthSession> {
     store.save(session);
     return session;
@@ -242,6 +278,7 @@ export function createHttpServices(
     // Activity planning domains (issue #46) share the same plumbing.
     ...createActivityPlanningHttp(request),
     ...createNotificationHttp(request),
+    ...createChatHttp(requestStream),
     // Crop cycle domain (issue #45) shares the same auth/error plumbing.
     ...createCropCycleHttp(request),
   };
