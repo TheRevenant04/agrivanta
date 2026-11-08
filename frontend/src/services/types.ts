@@ -8,6 +8,8 @@
 
 // Activity planning domain (issue #46) — types live in their own file.
 import type { ActivityPlanningServices } from './activityPlanningTypes';
+import type { ReportingServices } from './reportingTypes';
+export * from './reportingTypes';
 export * from './activityPlanningTypes';
 
 export interface User {
@@ -419,6 +421,7 @@ export interface AgrivantaServices
     InventoryServices,
     ExpensePaymentServices,
     ImportServices,
+    ReportingServices,
     HarvestSaleServices {
   auth: AuthService;
   /** Crop cycle domain (issue #45). */

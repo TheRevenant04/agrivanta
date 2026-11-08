@@ -5,6 +5,7 @@ import { createHarvestSaleHttp } from './harvestSaleHttp';
 import { createExpensePaymentHttp } from './expensePaymentHttp';
 import { createInventoryHttp } from './inventoryHttp';
 import { createImportHttp } from './importHttp';
+import { createReportingHttp } from './reportingHttp';
 import { createActivityPlanningHttp } from './activityPlanningHttp';
 // Crop cycle domain (issue #45).
 import { createCropCycleHttp } from './cropCycleHttp';
@@ -85,6 +86,7 @@ export function createHttpServices(
     path: string,
     init: RequestInit,
     authenticated: boolean,
+    binary = false,
   ): Promise<T> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -126,7 +128,7 @@ export function createHttpServices(
       return undefined as T;
     }
 
-    return (await response.json()) as T;
+    return (binary ? await response.blob() : await response.json()) as T;
   }
 
   /**
@@ -231,6 +233,9 @@ export function createHttpServices(
     // Expense and payment domains (issue #49)
     ...createExpensePaymentHttp(request, upload),
     ...createImportHttp(request, upload),
+    ...createReportingHttp(request, (path) =>
+      request<Blob>(path, { method: 'GET' }, true, true),
+    ),
     // Inventory domain (issue #47) shares the same plumbing too.
     ...createInventoryHttp(request),
     // Activity planning domains (issue #46) share the same plumbing.
