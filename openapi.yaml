@@ -2192,9 +2192,10 @@ components:
       description: >
         Completion is derived from the current farm profile, at least one
         field, at least one crop with a variety, and at least one crop
-        cycle. The crops step therefore remains incomplete until a variety
-        exists for a farm crop. A farm setup step is not persisted separately
-        from its domain data.
+        cycle. A valid generated farm profile counts as complete; changing
+        its name or currency is optional. The crops step therefore remains
+        incomplete until a variety exists for a farm crop. Setup steps are
+        not persisted separately from their domain data.
       required: [steps, complete, nextStep]
       properties:
         steps:

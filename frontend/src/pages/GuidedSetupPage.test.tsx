@@ -30,22 +30,41 @@ async function renderGuidedSetup(
 }
 
 describe('GuidedSetupPage', () => {
+  it('accepts the generated farm name without looping back to the farm step', async () => {
+    const { services } = await renderGuidedSetup();
+    expect(
+      await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' }),
+    ).toBeInTheDocument();
+    await expect(services.setupStatus.get()).resolves.toMatchObject({
+      steps: { farm: true, fields: false },
+      nextStep: 'fields',
+    });
+  });
+
   it('submits each setup step and completes after successful responses', async () => {
     const { services } = await renderGuidedSetup();
 
     expect(
-      await screen.findByRole('heading', { name: 'Step 1 of 4: Farm' }),
+      await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Guided setup' })).toHaveAttribute(
       'href',
       '/setup',
     );
     const steps = within(screen.getByRole('list', { name: 'Setup steps' }));
-    expect(steps.getByText('Farm')).toBeInTheDocument();
+    expect(steps.getByText(/^Farm/)).toBeInTheDocument();
     expect(steps.getByText('Fields')).toBeInTheDocument();
     expect(steps.getByText('Crops')).toBeInTheDocument();
     expect(steps.getByText('Initial crop cycle')).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     fireEvent.change(screen.getByLabelText('Farm name'), {
       target: { value: 'Willow Creek' },
     });
@@ -119,7 +138,8 @@ describe('GuidedSetupPage', () => {
         new ApiError('Farm update failed', 400),
       );
     });
-    await screen.findByRole('heading', { name: 'Step 1 of 4: Farm' });
+    await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
     fireEvent.change(screen.getByLabelText('Farm name'), {
       target: { value: 'Willow Creek' },
@@ -142,12 +162,6 @@ describe('GuidedSetupPage', () => {
         new ApiError('Variety could not be saved.', 400),
       );
     });
-    await screen.findByRole('heading', { name: 'Step 1 of 4: Farm' });
-
-    fireEvent.change(screen.getByLabelText('Farm name'), {
-      target: { value: 'Willow Creek' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' });
     fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'North Field' },
@@ -183,11 +197,6 @@ describe('GuidedSetupPage', () => {
     });
     expect((await services.setupStatus.get()).steps.crops).toBe(false);
 
-    await screen.findByRole('heading', { name: 'Step 1 of 4: Farm' });
-    fireEvent.change(screen.getByLabelText('Farm name'), {
-      target: { value: 'Willow Creek' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' });
     fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'North Field' },
@@ -215,14 +224,39 @@ describe('GuidedSetupPage', () => {
     });
   });
 
-  it('preserves form data when going back and resumes the current step after reload', async () => {
-    const { services, store } = await renderGuidedSetup();
-    await screen.findByRole('heading', { name: 'Step 1 of 4: Farm' });
+  it('updates an existing field when returning to the fields step', async () => {
+    const { services } = await renderGuidedSetup();
+    await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' });
 
-    fireEvent.change(screen.getByLabelText('Farm name'), {
-      target: { value: 'Willow Creek' },
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'North Field' },
+    });
+    fireEvent.change(screen.getByLabelText('Area'), {
+      target: { value: '12.5' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('heading', { name: 'Step 3 of 4: Crops' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByLabelText('Field name')).toHaveValue('North Field');
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'South Field' },
+    });
+    fireEvent.change(screen.getByLabelText('Area'), {
+      target: { value: '20' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Step 3 of 4: Crops' }),
+    ).toBeInTheDocument();
+    await expect(services.fields.list()).resolves.toMatchObject([
+      { id: 'field-1', name: 'South Field', area: 20 },
+    ]);
+  });
+
+  it('preserves form data when going back and resumes the current step after reload', async () => {
+    const { services, store } = await renderGuidedSetup();
     await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' });
     fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'North Field' },
@@ -232,7 +266,9 @@ describe('GuidedSetupPage', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-    expect(screen.getByLabelText('Farm name')).toHaveValue('Willow Creek');
+    fireEvent.change(screen.getByLabelText('Farm name'), {
+      target: { value: 'Willow Creek' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByLabelText('Field name')).toHaveValue(
       'North Field',

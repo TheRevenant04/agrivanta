@@ -172,12 +172,28 @@ export function GuidedSetupPage() {
             ? cropWithVariety?.cropId
             : cropItems[0]?.id) ||
           '';
+        const savedFieldId = fieldItems.some(
+          (field) => field.id === saved?.draft.fieldId,
+        )
+          ? saved?.draft.fieldId
+          : undefined;
+        const fieldId = savedFieldId || fieldItems[0]?.id || '';
+        const selectedField = fieldItems.find((field) => field.id === fieldId);
         const draft = {
           ...(saved?.draft ?? EMPTY_DRAFT),
           farmName: saved?.draft.farmName || farmInfo.name,
           reportingCurrency:
             saved?.draft.reportingCurrency || farmInfo.reportingCurrency,
-          fieldId: saved?.draft.fieldId || fieldItems[0]?.id || '',
+          fieldId,
+          fieldName:
+            saved?.draft.fieldName ||
+            (savedFieldId ? '' : (selectedField?.name ?? '')),
+          fieldArea:
+            saved?.draft.fieldArea ||
+            (savedFieldId ? '' : String(selectedField?.area ?? '')),
+          fieldNotes:
+            saved?.draft.fieldNotes ||
+            (savedFieldId ? '' : (selectedField?.notes ?? '')),
           cropId,
           varietyId:
             saved?.draft.varietyId ||
@@ -238,14 +254,19 @@ export function GuidedSetupPage() {
           reportingCurrency: updatedDraft.reportingCurrency,
         });
       } else if (step === 'fields') {
-        const createdField = await services.fields.create({
+        const fieldInput = {
           name: updatedDraft.fieldName,
           area: updatedDraft.fieldArea,
           notes: updatedDraft.fieldNotes,
-        });
-        updatedFields = [...fields, createdField];
+        };
+        const field = updatedDraft.fieldId
+          ? await services.fields.update(updatedDraft.fieldId, fieldInput)
+          : await services.fields.create(fieldInput);
+        updatedFields = updatedDraft.fieldId
+          ? fields.map((item) => (item.id === field.id ? field : item))
+          : [...fields, field];
         setFields(updatedFields);
-        updatedDraft = { ...updatedDraft, fieldId: createdField.id };
+        updatedDraft = { ...updatedDraft, fieldId: field.id };
       } else if (step === 'crops') {
         let cropId = updatedDraft.cropId;
         if (!cropId) {

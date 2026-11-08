@@ -82,7 +82,9 @@ export function createFarmSetupMock(
     seed.farm === undefined
       ? { ...DEFAULT_FARM }
       : seed.farm && { ...seed.farm };
-  let farmConfigured = Boolean(farm && farm.name !== DEFAULT_FARM.name);
+  let farmConfigured = Boolean(
+    farm?.name.trim() && farm.reportingCurrency.length === 3,
+  );
 
   const fields: Field[] = (seed.fields ?? []).map((item) => ({ ...item }));
   const crops: Crop[] = (seed.crops ?? []).map((item) => ({ ...item }));

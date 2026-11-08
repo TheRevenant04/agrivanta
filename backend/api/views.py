@@ -650,11 +650,8 @@ class FarmView(APIView):
 class FarmSetupStatusView(APIView):
     def get(self, request):
         farm = get_farm(request.user)
-        default_farm_name = (
-            f"{request.user.name}'s Farm" if request.user.name else "My Farm"
-        )
         steps = {
-            "farm": farm.name.strip() != default_farm_name,
+            "farm": bool(farm.name.strip() and len(farm.reporting_currency) == 3),
             "fields": farm.fields.exists(),
             "crops": farm.crops.filter(varieties__farm=farm).exists(),
             "initialCycle": farm.crop_cycles.exists(),

@@ -17,14 +17,22 @@ def test_setup_status_reports_each_step_and_completion(client):
     assert incomplete.status_code == 200
     assert incomplete.data == {
         "steps": {
-            "farm": False,
+            "farm": True,
             "fields": False,
             "crops": False,
             "initialCycle": False,
         },
         "complete": False,
-        "nextStep": "farm",
+        "nextStep": "fields",
     }
+
+    unchanged_default = client.put(
+        "/api/farm",
+        {"name": "Olive Owner's Farm", "reportingCurrency": "USD"},
+        format="json",
+    )
+    assert unchanged_default.status_code == 200
+    assert client.get(URL).data["nextStep"] == "fields"
 
     saved_farm = client.put(
         "/api/farm",
@@ -101,5 +109,5 @@ def test_setup_status_only_counts_the_authenticated_users_farm(client):
     )
     other_status = other_owner.get(URL)
     assert other_status.status_code == 200
-    assert other_status.data["nextStep"] == "farm"
+    assert other_status.data["nextStep"] == "fields"
     assert other_status.data["steps"]["fields"] is False
