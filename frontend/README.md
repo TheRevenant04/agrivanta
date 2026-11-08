@@ -43,6 +43,20 @@ consumes it via `useServices()` from `src/services/servicesContext.ts`.
 - `src/services/createServices.ts` — selects the implementation from
   `VITE_API_CLIENT`.
 
+### OpenAPI types and client
+
+Run `npm run api:generate` from `frontend/` after changing the checked-in
+OpenAPI contract. It generates TypeScript schemas and endpoint operations into
+`src/services/generated/`; those files are committed so type checking does not
+depend on running the generator.
+
+The generator currently reads `../openapi.yaml`. This repository does not yet
+expose or document a backend OpenAPI endpoint, and the checked-in contract
+covers only some of the services (chat, imports, notifications, and reporting
+are absent). Consequently this is a local-contract workflow, not a live
+backend-schema sync; a backend-owned schema endpoint and complete schema
+coverage are still needed to finish issue #68.
+
 ## Requirements
 
 - **Node.js 24.x** — pinned in both [`frontend/.nvmrc`](.nvmrc) and the

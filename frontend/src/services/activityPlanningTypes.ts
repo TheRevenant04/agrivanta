@@ -7,90 +7,60 @@
  * feature; `types.ts` re-exports everything and folds
  * {@link ActivityPlanningServices} into `AgrivantaServices`.
  */
+import type {
+  Activity as ApiActivity,
+  ActivityCategory as ApiActivityCategory,
+  ActivityInput as ApiActivityInput,
+  ActivityInputNeed as ApiActivityInputNeed,
+  ActivityResourceNeeds as ApiActivityResourceNeeds,
+  ActivityStatus as ApiActivityStatus,
+  ActivityType as ApiActivityType,
+  ActivityTypeInput as ApiActivityTypeInput,
+  CycleRef,
+  ResourceNeedsInput as ApiResourceNeedsInput,
+  SavedInputNeed as ApiSavedInputNeed,
+} from './generated/types.gen';
 
 /** Lifecycle statuses an activity can hold, as the API reports them. */
-export type ActivityStatus =
-  'planned' | 'in_progress' | 'completed' | 'overdue';
+export type ActivityStatus = ApiActivityStatus;
 
 /** Categories a template can belong to; custom types use `custom`. */
-export type ActivityCategory =
-  | 'land preparation'
-  | 'planting'
-  | 'fertilizing'
-  | 'spraying'
-  | 'harvesting'
-  | 'custom';
+export type ActivityCategory = ApiActivityCategory | 'custom';
 
 /** A standard or custom template activities are created from. */
-export interface ActivityType {
-  id: string;
-  name: string;
-  category: ActivityCategory;
-  /** True for the templates seeded on farm creation. */
-  standard: boolean;
-}
+export type ActivityType = Pick<
+  ApiActivityType,
+  'id' | 'name' | 'category' | 'standard'
+>;
 
-export interface ActivityTypeInput {
-  name: string;
-  /** Sent as typed so an unknown category reaches the backend's rule. */
-  category: string;
-}
+export type ActivityTypeInput = Pick<ApiActivityTypeInput, 'name' | 'category'>;
 
 /**
  * Minimal display reference for a crop cycle, used by the cycle picker on
  * the activities screen. The full crop cycle model belongs to the crop
  * cycle screens (issue #45).
  */
-export interface ActivityCycleRef {
-  id: string;
-  label: string;
-}
+export type ActivityCycleRef = CycleRef;
 
 /** A planned input line on an activity, before the backend normalises it. */
-export interface ActivityInputNeed {
-  itemName: string;
-  quantity: string | number;
-}
+export type ActivityInputNeed = ApiActivityInputNeed;
 
 /** A planned input line as stored (normalised quantity, stable id). */
-export interface SavedInputNeed {
-  id: string;
-  itemName: string;
-  quantity: number;
-}
+export type SavedInputNeed = ApiSavedInputNeed;
 
 /** Planned resource needs captured on an activity. */
-export interface ActivityResourceNeeds {
-  inputs: SavedInputNeed[];
-  labourHours: number;
-  equipment: string;
-}
+export type ActivityResourceNeeds = ApiActivityResourceNeeds;
 
 /** Resource needs as submitted for editing; strings so rules can reject. */
-export interface ResourceNeedsInput {
-  inputs: ActivityInputNeed[];
-  labourHours: string | number;
-  equipment: string;
-}
+export type ResourceNeedsInput = ApiResourceNeedsInput;
 
-export interface Activity {
-  id: string;
-  cycleId: string;
-  typeId: string;
-  /** ISO calendar date (`YYYY-MM-DD`). */
-  plannedDate: string;
-  status: ActivityStatus;
-  description?: string;
-  resourceNeeds: ActivityResourceNeeds;
-}
+export type Activity = Pick<
+  ApiActivity,
+  'id' | 'cycleId' | 'typeId' | 'plannedDate' | 'status' | 'resourceNeeds'
+> &
+  Partial<Pick<ApiActivity, 'description'>>;
 
-export interface ActivityInput {
-  cycleId: string;
-  typeId: string;
-  /** Sent as typed so a blank/invalid date reaches the backend's rule. */
-  plannedDate: string;
-  description?: string;
-}
+export type ActivityInput = ApiActivityInput;
 
 export interface ActivityTypeService {
   list(): Promise<ActivityType[]>;

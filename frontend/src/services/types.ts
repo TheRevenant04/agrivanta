@@ -11,28 +11,57 @@ import type { ActivityPlanningServices } from './activityPlanningTypes';
 import type { ReportingServices } from './reportingTypes';
 export * from './reportingTypes';
 export * from './activityPlanningTypes';
+import type {
+  AuthSession as ApiAuthSession,
+  Attachment as ApiAttachment,
+  BaseMeasureCategory as ApiBaseMeasureCategory,
+  ConversionInput as ApiConversionInput,
+  ConversionQuery as ApiConversionQuery,
+  ConversionResult as ApiConversionResult,
+  Crop as ApiCrop,
+  CropCycle as ApiCropCycle,
+  CropCycleInput as ApiCropCycleInput,
+  CropCycleStatus as ApiCropCycleStatus,
+  CropCycleType as ApiCropCycleType,
+  CropCycleUpdateInput as ApiCropCycleUpdateInput,
+  CropInput as ApiCropInput,
+  Expense as ApiExpense,
+  ExpenseCategory as ApiExpenseCategory,
+  ExpenseInput as ApiExpenseInput,
+  ExpenseStatus as ApiExpenseStatus,
+  Farm as ApiFarm,
+  FarmInput as ApiFarmInput,
+  FarmSetupStatus as ApiFarmSetupStatus,
+  Field as ApiField,
+  FieldInput as ApiFieldInput,
+  Harvest as ApiHarvest,
+  HarvestInput as ApiHarvestInput,
+  InventoryItem as ApiInventoryItem,
+  InventoryItemInput as ApiInventoryItemInput,
+  LoginCredentials as ApiLoginCredentials,
+  Payment as ApiPayment,
+  PaymentInput as ApiPaymentInput,
+  PaymentType as ApiPaymentType,
+  RegisterInput as ApiRegisterInput,
+  Sale as ApiSale,
+  SaleCustomer as ApiSaleCustomer,
+  SaleInput as ApiSaleInput,
+  StockMovement as ApiStockMovement,
+  StockMovementInput as ApiStockMovementInput,
+  StockMovementType as ApiStockMovementType,
+  Unit as ApiUnit,
+  UnitConversion as ApiUnitConversion,
+  UnitInput as ApiUnitInput,
+  User as ApiUser,
+  Variety as ApiVariety,
+  VarietyInput as ApiVarietyInput,
+  CycleRef as ApiCycleRef,
+} from './generated/types.gen';
 
-export interface User {
-  id: string;
-  email: string;
-  role: string;
-}
-
-export interface AuthSession {
-  token: string;
-  user: User;
-}
-
-export interface LoginCredentials {
-  email: string;
-  password: string;
-}
-
-export interface RegisterInput {
-  name?: string;
-  email: string;
-  password: string;
-}
+export type User = ApiUser;
+export type AuthSession = ApiAuthSession;
+export type LoginCredentials = ApiLoginCredentials;
+export type RegisterInput = ApiRegisterInput;
 
 export interface AuthService {
   login(credentials: LoginCredentials): Promise<AuthSession>;
@@ -69,105 +98,30 @@ export interface ChatServices {
 // ---------------------------------------------------------------------------
 
 /** Allowed base-measure categories for a unit of measure. */
-export type BaseMeasureCategory = 'mass' | 'volume' | 'count';
+export type BaseMeasureCategory = ApiBaseMeasureCategory;
 
-export interface Farm {
-  id: string;
-  name: string;
-  /** Three-letter reporting currency code, e.g. `USD`. */
-  reportingCurrency: string;
-}
+export type FarmSetupStepId = Exclude<ApiFarmSetupStatus['nextStep'], null>;
 
-export interface FarmInput {
-  name: string;
-  reportingCurrency: string;
-}
-
-export type FarmSetupStepId = 'farm' | 'fields' | 'crops' | 'initialCycle';
-
-export interface FarmSetupStatus {
-  steps: Record<FarmSetupStepId, boolean>;
-  complete: boolean;
-  nextStep: FarmSetupStepId | null;
-}
+export type FarmSetupStatus = ApiFarmSetupStatus;
 
 export interface FarmSetupStatusService {
   get(): Promise<FarmSetupStatus>;
 }
 
-export interface Field {
-  id: string;
-  farmId: string;
-  name: string;
-  area: number;
-  notes?: string;
-}
-
-export interface FieldInput {
-  name: string;
-  /** Sent as typed so a non-numeric value reaches the backend's rule. */
-  area: string | number;
-  notes?: string;
-}
-
-export interface Crop {
-  id: string;
-  name: string;
-}
-
-export interface CropInput {
-  name: string;
-}
-
-export interface Variety {
-  id: string;
-  cropId: string;
-  name: string;
-}
-
-export interface VarietyInput {
-  cropId: string;
-  name: string;
-}
-
-export interface Unit {
-  id: string;
-  name: string;
-  baseMeasure: BaseMeasureCategory;
-}
-
-export interface UnitInput {
-  name: string;
-  /** Sent as typed so a missing/invalid category reaches the backend rule. */
-  baseMeasure: string;
-}
-
-export interface UnitConversion {
-  id: string;
-  fromUnitId: string;
-  toUnitId: string;
-  factor: number;
-}
-
-export interface ConversionInput {
-  fromUnitId: string;
-  toUnitId: string;
-  factor: string | number;
-}
-
-export interface ConversionQuery {
-  fromUnitId: string;
-  toUnitId: string;
-  quantity: string | number;
-}
-
-export interface ConversionResult {
-  fromUnitId: string;
-  toUnitId: string;
-  quantity: number;
-  factor: number;
-  converted: number;
-}
+export type Farm = ApiFarm;
+export type FarmInput = ApiFarmInput;
+export type Field = ApiField;
+export type FieldInput = ApiFieldInput;
+export type Crop = ApiCrop;
+export type CropInput = ApiCropInput;
+export type Variety = ApiVariety;
+export type VarietyInput = ApiVarietyInput;
+export type Unit = ApiUnit;
+export type UnitInput = Pick<ApiUnitInput, 'name'> & { baseMeasure: string };
+export type UnitConversion = ApiUnitConversion;
+export type ConversionInput = ApiConversionInput;
+export type ConversionQuery = ApiConversionQuery;
+export type ConversionResult = ApiConversionResult;
 
 export interface FarmService {
   get(): Promise<Farm>;
@@ -210,41 +164,11 @@ export interface ConversionService {
 // Inventory domains (inventory items and stock movements)
 // ---------------------------------------------------------------------------
 
-export interface InventoryItem {
-  id: string;
-  name: string;
-  unitId: string;
-  reorderLevel: number;
-  /** Current quantity derived from stock movements (read-only). */
-  currentQuantity: number;
-}
-
-export interface InventoryItemInput {
-  name: string;
-  unitId: string;
-  /** Sent as typed so backend rules can be mirrored. */
-  reorderLevel: string | number;
-}
-
-export type StockMovementType = 'purchase' | 'usage' | 'adjustment';
-
-export interface StockMovement {
-  id: string;
-  itemId: string;
-  type: StockMovementType;
-  quantity: number;
-  date?: string;
-  note?: string;
-}
-
-export interface StockMovementInput {
-  itemId: string;
-  type: StockMovementType;
-  /** Sent as typed so backend rules can be mirrored. */
-  quantity: string | number;
-  date?: string;
-  note?: string;
-}
+export type InventoryItem = ApiInventoryItem;
+export type InventoryItemInput = ApiInventoryItemInput;
+export type StockMovementType = ApiStockMovementType;
+export type StockMovement = ApiStockMovement;
+export type StockMovementInput = ApiStockMovementInput;
 
 export interface InventoryItemService {
   list(): Promise<InventoryItem[]>;
@@ -272,64 +196,19 @@ export interface FarmSetupServices {
 // Expenses and payments (issues #49, #20, #23, #24)
 // ---------------------------------------------------------------------------
 
-/** The backend's expense categories (task #20). */
-export type ExpenseCategory =
-  'inputs' | 'labour' | 'equipment' | 'overhead' | 'other';
-
 /** Posted records are immutable; drafts may still be edited or deleted. */
-export type ExpenseStatus = 'draft' | 'posted';
+export type ExpenseCategory = ApiExpenseCategory;
+export type ExpenseStatus = ApiExpenseStatus;
 
 /** Direction of a payment (task #23). */
-export type PaymentType = 'received' | 'paid';
+export type PaymentType = ApiPaymentType;
 
 /** A receipt or invoice file linked to an expense (task #24). */
-export interface Attachment {
-  id: string;
-  /** The uploaded file name, shown on the saved expense. */
-  name: string;
-  url?: string;
-}
-
-export interface Expense {
-  id: string;
-  category: ExpenseCategory;
-  amount: number;
-  date: string;
-  supplier?: string | null;
-  status: ExpenseStatus;
-  attachments?: Attachment[];
-  notes?: string | null;
-}
-
-export interface ExpenseInput {
-  category: ExpenseCategory;
-  /** Sent as typed so the backend rules can reject a missing amount. */
-  amount: string | number;
-  date: string;
-  /** Optional counterparty; the backend allows an expense without one. */
-  supplier?: string;
-}
-
-export interface Payment {
-  id: string;
-  type: PaymentType;
-  amount: number;
-  date: string;
-  linkedExpenseId?: string | null;
-  linkedSaleId?: string | null;
-  reference?: string | null;
-}
-
-export interface PaymentInput {
-  type: PaymentType;
-  /** Sent as typed so the backend rules can reject a missing amount. */
-  amount: string | number;
-  date: string;
-  /** A payment may link to an expense, a sale, or neither. */
-  linkedExpenseId?: string;
-  linkedSaleId?: string;
-  reference?: string;
-}
+export type Attachment = ApiAttachment;
+export type Expense = ApiExpense;
+export type ExpenseInput = ApiExpenseInput;
+export type Payment = ApiPayment;
+export type PaymentInput = ApiPaymentInput;
 
 export interface ExpenseService {
   list(): Promise<Expense[]>;
@@ -549,55 +428,13 @@ export function isApiError(error: unknown): error is ApiError {
  * cycle pickers. The full crop cycle model belongs to the crop cycle screens
  * (issue #45), so this domain only needs an id and a human-readable label.
  */
-export interface HarvestCycleRef {
-  id: string;
-  label: string;
-}
+export type HarvestCycleRef = ApiCycleRef;
 
-export interface Harvest {
-  id: string;
-  cycleId: string;
-  quantity: number;
-  unitId: string;
-  /** ISO calendar date (`YYYY-MM-DD`). */
-  date: string;
-}
-
-export interface HarvestInput {
-  cycleId: string;
-  /** Sent as typed so a blank/invalid quantity reaches the backend rule. */
-  quantity: string | number;
-  unitId: string;
-  /** Sent as typed so a blank/invalid date reaches the backend rule. */
-  date: string;
-}
-
-/** A customer profile the sale form can pick from (backend task #19). */
-export interface SaleCustomer {
-  id: string;
-  name: string;
-}
-
-export interface Sale {
-  id: string;
-  customerId: string;
-  /** The harvest this sale draws from; its cycle scopes the sale list. */
-  harvestId: string;
-  quantity: number;
-  unitPrice: number;
-  /** ISO calendar date (`YYYY-MM-DD`). */
-  date: string;
-  /** Quantity × unit price, computed by the backend (issue #29). */
-  revenue: number;
-}
-
-export interface SaleInput {
-  customerId: string;
-  harvestId: string;
-  quantity: string | number;
-  unitPrice: string | number;
-  date: string;
-}
+export type Harvest = ApiHarvest;
+export type HarvestInput = ApiHarvestInput;
+export type SaleCustomer = ApiSaleCustomer;
+export type Sale = ApiSale;
+export type SaleInput = ApiSaleInput;
 
 export interface HarvestService {
   /** Crop cycles the farm can record harvests against, for the picker. */
@@ -628,45 +465,33 @@ export interface HarvestSaleServices {
  * Lifecycle state of a crop cycle. Closed cycles are locked
  * (`_docs/plan.md` §3.1); reopening them is out of scope for now.
  */
-export type CropCycleStatus = 'open' | 'closed';
-export type CropCycleType = 'annual' | 'perennial';
-
-export interface CropCycle {
-  id: string;
-  fieldId: string;
-  cropId: string;
+export type CropCycleStatus = ApiCropCycleStatus;
+export type CropCycleType = ApiCropCycleType;
+export type CropCycle = Pick<
+  ApiCropCycle,
+  | 'id'
+  | 'fieldId'
+  | 'cropId'
+  | 'startDate'
+  | 'endDate'
+  | 'status'
+  | 'expectedYield'
+  | 'expectedPrice'
+> &
+  Partial<Pick<ApiCropCycle, 'cycleType'>> & { varietyId: string };
+export type CropCycleInput = Pick<
+  ApiCropCycleInput,
+  'fieldId' | 'cropId' | 'startDate' | 'endDate'
+> & {
   varietyId: string;
-  cycleType?: CropCycleType | null;
-  /** ISO calendar date (`YYYY-MM-DD`) the cycle starts on. */
-  startDate: string;
-  /** Optional ISO calendar date the cycle ended on. */
-  endDate?: string;
-  status: CropCycleStatus;
-  expectedYield?: number;
-  expectedPrice?: number;
-}
-
-export interface CropCycleInput {
-  fieldId: string;
-  cropId: string;
-  varietyId: string;
-  cycleType?: CropCycleType;
-  /**
-   * Sent as a raw string so a blank value reaches the backend's
-   * "start date is required" rule.
-   */
-  startDate: string;
-  endDate?: string;
-  /** Sent as typed so a blank clears and invalid values reach the backend. */
-  expectedYield?: string | number;
-  expectedPrice?: string | number;
-}
-
-/** Only the forecast amounts can be edited after a cycle is created. */
-export interface CropCycleUpdateInput {
-  expectedYield?: string | number;
-  expectedPrice?: string | number;
-}
+  cycleType?: ApiCropCycleInput['cycleType'];
+  expectedYield?: NonNullable<ApiCropCycleInput['expectedYield']>;
+  expectedPrice?: NonNullable<ApiCropCycleInput['expectedPrice']>;
+};
+export type CropCycleUpdateInput = {
+  expectedYield?: NonNullable<ApiCropCycleUpdateInput['expectedYield']>;
+  expectedPrice?: NonNullable<ApiCropCycleUpdateInput['expectedPrice']>;
+};
 
 export interface CropCycleService {
   /** When `fieldId` is given, only that field's cycles are returned. */
