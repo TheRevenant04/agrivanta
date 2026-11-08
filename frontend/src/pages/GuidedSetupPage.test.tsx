@@ -14,7 +14,7 @@ import { ApiError, type AgrivantaServices } from '../services/types';
 afterEach(cleanup);
 
 async function renderGuidedSetup(
-  configure?: (services: AgrivantaServices) => void,
+  configure?: (services: AgrivantaServices) => void | Promise<void>,
 ) {
   window.localStorage.clear();
   const store = createSessionStore(window.localStorage);
@@ -23,7 +23,7 @@ async function renderGuidedSetup(
     email: MOCK_USERS[0].email,
     password: MOCK_USERS[0].password,
   });
-  configure?.(services);
+  await configure?.(services);
   window.history.pushState({}, '', '/setup');
   render(<App services={services} store={store} />);
   return { services, store };
@@ -175,6 +175,44 @@ describe('GuidedSetupPage', () => {
     });
     await expect(services.crops.list()).resolves.toHaveLength(1);
     await expect(services.varieties.list()).resolves.toHaveLength(1);
+  });
+
+  it('creates a variety for an existing crop before advancing setup', async () => {
+    const { services } = await renderGuidedSetup(async (mockServices) => {
+      await mockServices.crops.create({ name: 'Existing Wheat' });
+    });
+    expect((await services.setupStatus.get()).steps.crops).toBe(false);
+
+    await screen.findByRole('heading', { name: 'Step 1 of 4: Farm' });
+    fireEvent.change(screen.getByLabelText('Farm name'), {
+      target: { value: 'Willow Creek' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('heading', { name: 'Step 2 of 4: Fields' });
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'North Field' },
+    });
+    fireEvent.change(screen.getByLabelText('Area'), {
+      target: { value: '12.5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('heading', { name: 'Step 3 of 4: Crops' });
+    fireEvent.change(screen.getByLabelText('Variety name'), {
+      target: { value: 'Winter Wheat' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await screen.findByRole('heading', {
+      name: 'Step 4 of 4: Initial crop cycle',
+    });
+    await expect(services.crops.list()).resolves.toHaveLength(1);
+    await expect(services.varieties.list()).resolves.toMatchObject([
+      { cropId: 'crop-1', name: 'Winter Wheat' },
+    ]);
+    await expect(services.setupStatus.get()).resolves.toMatchObject({
+      steps: { crops: true },
+      nextStep: 'initialCycle',
+    });
   });
 
   it('preserves form data when going back and resumes the current step after reload', async () => {

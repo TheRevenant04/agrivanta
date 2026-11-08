@@ -2191,8 +2191,10 @@ components:
       type: object
       description: >
         Completion is derived from the current farm profile, at least one
-        field, at least one crop, and at least one crop cycle. A farm setup
-        step is not persisted separately from its domain data.
+        field, at least one crop with a variety, and at least one crop
+        cycle. The crops step therefore remains incomplete until a variety
+        exists for a farm crop. A farm setup step is not persisted separately
+        from its domain data.
       required: [steps, complete, nextStep]
       properties:
         steps:

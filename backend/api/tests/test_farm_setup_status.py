@@ -44,6 +44,16 @@ def test_setup_status_reports_each_step_and_completion(client):
 
     crop = client.post("/api/crops", {"name": "Wheat"}, format="json")
     assert crop.status_code == 201
+    without_variety = client.get(URL)
+    assert without_variety.data["steps"]["crops"] is False
+    assert without_variety.data["nextStep"] == "crops"
+
+    variety = client.post(
+        "/api/varieties",
+        {"cropId": crop.data["id"], "name": "Winter Wheat"},
+        format="json",
+    )
+    assert variety.status_code == 201
     assert client.get(URL).data["nextStep"] == "initialCycle"
 
     cycle = client.post(

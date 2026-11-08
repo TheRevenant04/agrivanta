@@ -656,7 +656,7 @@ class FarmSetupStatusView(APIView):
         steps = {
             "farm": farm.name.strip() != default_farm_name,
             "fields": farm.fields.exists(),
-            "crops": farm.crops.exists(),
+            "crops": farm.crops.filter(varieties__farm=farm).exists(),
             "initialCycle": farm.crop_cycles.exists(),
         }
         next_step = next(

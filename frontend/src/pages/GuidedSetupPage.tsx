@@ -153,7 +153,25 @@ export function GuidedSetupPage() {
         if (!active) return;
         const saved = readProgress(storageKey);
         const currentStep = defaultStep(setupStatus, saved?.currentStep);
-        const cropId = saved?.draft.cropId || cropItems[0]?.id || '';
+        const cropWithVariety = varietyItems.find((variety) =>
+          cropItems.some((crop) => crop.id === variety.cropId),
+        );
+        const savedCropId = cropItems.some(
+          (crop) => crop.id === saved?.draft.cropId,
+        )
+          ? saved?.draft.cropId
+          : undefined;
+        const savedCropHasVariety = varietyItems.some(
+          (variety) => variety.cropId === savedCropId,
+        );
+        const cropId =
+          (savedCropId && (!setupStatus.steps.crops || savedCropHasVariety)
+            ? savedCropId
+            : undefined) ||
+          (setupStatus.steps.crops
+            ? cropWithVariety?.cropId
+            : cropItems[0]?.id) ||
+          '';
         const draft = {
           ...(saved?.draft ?? EMPTY_DRAFT),
           farmName: saved?.draft.farmName || farmInfo.name,
@@ -398,16 +416,27 @@ export function GuidedSetupPage() {
 
             {progress.currentStep === 'crops' && (
               <>
-                <label htmlFor="setup-crop-name">Crop name</label>
-                <input
-                  id="setup-crop-name"
-                  required
-                  maxLength={255}
-                  value={progress.draft.cropName}
-                  onChange={(event) =>
-                    updateDraft({ cropName: event.target.value })
-                  }
-                />
+                {progress.draft.cropId ? (
+                  <p>
+                    Adding a variety to{' '}
+                    {crops.find((crop) => crop.id === progress.draft.cropId)
+                      ?.name ?? 'the selected crop'}
+                    .
+                  </p>
+                ) : (
+                  <>
+                    <label htmlFor="setup-crop-name">Crop name</label>
+                    <input
+                      id="setup-crop-name"
+                      required
+                      maxLength={255}
+                      value={progress.draft.cropName}
+                      onChange={(event) =>
+                        updateDraft({ cropName: event.target.value })
+                      }
+                    />
+                  </>
+                )}
                 <label htmlFor="setup-variety-name">Variety name</label>
                 <input
                   id="setup-variety-name"

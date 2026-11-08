@@ -187,7 +187,9 @@ export function createFarmSetupMock(
         const steps = {
           farm: farmConfigured,
           fields: fields.length > 0,
-          crops: crops.length > 0,
+          crops: crops.some((crop) =>
+            varieties.some((variety) => variety.cropId === crop.id),
+          ),
           initialCycle: (await options.hasInitialCycle?.()) ?? false,
         };
         const nextStep =
