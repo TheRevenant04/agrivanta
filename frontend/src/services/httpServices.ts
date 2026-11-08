@@ -7,6 +7,7 @@ import { createInventoryHttp } from './inventoryHttp';
 import { createImportHttp } from './importHttp';
 import { createReportingHttp } from './reportingHttp';
 import { createActivityPlanningHttp } from './activityPlanningHttp';
+import { createNotificationHttp } from './notificationHttp';
 // Crop cycle domain (issue #45).
 import { createCropCycleHttp } from './cropCycleHttp';
 import {
@@ -240,6 +241,7 @@ export function createHttpServices(
     ...createInventoryHttp(request),
     // Activity planning domains (issue #46) share the same plumbing.
     ...createActivityPlanningHttp(request),
+    ...createNotificationHttp(request),
     // Crop cycle domain (issue #45) shares the same auth/error plumbing.
     ...createCropCycleHttp(request),
   };
