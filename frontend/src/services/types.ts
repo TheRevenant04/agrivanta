@@ -15,6 +15,9 @@ import type {
   AuthSession as ApiAuthSession,
   Attachment as ApiAttachment,
   BaseMeasureCategory as ApiBaseMeasureCategory,
+  ChatAnswer as ApiChatAnswer,
+  ChatEvidence as ApiChatEvidence,
+  ChatEvidenceItem as ApiChatEvidenceItem,
   ConversionInput as ApiConversionInput,
   ConversionQuery as ApiConversionQuery,
   ConversionResult as ApiConversionResult,
@@ -38,7 +41,17 @@ import type {
   HarvestInput as ApiHarvestInput,
   InventoryItem as ApiInventoryItem,
   InventoryItemInput as ApiInventoryItemInput,
+  ImportCommitInput as ApiImportCommitInput,
+  ImportCommitResult as ApiImportCommitResult,
+  ImportDuplicateRow as ApiImportDuplicateRow,
+  ImportEntityType as ApiImportEntityType,
+  ImportInvalidRow as ApiImportInvalidRow,
+  ImportPreview as ApiImportPreview,
+  ImportRowError as ApiImportRowError,
+  ImportValidRow as ApiImportValidRow,
   LoginCredentials as ApiLoginCredentials,
+  Notification as ApiNotification,
+  NotificationPage as ApiNotificationPage,
   Payment as ApiPayment,
   PaymentInput as ApiPaymentInput,
   PaymentType as ApiPaymentType,
@@ -53,6 +66,7 @@ import type {
   UnitConversion as ApiUnitConversion,
   UnitInput as ApiUnitInput,
   User as ApiUser,
+  UnreadCountResponse as ApiUnreadCountResponse,
   Variety as ApiVariety,
   VarietyInput as ApiVarietyInput,
   CycleRef as ApiCycleRef,
@@ -70,20 +84,9 @@ export interface AuthService {
   me(): Promise<User>;
 }
 
-export type ChatEvidenceItem = Record<string, unknown>;
-
-export interface ChatEvidence {
-  figures: ChatEvidenceItem[];
-  reportingPeriods: ChatEvidenceItem[];
-  cropCycles: ChatEvidenceItem[];
-  calculationBasis: ChatEvidenceItem[];
-  toolResults?: ChatEvidenceItem[];
-}
-
-export interface ChatAnswer {
-  answer: string;
-  evidence: ChatEvidence;
-}
+export type ChatEvidenceItem = ApiChatEvidenceItem;
+export type ChatEvidence = ApiChatEvidence;
+export type ChatAnswer = ApiChatAnswer;
 
 export interface ChatService {
   ask(question: string, onToken: (text: string) => void): Promise<ChatAnswer>;
@@ -235,81 +238,14 @@ export interface ExpensePaymentServices {
 // CSV and Excel imports (issues #34, #35, #50)
 // ---------------------------------------------------------------------------
 
-export type ImportEntityType = 'expenses' | 'inventory_movements';
-
-export interface ImportRowError {
-  field: string;
-  message: string;
-}
-
-export interface ImportValidRow {
-  row: number;
-  date?: string | null;
-  category?: string;
-  amount?: number;
-  supplier?: string | null;
-  notes?: string | null;
-  cycleId?: string | null;
-  item?: string;
-  itemId?: string;
-  type?: string;
-  quantity?: number;
-  note?: string | null;
-}
-
-export interface ImportInvalidRow {
-  row: number;
-  errors: ImportRowError[];
-}
-
-export interface ImportDuplicateRow {
-  row: number;
-  reason: string;
-  key: Record<string, unknown>;
-}
-
-export interface ImportPreview {
-  entityType: ImportEntityType;
-  fileName: string;
-  previewToken: string;
-  expiresAt: string;
-  totalRows: number;
-  validRows: ImportValidRow[];
-  invalidRows: ImportInvalidRow[];
-  duplicateRows: ImportDuplicateRow[];
-  counts: {
-    total: number;
-    valid: number;
-    invalid: number;
-    duplicate: number;
-  };
-}
-
-export interface ImportCommitInput {
-  token: string;
-  confirmedRows: Array<{
-    row: number;
-    values?: Record<string, string>;
-  }>;
-}
-
-export interface ImportCommitResult {
-  previewToken: string;
-  entityType: ImportEntityType;
-  imported: Array<{ row: number; id: string }>;
-  counts: {
-    confirmed: number;
-    imported: number;
-    skipped: number;
-  };
-  audit: {
-    id: string;
-    actorId: string;
-    committedAt: string;
-    entityCounts: Record<string, number>;
-    previewToken: string;
-  };
-}
+export type ImportEntityType = ApiImportEntityType;
+export type ImportRowError = ApiImportRowError;
+export type ImportValidRow = ApiImportValidRow;
+export type ImportInvalidRow = ApiImportInvalidRow;
+export type ImportDuplicateRow = ApiImportDuplicateRow;
+export type ImportPreview = ApiImportPreview;
+export type ImportCommitInput = ApiImportCommitInput;
+export type ImportCommitResult = ApiImportCommitResult;
 
 export interface ImportService {
   preview(entityType: ImportEntityType, file: File): Promise<ImportPreview>;
@@ -345,17 +281,9 @@ export interface AgrivantaServices
   cropCycles: CropCycleService;
 }
 
-export interface Notification {
-  id: string;
-  type: 'info' | 'warning' | 'alert';
-  message: string;
-  read: boolean;
-  createdAt: string;
-  updatedAt: string;
-  farmId?: string;
-  recurringExpenseTemplateId?: string;
-  occurrenceDate?: string;
-}
+export type Notification = ApiNotification;
+export type NotificationPage = ApiNotificationPage;
+export type UnreadCountResponse = ApiUnreadCountResponse;
 
 export interface NotificationService {
   list(): Promise<Notification[]>;

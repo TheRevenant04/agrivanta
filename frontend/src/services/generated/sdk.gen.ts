@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { CloseCropCycleData, CloseCropCycleErrors, CloseCropCycleResponses, ConvertQuantityData, ConvertQuantityErrors, ConvertQuantityResponses, CreateActivityData, CreateActivityErrors, CreateActivityResponses, CreateActivityTypeData, CreateActivityTypeErrors, CreateActivityTypeResponses, CreateConversionData, CreateConversionErrors, CreateConversionResponses, CreateCropCycleData, CreateCropCycleErrors, CreateCropCycleResponses, CreateCropData, CreateCropErrors, CreateCropResponses, CreateExpenseData, CreateExpenseErrors, CreateExpenseResponses, CreateFieldData, CreateFieldErrors, CreateFieldResponses, CreateHarvestData, CreateHarvestErrors, CreateHarvestResponses, CreateInventoryItemData, CreateInventoryItemErrors, CreateInventoryItemResponses, CreateItemMovementData, CreateItemMovementErrors, CreateItemMovementResponses, CreatePaymentData, CreatePaymentErrors, CreatePaymentResponses, CreateSaleData, CreateSaleErrors, CreateSaleResponses, CreateUnitData, CreateUnitErrors, CreateUnitResponses, CreateVarietyData, CreateVarietyErrors, CreateVarietyResponses, DeleteActivityData, DeleteActivityErrors, DeleteActivityResponses, DeleteActivityTypeData, DeleteActivityTypeErrors, DeleteActivityTypeResponses, DeleteConversionData, DeleteConversionErrors, DeleteConversionResponses, DeleteCropCycleData, DeleteCropCycleErrors, DeleteCropCycleResponses, DeleteCropData, DeleteCropErrors, DeleteCropResponses, DeleteExpenseData, DeleteExpenseErrors, DeleteExpenseResponses, DeleteFieldData, DeleteFieldErrors, DeleteFieldResponses, DeletePaymentData, DeletePaymentErrors, DeletePaymentResponses, DeleteUnitData, DeleteUnitErrors, DeleteUnitResponses, DeleteVarietyData, DeleteVarietyErrors, DeleteVarietyResponses, GetActivityData, GetActivityErrors, GetActivityResponses, GetActivityTypeData, GetActivityTypeErrors, GetActivityTypeResponses, GetConversionData, GetConversionErrors, GetConversionResponses, GetCropCycleData, GetCropCycleErrors, GetCropCycleResponses, GetCropData, GetCropErrors, GetCropResponses, GetFarmData, GetFarmErrors, GetFarmResponses, GetFarmSetupStatusData, GetFarmSetupStatusErrors, GetFarmSetupStatusResponses, GetFieldData, GetFieldErrors, GetFieldResponses, GetPaymentData, GetPaymentErrors, GetPaymentResponses, GetUnitData, GetUnitErrors, GetUnitResponses, GetVarietyData, GetVarietyErrors, GetVarietyResponses, ListActivitiesData, ListActivitiesErrors, ListActivitiesResponses, ListActivityCyclesData, ListActivityCyclesErrors, ListActivityCyclesResponses, ListActivityTypesData, ListActivityTypesErrors, ListActivityTypesResponses, ListConversionsData, ListConversionsErrors, ListConversionsResponses, ListCropCyclesData, ListCropCyclesErrors, ListCropCyclesResponses, ListCropsData, ListCropsErrors, ListCropsResponses, ListCustomersData, ListCustomersErrors, ListCustomersResponses, ListExpensesData, ListExpensesErrors, ListExpensesResponses, ListFieldsData, ListFieldsErrors, ListFieldsResponses, ListHarvestCyclesData, ListHarvestCyclesErrors, ListHarvestCyclesResponses, ListHarvestsData, ListHarvestsErrors, ListHarvestsResponses, ListInventoryItemsData, ListInventoryItemsErrors, ListInventoryItemsResponses, ListItemMovementsData, ListItemMovementsErrors, ListItemMovementsResponses, ListPaymentsData, ListPaymentsErrors, ListPaymentsResponses, ListSalesData, ListSalesErrors, ListSalesResponses, ListStockMovementsData, ListStockMovementsErrors, ListStockMovementsResponses, ListUnitsData, ListUnitsErrors, ListUnitsResponses, ListVarietiesData, ListVarietiesErrors, ListVarietiesResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, MeData, MeErrors, MeResponses, PartiallyUpdateCropCycleData, PartiallyUpdateCropCycleErrors, PartiallyUpdateCropCycleResponses, PartiallyUpdateFarmData, PartiallyUpdateFarmErrors, PartiallyUpdateFarmResponses, PartiallyUpdateFieldData, PartiallyUpdateFieldErrors, PartiallyUpdateFieldResponses, PatchCropData, PatchCropErrors, PatchCropResponses, PatchUnitData, PatchUnitErrors, PatchUnitResponses, PatchVarietyData, PatchVarietyErrors, PatchVarietyResponses, PostExpenseData, PostExpenseErrors, PostExpenseResponses, RegisterData, RegisterErrors, RegisterResponses, ReopenCropCycleData, ReopenCropCycleErrors, ReopenCropCycleResponses, ReplaceActivityAssigneesData, ReplaceActivityAssigneesErrors, ReplaceActivityAssigneesResponses, ReplaceActivityTypeData, ReplaceActivityTypeErrors, ReplaceActivityTypeResponses, UpdateActivityData, UpdateActivityErrors, UpdateActivityResourceNeedsData, UpdateActivityResourceNeedsErrors, UpdateActivityResourceNeedsResponses, UpdateActivityResponses, UpdateActivityStatusData, UpdateActivityStatusErrors, UpdateActivityStatusResponses, UpdateActivityTypeData, UpdateActivityTypeErrors, UpdateActivityTypeResponses, UpdateConversionData, UpdateConversionErrors, UpdateConversionResponses, UpdateCropCycleData, UpdateCropCycleErrors, UpdateCropCycleResponses, UpdateCropData, UpdateCropErrors, UpdateCropResponses, UpdateExpenseData, UpdateExpenseErrors, UpdateExpenseResponses, UpdateFarmData, UpdateFarmErrors, UpdateFarmResponses, UpdateFieldData, UpdateFieldErrors, UpdateFieldResponses, UpdateInventoryItemData, UpdateInventoryItemErrors, UpdateInventoryItemResponses, UpdatePaymentData, UpdatePaymentErrors, UpdatePaymentResponses, UpdateUnitData, UpdateUnitErrors, UpdateUnitResponses, UpdateVarietyData, UpdateVarietyErrors, UpdateVarietyResponses, UploadExpenseAttachmentData, UploadExpenseAttachmentErrors, UploadExpenseAttachmentResponses } from './types.gen';
+import type { AskChatData, AskChatErrors, AskChatResponses, CloseCropCycleData, CloseCropCycleErrors, CloseCropCycleResponses, CommitImportData, CommitImportErrors, CommitImportResponses, ConvertQuantityData, ConvertQuantityErrors, ConvertQuantityResponses, CreateActivityData, CreateActivityErrors, CreateActivityResponses, CreateActivityTypeData, CreateActivityTypeErrors, CreateActivityTypeResponses, CreateConversionData, CreateConversionErrors, CreateConversionResponses, CreateCropCycleData, CreateCropCycleErrors, CreateCropCycleResponses, CreateCropData, CreateCropErrors, CreateCropResponses, CreateExpenseData, CreateExpenseErrors, CreateExpenseResponses, CreateFieldData, CreateFieldErrors, CreateFieldResponses, CreateHarvestData, CreateHarvestErrors, CreateHarvestResponses, CreateInventoryItemData, CreateInventoryItemErrors, CreateInventoryItemResponses, CreateItemMovementData, CreateItemMovementErrors, CreateItemMovementResponses, CreatePaymentData, CreatePaymentErrors, CreatePaymentResponses, CreateSaleData, CreateSaleErrors, CreateSaleResponses, CreateUnitData, CreateUnitErrors, CreateUnitResponses, CreateVarietyData, CreateVarietyErrors, CreateVarietyResponses, DeleteActivityData, DeleteActivityErrors, DeleteActivityResponses, DeleteActivityTypeData, DeleteActivityTypeErrors, DeleteActivityTypeResponses, DeleteConversionData, DeleteConversionErrors, DeleteConversionResponses, DeleteCropCycleData, DeleteCropCycleErrors, DeleteCropCycleResponses, DeleteCropData, DeleteCropErrors, DeleteCropResponses, DeleteExpenseData, DeleteExpenseErrors, DeleteExpenseResponses, DeleteFieldData, DeleteFieldErrors, DeleteFieldResponses, DeletePaymentData, DeletePaymentErrors, DeletePaymentResponses, DeleteUnitData, DeleteUnitErrors, DeleteUnitResponses, DeleteVarietyData, DeleteVarietyErrors, DeleteVarietyResponses, ExportReportData, ExportReportErrors, ExportReportResponses, GetActivityData, GetActivityErrors, GetActivityResponses, GetActivityTypeData, GetActivityTypeErrors, GetActivityTypeResponses, GetConversionData, GetConversionErrors, GetConversionResponses, GetCropCycleData, GetCropCycleErrors, GetCropCycleResponses, GetCropData, GetCropErrors, GetCropResponses, GetDashboardData, GetDashboardErrors, GetDashboardResponses, GetFarmData, GetFarmErrors, GetFarmResponses, GetFarmSetupStatusData, GetFarmSetupStatusErrors, GetFarmSetupStatusResponses, GetFieldData, GetFieldErrors, GetFieldResponses, GetPaymentData, GetPaymentErrors, GetPaymentResponses, GetReportData, GetReportErrors, GetReportResponses, GetUnitData, GetUnitErrors, GetUnitResponses, GetUnreadNotificationCountData, GetUnreadNotificationCountErrors, GetUnreadNotificationCountResponses, GetVarietyData, GetVarietyErrors, GetVarietyResponses, ListActivitiesData, ListActivitiesErrors, ListActivitiesResponses, ListActivityCyclesData, ListActivityCyclesErrors, ListActivityCyclesResponses, ListActivityTypesData, ListActivityTypesErrors, ListActivityTypesResponses, ListConversionsData, ListConversionsErrors, ListConversionsResponses, ListCropCyclesData, ListCropCyclesErrors, ListCropCyclesResponses, ListCropsData, ListCropsErrors, ListCropsResponses, ListCustomersData, ListCustomersErrors, ListCustomersResponses, ListExpensesData, ListExpensesErrors, ListExpensesResponses, ListFieldsData, ListFieldsErrors, ListFieldsResponses, ListHarvestCyclesData, ListHarvestCyclesErrors, ListHarvestCyclesResponses, ListHarvestsData, ListHarvestsErrors, ListHarvestsResponses, ListInventoryItemsData, ListInventoryItemsErrors, ListInventoryItemsResponses, ListItemMovementsData, ListItemMovementsErrors, ListItemMovementsResponses, ListNotificationsData, ListNotificationsErrors, ListNotificationsResponses, ListPaymentsData, ListPaymentsErrors, ListPaymentsResponses, ListReportingPeriodsData, ListReportingPeriodsErrors, ListReportingPeriodsResponses, ListSalesData, ListSalesErrors, ListSalesResponses, ListSeasonsData, ListSeasonsErrors, ListSeasonsResponses, ListStockMovementsData, ListStockMovementsErrors, ListStockMovementsResponses, ListUnitsData, ListUnitsErrors, ListUnitsResponses, ListVarietiesData, ListVarietiesErrors, ListVarietiesResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutErrors, LogoutResponses, MarkNotificationReadData, MarkNotificationReadErrors, MarkNotificationReadResponses, MeData, MeErrors, MeResponses, PartiallyUpdateCropCycleData, PartiallyUpdateCropCycleErrors, PartiallyUpdateCropCycleResponses, PartiallyUpdateFarmData, PartiallyUpdateFarmErrors, PartiallyUpdateFarmResponses, PartiallyUpdateFieldData, PartiallyUpdateFieldErrors, PartiallyUpdateFieldResponses, PatchCropData, PatchCropErrors, PatchCropResponses, PatchUnitData, PatchUnitErrors, PatchUnitResponses, PatchVarietyData, PatchVarietyErrors, PatchVarietyResponses, PostExpenseData, PostExpenseErrors, PostExpenseResponses, PreviewImportData, PreviewImportErrors, PreviewImportResponses, RegisterData, RegisterErrors, RegisterResponses, ReopenCropCycleData, ReopenCropCycleErrors, ReopenCropCycleResponses, ReplaceActivityAssigneesData, ReplaceActivityAssigneesErrors, ReplaceActivityAssigneesResponses, ReplaceActivityTypeData, ReplaceActivityTypeErrors, ReplaceActivityTypeResponses, UpdateActivityData, UpdateActivityErrors, UpdateActivityResourceNeedsData, UpdateActivityResourceNeedsErrors, UpdateActivityResourceNeedsResponses, UpdateActivityResponses, UpdateActivityStatusData, UpdateActivityStatusErrors, UpdateActivityStatusResponses, UpdateActivityTypeData, UpdateActivityTypeErrors, UpdateActivityTypeResponses, UpdateConversionData, UpdateConversionErrors, UpdateConversionResponses, UpdateCropCycleData, UpdateCropCycleErrors, UpdateCropCycleResponses, UpdateCropData, UpdateCropErrors, UpdateCropResponses, UpdateExpenseData, UpdateExpenseErrors, UpdateExpenseResponses, UpdateFarmData, UpdateFarmErrors, UpdateFarmResponses, UpdateFieldData, UpdateFieldErrors, UpdateFieldResponses, UpdateInventoryItemData, UpdateInventoryItemErrors, UpdateInventoryItemResponses, UpdatePaymentData, UpdatePaymentErrors, UpdatePaymentResponses, UpdateUnitData, UpdateUnitErrors, UpdateUnitResponses, UpdateVarietyData, UpdateVarietyErrors, UpdateVarietyResponses, UploadExpenseAttachmentData, UploadExpenseAttachmentErrors, UploadExpenseAttachmentResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -996,4 +996,116 @@ export const createSale = <ThrowOnError extends boolean = false>(options: Option
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Ask the read-only analyst a question
+ */
+export const askChat = <ThrowOnError extends boolean = false>(options: Options<AskChatData, ThrowOnError>): RequestResult<AskChatResponses, AskChatErrors, ThrowOnError> => (options.client ?? client).post<AskChatResponses, AskChatErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/chat',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Validate an uploaded import file without committing records
+ */
+export const previewImport = <ThrowOnError extends boolean = false>(options: Options<PreviewImportData, ThrowOnError>): RequestResult<PreviewImportResponses, PreviewImportErrors, ThrowOnError> => (options.client ?? client).post<PreviewImportResponses, PreviewImportErrors, ThrowOnError>({
+    ...formDataBodySerializer,
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/imports/preview',
+    ...options,
+    headers: {
+        'Content-Type': null,
+        ...options.headers
+    }
+});
+
+/**
+ * Commit the confirmed rows from an import preview
+ */
+export const commitImport = <ThrowOnError extends boolean = false>(options: Options<CommitImportData, ThrowOnError>): RequestResult<CommitImportResponses, CommitImportErrors, ThrowOnError> => (options.client ?? client).post<CommitImportResponses, CommitImportErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/imports/commit',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * List the current user's notifications
+ */
+export const listNotifications = <ThrowOnError extends boolean = false>(options?: Options<ListNotificationsData, ThrowOnError>): RequestResult<ListNotificationsResponses, ListNotificationsErrors, ThrowOnError> => (options?.client ?? client).get<ListNotificationsResponses, ListNotificationsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/notifications',
+    ...options
+});
+
+/**
+ * Get the number of unread notifications
+ */
+export const getUnreadNotificationCount = <ThrowOnError extends boolean = false>(options?: Options<GetUnreadNotificationCountData, ThrowOnError>): RequestResult<GetUnreadNotificationCountResponses, GetUnreadNotificationCountErrors, ThrowOnError> => (options?.client ?? client).get<GetUnreadNotificationCountResponses, GetUnreadNotificationCountErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/notifications/unread-count',
+    ...options
+});
+
+/**
+ * Mark a notification as read
+ */
+export const markNotificationRead = <ThrowOnError extends boolean = false>(options: Options<MarkNotificationReadData, ThrowOnError>): RequestResult<MarkNotificationReadResponses, MarkNotificationReadErrors, ThrowOnError> => (options.client ?? client).post<MarkNotificationReadResponses, MarkNotificationReadErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/notifications/{notificationId}/read',
+    ...options
+});
+
+/**
+ * List saved reporting periods
+ */
+export const listReportingPeriods = <ThrowOnError extends boolean = false>(options?: Options<ListReportingPeriodsData, ThrowOnError>): RequestResult<ListReportingPeriodsResponses, ListReportingPeriodsErrors, ThrowOnError> => (options?.client ?? client).get<ListReportingPeriodsResponses, ListReportingPeriodsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/reporting-periods',
+    ...options
+});
+
+/**
+ * List farm seasons for reporting filters
+ */
+export const listSeasons = <ThrowOnError extends boolean = false>(options?: Options<ListSeasonsData, ThrowOnError>): RequestResult<ListSeasonsResponses, ListSeasonsErrors, ThrowOnError> => (options?.client ?? client).get<ListSeasonsResponses, ListSeasonsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/seasons',
+    ...options
+});
+
+/**
+ * Get dashboard key performance indicators
+ */
+export const getDashboard = <ThrowOnError extends boolean = false>(options?: Options<GetDashboardData, ThrowOnError>): RequestResult<GetDashboardResponses, GetDashboardErrors, ThrowOnError> => (options?.client ?? client).get<GetDashboardResponses, GetDashboardErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/dashboard',
+    ...options
+});
+
+/**
+ * Run a predefined report
+ */
+export const getReport = <ThrowOnError extends boolean = false>(options: Options<GetReportData, ThrowOnError>): RequestResult<GetReportResponses, GetReportErrors, ThrowOnError> => (options.client ?? client).get<GetReportResponses, GetReportErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/reports/{reportName}',
+    ...options
+});
+
+/**
+ * Export a predefined report
+ */
+export const exportReport = <ThrowOnError extends boolean = false>(options: Options<ExportReportData, ThrowOnError>): RequestResult<ExportReportResponses, ExportReportErrors, ThrowOnError> => (options.client ?? client).get<ExportReportResponses, ExportReportErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/reports/{reportName}/export',
+    ...options
 });

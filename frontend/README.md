@@ -45,17 +45,20 @@ consumes it via `useServices()` from `src/services/servicesContext.ts`.
 
 ### OpenAPI types and client
 
-Run `npm run api:generate` from `frontend/` after changing the checked-in
-OpenAPI contract. It generates TypeScript schemas and endpoint operations into
-`src/services/generated/`; those files are committed so type checking does not
-depend on running the generator.
+The backend-maintained OpenAPI schema is published at
+`http://localhost:8000/openapi.yaml`; its checked-in source is
+`backend/api/openapi.yaml`. Run `npm run api:generate` from `frontend/` after
+the backend contract changes. The command reads the local endpoint when it is
+available and otherwise uses its checked-in schema file, so offline
+regeneration, builds, and tests do not require a running backend. To generate
+against another deployment, set `AGRIVANTA_OPENAPI_URL` to its schema URL
+before running the command.
 
-The generator currently reads `../openapi.yaml`. This repository does not yet
-expose or document a backend OpenAPI endpoint, and the checked-in contract
-covers only some of the services (chat, imports, notifications, and reporting
-are absent). Consequently this is a local-contract workflow, not a live
-backend-schema sync; a backend-owned schema endpoint and complete schema
-coverage are still needed to finish issue #68.
+Generated TypeScript schemas and endpoint operations are written to
+`src/services/generated/` and committed. The services layer imports generated
+DTOs for all frontend domains, including chat, imports, notifications, and
+reporting; transport interfaces and runtime response validation remain
+handwritten.
 
 ## Requirements
 

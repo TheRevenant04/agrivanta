@@ -4,6 +4,219 @@ export type ClientOptions = {
     baseUrl: 'http://localhost:8000/api' | (string & {});
 };
 
+export type ChatQuestion = {
+    question: string;
+};
+
+export type ChatEvidenceItem = {
+    [key: string]: unknown;
+};
+
+export type ChatEvidence = {
+    figures: Array<ChatEvidenceItem>;
+    reportingPeriods: Array<ChatEvidenceItem>;
+    cropCycles: Array<ChatEvidenceItem>;
+    calculationBasis: Array<ChatEvidenceItem>;
+    toolResults?: Array<ChatEvidenceItem>;
+};
+
+export type ChatAnswer = {
+    answer: string;
+    evidence: ChatEvidence;
+};
+
+export type ChatTokenEvent = {
+    type: 'token';
+    text: string;
+};
+
+export type ChatFinalEvent = {
+    type: 'final';
+    answer: string;
+    evidence: ChatEvidence;
+};
+
+export type ChatErrorEvent = {
+    type: 'error';
+    error: {
+        message: string;
+    };
+};
+
+export type ChatStreamEvent = ChatTokenEvent | ChatFinalEvent | ChatErrorEvent;
+
+export type ImportEntityType = 'expenses' | 'inventory_movements';
+
+export type ImportRowError = {
+    field: string;
+    message: string;
+};
+
+export type ImportValidRow = {
+    row: number;
+    date?: string | null;
+    category?: string;
+    amount?: number;
+    supplier?: string | null;
+    notes?: string | null;
+    cycleId?: string | null;
+    item?: string;
+    itemId?: string;
+    type?: string;
+    quantity?: number;
+    note?: string | null;
+};
+
+export type ImportInvalidRow = {
+    row: number;
+    errors: Array<ImportRowError>;
+};
+
+export type ImportDuplicateRow = {
+    row: number;
+    reason: string;
+    key: {
+        [key: string]: unknown;
+    };
+};
+
+export type ImportPreviewInput = {
+    entityType: ImportEntityType;
+    file: Blob | File;
+};
+
+export type ImportPreview = {
+    entityType: ImportEntityType;
+    fileName: string;
+    previewToken: string;
+    expiresAt: string;
+    totalRows: number;
+    validRows: Array<ImportValidRow>;
+    invalidRows: Array<ImportInvalidRow>;
+    duplicateRows: Array<ImportDuplicateRow>;
+    counts: {
+        total: number;
+        valid: number;
+        invalid: number;
+        duplicate: number;
+    };
+};
+
+export type ImportCommitInput = {
+    token: string;
+    confirmedRows: Array<{
+        row: number;
+        values?: {
+            [key: string]: string;
+        };
+    }>;
+};
+
+export type ImportCommitResult = {
+    previewToken: string;
+    entityType: ImportEntityType;
+    imported: Array<{
+        row: number;
+        id: string;
+    }>;
+    counts: {
+        confirmed: number;
+        imported: number;
+        skipped: number;
+    };
+    audit: {
+        id: string;
+        actorId: string;
+        committedAt: string;
+        entityCounts: {
+            [key: string]: number;
+        };
+        previewToken: string;
+    };
+};
+
+export type Notification = {
+    id: string;
+    type: 'info' | 'warning' | 'alert';
+    message: string;
+    read: boolean;
+    createdAt: string;
+    updatedAt: string;
+    farmId?: string;
+    recurringExpenseTemplateId?: string;
+    occurrenceDate?: string;
+};
+
+export type NotificationPage = {
+    count: number;
+    unreadCount: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    nextPage: number | null;
+    previousPage: number | null;
+    results: Array<Notification>;
+};
+
+export type UnreadCountResponse = {
+    unreadCount: number;
+};
+
+export type ReportingPeriod = {
+    id: string;
+    name: string;
+    startDate: string;
+    endDate: string;
+};
+
+export type ReportFilters = {
+    periodId?: string;
+    startDate?: string;
+    endDate?: string;
+};
+
+export type DashboardKpis = {
+    currentCycleSpend: number;
+    revenueToDate: number;
+    unsoldProduce: Array<{
+        cycleId: string;
+        quantity: number;
+        unitId: string;
+    }>;
+    upcomingActivities: number;
+    overdueActivities: number;
+    lowStockItemCount: number;
+};
+
+export type ReportName = 'activity-status' | 'inventory' | 'labour-usage' | 'equipment-usage' | 'budget-vs-actual';
+
+export type ExportFormat = 'csv' | 'xlsx' | 'pdf';
+
+export type ReportCell = string | number | boolean | null;
+
+export type ReportRow = {
+    [key: string]: ReportCell;
+};
+
+export type ReportResult = {
+    counts: {
+        [key: string]: number;
+    };
+    total: number;
+} | {
+    asOf: string;
+    items: Array<ReportRow>;
+} | {
+    groupBy: string;
+    rows: Array<ReportRow>;
+    totals: {
+        [key: string]: number;
+    };
+} | {
+    overall: Array<ReportRow>;
+    categories: Array<ReportRow>;
+};
+
 /**
  * Error envelope. Either `{detail, field?}` or a Django REST Framework-style field-keyed map such as `{"name": ["This field is required."]}`; the frontend treats the first array-of-strings entry as `{field, message}`.
  *
@@ -517,6 +730,16 @@ export type SaleInput = {
      */
     date: string;
 };
+
+/**
+ * Optional saved period. Use `startDate` and `endDate` when no saved period is selected.
+ *
+ */
+export type ReportPeriodId = string;
+
+export type ReportStartDate = string;
+
+export type ReportEndDate = string;
 
 export type FieldId = string;
 
@@ -1189,7 +1412,7 @@ export type ListVarietiesData = {
         /**
          * Only return varieties of this crop.
          */
-        crop?: string;
+        crop?: ChatStreamEvent;
     };
     url: '/varieties';
 };
@@ -3407,3 +3630,326 @@ export type CreateSaleResponses = {
 };
 
 export type CreateSaleResponse = CreateSaleResponses[keyof CreateSaleResponses];
+
+export type AskChatData = {
+    body: ChatQuestion;
+    path?: never;
+    query?: never;
+    url: '/chat';
+};
+
+export type AskChatErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type AskChatError = AskChatErrors[keyof AskChatErrors];
+
+export type AskChatResponses = {
+    /**
+     * Newline-delimited JSON token, final-answer, or error events.
+     */
+    200: string;
+};
+
+export type AskChatResponse = AskChatResponses[keyof AskChatResponses];
+
+export type PreviewImportData = {
+    body: ImportPreviewInput;
+    path?: never;
+    query?: never;
+    url: '/imports/preview';
+};
+
+export type PreviewImportErrors = {
+    /**
+     * Input rejected. Either `{detail, field}` or a field-keyed validation map; `field` names the offending input so forms render the message inline.
+     *
+     */
+    400: Error;
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type PreviewImportError = PreviewImportErrors[keyof PreviewImportErrors];
+
+export type PreviewImportResponses = {
+    /**
+     * Parsed and validated import preview.
+     */
+    200: ImportPreview;
+};
+
+export type PreviewImportResponse = PreviewImportResponses[keyof PreviewImportResponses];
+
+export type CommitImportData = {
+    body: ImportCommitInput;
+    path?: never;
+    query?: never;
+    url: '/imports/commit';
+};
+
+export type CommitImportErrors = {
+    /**
+     * Input rejected. Either `{detail, field}` or a field-keyed validation map; `field` names the offending input so forms render the message inline.
+     *
+     */
+    400: Error;
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type CommitImportError = CommitImportErrors[keyof CommitImportErrors];
+
+export type CommitImportResponses = {
+    /**
+     * Import result and audit record.
+     */
+    201: ImportCommitResult;
+};
+
+export type CommitImportResponse = CommitImportResponses[keyof CommitImportResponses];
+
+export type ListNotificationsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        page_size?: number;
+    };
+    url: '/notifications';
+};
+
+export type ListNotificationsErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type ListNotificationsError = ListNotificationsErrors[keyof ListNotificationsErrors];
+
+export type ListNotificationsResponses = {
+    /**
+     * A page of notifications.
+     */
+    200: NotificationPage;
+};
+
+export type ListNotificationsResponse = ListNotificationsResponses[keyof ListNotificationsResponses];
+
+export type GetUnreadNotificationCountData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/notifications/unread-count';
+};
+
+export type GetUnreadNotificationCountErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type GetUnreadNotificationCountError = GetUnreadNotificationCountErrors[keyof GetUnreadNotificationCountErrors];
+
+export type GetUnreadNotificationCountResponses = {
+    /**
+     * Unread notification count.
+     */
+    200: UnreadCountResponse;
+};
+
+export type GetUnreadNotificationCountResponse = GetUnreadNotificationCountResponses[keyof GetUnreadNotificationCountResponses];
+
+export type MarkNotificationReadData = {
+    body?: never;
+    path: {
+        notificationId: string;
+    };
+    query?: never;
+    url: '/notifications/{notificationId}/read';
+};
+
+export type MarkNotificationReadErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+    /**
+     * Referenced record does not exist.
+     */
+    404: Error;
+};
+
+export type MarkNotificationReadError = MarkNotificationReadErrors[keyof MarkNotificationReadErrors];
+
+export type MarkNotificationReadResponses = {
+    /**
+     * Updated notification.
+     */
+    200: Notification;
+};
+
+export type MarkNotificationReadResponse = MarkNotificationReadResponses[keyof MarkNotificationReadResponses];
+
+export type ListReportingPeriodsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/reporting-periods';
+};
+
+export type ListReportingPeriodsErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type ListReportingPeriodsError = ListReportingPeriodsErrors[keyof ListReportingPeriodsErrors];
+
+export type ListReportingPeriodsResponses = {
+    /**
+     * Reporting periods.
+     */
+    200: Array<ReportingPeriod>;
+};
+
+export type ListReportingPeriodsResponse = ListReportingPeriodsResponses[keyof ListReportingPeriodsResponses];
+
+export type ListSeasonsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/seasons';
+};
+
+export type ListSeasonsErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type ListSeasonsError = ListSeasonsErrors[keyof ListSeasonsErrors];
+
+export type ListSeasonsResponses = {
+    /**
+     * Seasons represented as reporting periods.
+     */
+    200: Array<ReportingPeriod>;
+};
+
+export type ListSeasonsResponse = ListSeasonsResponses[keyof ListSeasonsResponses];
+
+export type GetDashboardData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Optional saved period. Use `startDate` and `endDate` when no saved period is selected.
+         *
+         */
+        periodId?: string;
+        startDate?: string;
+        endDate?: string;
+    };
+    url: '/dashboard';
+};
+
+export type GetDashboardErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type GetDashboardError = GetDashboardErrors[keyof GetDashboardErrors];
+
+export type GetDashboardResponses = {
+    /**
+     * Dashboard figures for the selected period.
+     */
+    200: DashboardKpis;
+};
+
+export type GetDashboardResponse = GetDashboardResponses[keyof GetDashboardResponses];
+
+export type GetReportData = {
+    body?: never;
+    path: {
+        reportName: ReportName;
+    };
+    query?: {
+        /**
+         * Optional saved period. Use `startDate` and `endDate` when no saved period is selected.
+         *
+         */
+        periodId?: string;
+        startDate?: string;
+        endDate?: string;
+    };
+    url: '/reports/{reportName}';
+};
+
+export type GetReportErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type GetReportError = GetReportErrors[keyof GetReportErrors];
+
+export type GetReportResponses = {
+    /**
+     * Report data.
+     */
+    200: ReportResult;
+};
+
+export type GetReportResponse = GetReportResponses[keyof GetReportResponses];
+
+export type ExportReportData = {
+    body?: never;
+    path: {
+        reportName: ReportName;
+    };
+    query: {
+        /**
+         * Optional saved period. Use `startDate` and `endDate` when no saved period is selected.
+         *
+         */
+        periodId?: string;
+        startDate?: string;
+        endDate?: string;
+        exportFormat: ExportFormat;
+    };
+    url: '/reports/{reportName}/export';
+};
+
+export type ExportReportErrors = {
+    /**
+     * Missing or expired bearer token. The frontend clears the session and redirects to login.
+     */
+    401: Error;
+};
+
+export type ExportReportError = ExportReportErrors[keyof ExportReportErrors];
+
+export type ExportReportResponses = {
+    /**
+     * The requested report export.
+     */
+    200: Blob | File;
+};
+
+export type ExportReportResponse = ExportReportResponses[keyof ExportReportResponses];

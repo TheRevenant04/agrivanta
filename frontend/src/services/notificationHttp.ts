@@ -1,14 +1,10 @@
 import type { ServiceRequest } from './farmSetupHttp';
-import type { Notification, NotificationServices } from './types';
-
-interface NotificationPage {
-  nextPage: number | null;
-  results: Notification[];
-}
-
-interface UnreadCountResponse {
-  unreadCount: number;
-}
+import type {
+  Notification,
+  NotificationPage,
+  NotificationServices,
+  UnreadCountResponse,
+} from './types';
 
 const PAGE_SIZE = 100;
 

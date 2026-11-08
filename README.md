@@ -33,6 +33,9 @@ The API is available under `http://localhost:8000/api/`. The backend uses
 development defaults when no environment is configured; set an appropriate
 `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, and `DJANGO_ALLOWED_HOSTS` before any
 non-development deployment.
+The backend-maintained OpenAPI contract is available at
+`http://localhost:8000/openapi.yaml` and is stored in
+[`backend/api/openapi.yaml`](backend/api/openapi.yaml).
 
 Run backend tests from the repository root:
 
@@ -74,7 +77,7 @@ available scripts, and frontend architecture.
 - [`backend/`](backend/) — Django project, API app, migrations, and pytest
   suite
 - [`frontend/`](frontend/) — Vite application and Vitest suite
-- [`openapi.yaml`](openapi.yaml) — API contract
+- [`backend/api/openapi.yaml`](backend/api/openapi.yaml) — backend API contract
 - [`_docs/`](_docs/) — product plan, backlog, and contribution workflows
 - [`custom-agent/`](custom-agent/) — headless issue lifecycle runner
 - [`mcp-server/`](mcp-server/) — read-only backlog and issue MCP server

@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "api:generate": "openapi-ts -i ../openapi.yaml -o src/services/generated --no-log-file",
+    "api:generate": "node scripts/generate-api.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
