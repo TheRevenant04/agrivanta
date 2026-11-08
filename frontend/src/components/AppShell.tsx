@@ -6,6 +6,7 @@ const NAV_LINKS = [
   { to: '/chat', label: 'AI analyst' },
   { to: '/reports', label: 'Reports' },
   { to: '/farm', label: 'Farm' },
+  { to: '/setup', label: 'Guided setup' },
   { to: '/fields', label: 'Fields' },
   { to: '/crops', label: 'Crops' },
   { to: '/varieties', label: 'Varieties' },

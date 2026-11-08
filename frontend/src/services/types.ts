@@ -83,6 +83,18 @@ export interface FarmInput {
   reportingCurrency: string;
 }
 
+export type FarmSetupStepId = 'farm' | 'fields' | 'crops' | 'initialCycle';
+
+export interface FarmSetupStatus {
+  steps: Record<FarmSetupStepId, boolean>;
+  complete: boolean;
+  nextStep: FarmSetupStepId | null;
+}
+
+export interface FarmSetupStatusService {
+  get(): Promise<FarmSetupStatus>;
+}
+
 export interface Field {
   id: string;
   farmId: string;
@@ -247,6 +259,7 @@ export interface StockMovementService {
 
 /** The farm-setup domains exposed by the services layer. */
 export interface FarmSetupServices {
+  setupStatus: FarmSetupStatusService;
   farm: FarmService;
   fields: FieldService;
   crops: CropService;
@@ -616,12 +629,14 @@ export interface HarvestSaleServices {
  * (`_docs/plan.md` §3.1); reopening them is out of scope for now.
  */
 export type CropCycleStatus = 'open' | 'closed';
+export type CropCycleType = 'annual' | 'perennial';
 
 export interface CropCycle {
   id: string;
   fieldId: string;
   cropId: string;
   varietyId: string;
+  cycleType?: CropCycleType | null;
   /** ISO calendar date (`YYYY-MM-DD`) the cycle starts on. */
   startDate: string;
   /** Optional ISO calendar date the cycle ended on. */
@@ -635,6 +650,7 @@ export interface CropCycleInput {
   fieldId: string;
   cropId: string;
   varietyId: string;
+  cycleType?: CropCycleType;
   /**
    * Sent as a raw string so a blank value reaches the backend's
    * "start date is required" rule.

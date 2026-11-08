@@ -214,6 +214,23 @@ paths:
         '404':
           description: No farm is configured for this account.
 
+  /farm-setup/status:
+    get:
+      tags: [farm-setup]
+      operationId: getFarmSetupStatus
+      summary: Return completion status for the guided setup steps
+      responses:
+        '200':
+          description: Setup completion and the first incomplete step.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FarmSetupStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No farm is configured for this account.
+
   /fields:
     get:
       tags: [farm-setup]
@@ -2169,6 +2186,32 @@ components:
           minLength: 3
           maxLength: 3
           pattern: '^[A-Za-z]{3}$'
+
+    FarmSetupStatus:
+      type: object
+      description: >
+        Completion is derived from the current farm profile, at least one
+        field, at least one crop, and at least one crop cycle. A farm setup
+        step is not persisted separately from its domain data.
+      required: [steps, complete, nextStep]
+      properties:
+        steps:
+          type: object
+          required: [farm, fields, crops, initialCycle]
+          properties:
+            farm:
+              type: boolean
+            fields:
+              type: boolean
+            crops:
+              type: boolean
+            initialCycle:
+              type: boolean
+        complete:
+          type: boolean
+        nextStep:
+          type: [string, 'null']
+          enum: [farm, fields, crops, initialCycle, null]
 
     FarmInput:
       type: object

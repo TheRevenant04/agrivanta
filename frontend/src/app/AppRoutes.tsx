@@ -13,6 +13,7 @@ import { PaymentsPage } from '../pages/PaymentsPage';
 import { ConversionsPage } from '../pages/ConversionsPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { FarmPage } from '../pages/FarmPage';
+import { GuidedSetupPage } from '../pages/GuidedSetupPage';
 import { FieldsPage } from '../pages/FieldsPage';
 import { HarvestsPage } from '../pages/HarvestsPage';
 import { InventoryPage } from '../pages/InventoryPage';
@@ -36,6 +37,7 @@ export function AppRoutes() {
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/farm" element={<FarmPage />} />
+            <Route path="/setup" element={<GuidedSetupPage />} />
             <Route path="/fields" element={<FieldsPage />} />
             <Route path="/crops" element={<CropsPage />} />
             <Route path="/varieties" element={<VarietiesPage />} />

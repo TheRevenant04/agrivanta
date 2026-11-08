@@ -145,9 +145,15 @@ export function createMockServices(
     return user;
   };
 
+  const cropCycleServices = createCropCycleMock({
+    seed: options.cropCycles,
+    requireAuth: requireUser,
+  });
   const farmSetup = createFarmSetupMock({
     seed: options.farmSetup,
     requireAuth: requireUser,
+    hasInitialCycle: async () =>
+      (await cropCycleServices.cropCycles.list()).length > 0,
   });
 
   return {
@@ -253,10 +259,7 @@ export function createMockServices(
     }),
 
     // Crop cycle domain (issue #45) shares the same session requirement.
-    ...createCropCycleMock({
-      seed: options.cropCycles,
-      requireAuth: requireUser,
-    }),
+    ...cropCycleServices,
 
     ...createNotificationMock({
       seed: options.notifications,
