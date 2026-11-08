@@ -37,6 +37,43 @@ The backend-maintained OpenAPI contract is available at
 `http://localhost:8000/openapi.yaml` and is stored in
 [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
 
+## Local development with Docker Compose
+
+Install Docker Desktop (Windows/macOS) or Docker Engine with the Docker Compose
+v2 plugin, then run these commands from the repository root. No local Python,
+PostgreSQL, or Redis installation is needed for this stack.
+
+```bash
+docker compose up --build
+```
+
+This builds the backend image, runs database migrations, and starts PostgreSQL,
+Redis, the Django development server, and a Celery worker. The server is
+available at `http://localhost:8000/api/`; its health endpoint is
+`http://localhost:8000/healthz`. Compose waits for PostgreSQL and Redis health
+checks before starting Django, and for Django to become healthy before starting
+the worker.
+
+PDF report exports are not available in the default Compose image: they
+require the optional Playwright dependency and a Chromium-compatible browser,
+which the image does not include. PDF export requests return `503` without
+these dependencies.
+
+In another terminal, follow the application and worker logs with:
+
+```bash
+docker compose logs -f web celery-worker
+```
+
+Stop and remove the containers and network with:
+
+```bash
+docker compose down
+```
+
+The PostgreSQL data volume is preserved by `down`; use `docker compose down -v`
+only when you also want to delete the local database data.
+
 Run backend tests from the repository root:
 
 ```bash
