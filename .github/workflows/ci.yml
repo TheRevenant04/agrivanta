@@ -56,6 +56,15 @@ jobs:
       - name: Install PDF dependencies
         run: uv pip install -r backend/requirements-pdf.txt
 
+      - name: Diagnose PDF worker
+        run: |
+          set +e
+          printf '<p>hi</p>' | PYTHONPATH=backend uv run --no-sync python backend/api/pdf_chromium_worker.py /usr/bin/google-chrome > /tmp/out.pdf 2> /tmp/err.txt
+          echo "exit=$?"
+          ls -l /tmp/out.pdf
+          head -c 8 /tmp/out.pdf | od -c
+          cat /tmp/err.txt
+
       - name: Run backend tests
         run: uv run --no-sync pytest
 
