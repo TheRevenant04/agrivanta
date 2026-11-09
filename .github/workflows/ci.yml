@@ -55,6 +55,32 @@ jobs:
       - name: Install PDF dependencies
         run: uv pip install -r backend/requirements-pdf.txt
 
+      - name: Diagnose PDF browser
+        run: |
+          cat > /tmp/diag.py <<'PY'
+          import shutil
+          from playwright.sync_api import sync_playwright
+
+          for name in ("chromium", "chromium-browser", "google-chrome", "microsoft-edge"):
+              exe = shutil.which(name)
+              if not exe:
+                  continue
+              print("trying", name, exe, flush=True)
+              try:
+                  with sync_playwright() as p:
+                      browser = p.chromium.launch(
+                          executable_path=exe, headless=True,
+                          chromium_sandbox=True, timeout=30000,
+                      )
+                      page = browser.new_page()
+                      page.set_content("<p>hi</p>")
+                      print("OK", name, page.pdf()[:5], flush=True)
+                      browser.close()
+              except Exception as exc:
+                  print("FAIL", name, repr(exc), flush=True)
+          PY
+          PYTHONPATH=backend uv run --no-sync python /tmp/diag.py
+
       - name: Run backend tests
         run: uv run --no-sync pytest
 
