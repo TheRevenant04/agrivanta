@@ -56,56 +56,15 @@ jobs:
       - name: Install PDF dependencies
         run: uv pip install -r backend/requirements-pdf.txt
 
-      - name: Diagnose PDF worker
-        run: |
-          cat > /tmp/diag.py <<'PY'
-          import subprocess
-
-          import django
-
-          django.setup()
-
-          import api.pdf_chromium as pc
-
-          print("executable", pc._browser_executable(), flush=True)
-
-          real_popen = subprocess.Popen
-
-          class Spy:
-              def __init__(self, *args, **kwargs):
-                  print("SPY args", args, flush=True)
-                  self.proc = real_popen(*args, **kwargs)
-                  self.pid = self.proc.pid
-                  self.returncode = None
-
-              def communicate(self, *args, **kwargs):
-                  out, err = self.proc.communicate(*args, **kwargs)
-                  self.returncode = self.proc.returncode
-                  print("SPY rc", self.proc.returncode, flush=True)
-                  print("SPY stdout", out[:16], flush=True)
-                  print("SPY stderr", err.decode(errors="replace")[:8000], flush=True)
-                  return out, err
-
-              def poll(self):
-                  return self.proc.poll()
-
-              def kill(self):
-                  return self.proc.kill()
-
-          pc.subprocess.Popen = Spy
-          try:
-              data = pc.render_chromium_pdf("<p>hi</p>")
-              print("render ok", data[:8], flush=True)
-          except Exception:
-              import traceback
-              traceback.print_exc()
-          finally:
-              pc.subprocess.Popen = real_popen
-          PY
-          DJANGO_SETTINGS_MODULE=config.settings PYTHONPATH=backend uv run --no-sync python /tmp/diag.py
-
       - name: Run backend tests
-        run: uv run --no-sync pytest
+        run: |
+          # Chromium's Linux singleton socket path is limited to 108 chars.
+          # Bind-mount the workspace at a short path so the PDF runtime
+          # directory under backend/.pdf-runtime stays within that limit.
+          sudo mkdir -p /r
+          sudo mount --bind "$GITHUB_WORKSPACE" /r
+          cd /r
+          uv run --no-sync pytest
 
   frontend:
     name: Frontend tests
