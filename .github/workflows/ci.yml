@@ -52,8 +52,11 @@ jobs:
       - name: Run migrations
         run: uv run python backend/manage.py migrate --no-input
 
+      - name: Install PDF dependencies
+        run: uv pip install -r backend/requirements-pdf.txt
+
       - name: Run backend tests
-        run: uv run pytest
+        run: uv run --no-sync pytest
 
   frontend:
     name: Frontend tests
