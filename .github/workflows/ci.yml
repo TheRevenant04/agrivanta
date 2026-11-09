@@ -65,6 +65,10 @@ jobs:
           import uuid
           from pathlib import Path
 
+          import django
+
+          django.setup()
+
           from api.pdf_chromium import render_chromium_pdf
 
           runtime = Path("backend/.pdf-runtime") / uuid.uuid4().hex
