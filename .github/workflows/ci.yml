@@ -87,7 +87,7 @@ jobs:
               import traceback
               traceback.print_exc()
           PY
-          PYTHONPATH=backend uv run --no-sync python /tmp/diag.py
+          DJANGO_SETTINGS_MODULE=config.settings PYTHONPATH=backend uv run --no-sync python /tmp/diag.py
 
       - name: Run backend tests
         run: uv run --no-sync pytest
