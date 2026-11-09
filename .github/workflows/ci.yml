@@ -58,12 +58,36 @@ jobs:
 
       - name: Diagnose PDF worker
         run: |
-          set +e
-          printf '<p>hi</p>' | PYTHONPATH=backend uv run --no-sync python backend/api/pdf_chromium_worker.py /usr/bin/google-chrome > /tmp/out.pdf 2> /tmp/err.txt
-          echo "exit=$?"
-          ls -l /tmp/out.pdf
-          head -c 8 /tmp/out.pdf | od -c
-          cat /tmp/err.txt
+          cat > /tmp/diag.py <<'PY'
+          import os
+          import subprocess
+          import sys
+          import uuid
+          from pathlib import Path
+
+          from api.pdf_chromium import render_chromium_pdf
+
+          runtime = Path("backend/.pdf-runtime") / uuid.uuid4().hex
+          runtime.parent.mkdir(mode=0o700, exist_ok=True)
+          runtime.mkdir(mode=0o700)
+          env = os.environ.copy()
+          env.update(TEMP=str(runtime), TMP=str(runtime), TMPDIR=str(runtime))
+          proc = subprocess.run(
+              [sys.executable, "backend/api/pdf_chromium_worker.py", "/usr/bin/google-chrome"],
+              input=b"<p>hi</p>", capture_output=True, env=env,
+              start_new_session=True,
+          )
+          print("worker rc", proc.returncode, "stdout", proc.stdout[:8], flush=True)
+          print("worker stderr", proc.stderr.decode(errors="replace")[:6000], flush=True)
+
+          try:
+              data = render_chromium_pdf("<p>hi</p>")
+              print("render ok", data[:8], flush=True)
+          except Exception as exc:
+              import traceback
+              traceback.print_exc()
+          PY
+          PYTHONPATH=backend uv run --no-sync python /tmp/diag.py
 
       - name: Run backend tests
         run: uv run --no-sync pytest
