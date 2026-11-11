@@ -79,14 +79,30 @@ def process_issue(number: int, *, max_attempts: int, dry_run: bool) -> bool:
         print("PM: already groomed, skipping")
 
     verdict_output = ""
+    review_output = ""
     for attempt in range(1, max_attempts + 1):
         print(f"Engineer: attempt {attempt}")
         engineer_prompt = f"Implement issue #{number}. Work only on that issue."
         if attempt > 1:
             qa_comment = last_qa_comment(number) if not dry_run else verdict_output
+            feedback = []
             if qa_comment:
-                engineer_prompt += f"\n\nQA reported failures; fix them. QA verdict:\n{qa_comment}"
+                feedback.append(f"QA verdict:\n{qa_comment}")
+            if review_output and "BLOCKING" in review_output:
+                feedback.append(f"Code Reviewer blocking findings:\n{review_output}")
+            if feedback:
+                engineer_prompt += f"\n\nPrevious attempt failed. Address the following feedback:\n" + "\n\n".join(feedback)
         opencode_run("software-engineer", engineer_prompt, dry_run=dry_run)
+
+        print("Code Reviewer: reviewing")
+        review_output = opencode_run(
+            "code-reviewer",
+            f"Review the current branch changes for issue #{number} against plan, security, and branching strategy.",
+            dry_run=dry_run,
+        )
+        if not dry_run and "BLOCKING" in review_output:
+            print("Code Reviewer: BLOCKING findings found, sending back to engineer")
+            continue
 
         print("QA: verifying")
         verdict_output = opencode_run(

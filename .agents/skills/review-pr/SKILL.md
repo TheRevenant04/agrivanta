@@ -12,7 +12,7 @@ subagent does, in its own context.
    - PR number given → `gh pr diff <N>` and `gh pr view <N> --json title,body`
    - Branch given → `git diff main...<branch>`
    - Neither → current branch against `main` (`git diff main...HEAD`)
-2. Launch a `code-reviewer` subagent with the target reference and the
+2. Launch a `code-reviewer` subagent (following `_docs/team/code-reviewer.md`) with the target reference and the
    linked issue number if one exists. Pass the diff or the PR/branch
    reference, not your own summary of it. Review against the current target
    branch and note unavailable validation rather than implying tests passed.

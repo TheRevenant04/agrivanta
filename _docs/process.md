@@ -11,6 +11,7 @@
 - PM - grooms a task before anyone implements it, follows _docs/team/pm.md
 - Engineer - implements one groomed task, follows _docs/team/software-engineer.md
 - QA - checks the result against the acceptance criteria, follows _docs/team/qa-engineer.md
+- Code Reviewer - reviews a diff, branch, or PR against the plan and strategy, follows _docs/team/code-reviewer.md
 
 The orchestrator may run up to five independent issue tracks in parallel.
 Each track must have its own worktree, branch, issue scope, and clear file
@@ -36,18 +37,13 @@ issues itself. Its job is to:
 3. Engineer implements the acceptance criteria in the issue's worktree,
    writes tests, commits the change, and comments on the issue. The engineer
    does not close the issue.
-4. A fresh QA agent checks the running code against every acceptance
+4. A fresh Code Reviewer agent reviews the diff for plan violations, API breaks, security issues, financial correctness, and commit hygiene (`_docs/team/code-reviewer.md`). Blocking findings must be addressed by the engineer.
+5. A fresh QA agent checks the running code against every acceptance
    criterion, runs the relevant tests, and comments `## QA: PASS` or
    `## QA: FAIL`. QA does not modify code.
-5. On FAIL, a fresh engineer session addresses the QA findings; repeat QA
-   until the result is PASS or the work is blocked.
-6. On PASS, the orchestrator pushes the branch and opens a pull request.
-7. Send the pull request to a fresh reviewer. Resolve blocking findings with
-   the engineer and repeat QA when a change affects acceptance criteria.
-8. After QA PASS and resolution of blocking review findings, the orchestrator
-   closes the issue. Merge the pull request only when authorized by the user
-   and permitted by repository policy.
-9. Continue with eligible issues until the requested scope is complete.
+6. On FAIL (review blocking findings or QA FAIL), a fresh engineer session addresses the findings; repeat code review and QA until all blocking findings are resolved and QA outputs PASS.
+7. On PASS, the orchestrator pushes the branch, opens a pull request, and closes the issue. Merge the pull request only when authorized by the user and permitted by repository policy.
+8. Continue with eligible issues until the requested scope is complete.
 
 ## Rules
 
