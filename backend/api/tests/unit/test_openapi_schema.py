@@ -4,7 +4,7 @@ from django.test import Client
 
 
 def test_openapi_endpoint_publishes_backend_schema():
-    schema_path = Path(__file__).parents[1] / "openapi.yaml"
+    schema_path = Path(__file__).parents[2] / "openapi.yaml"
     response = Client().get("/openapi.yaml")
 
     assert response.status_code == 200
