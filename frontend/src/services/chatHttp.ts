@@ -3,7 +3,7 @@ import {
   type ChatAnswer,
   type ChatEvidence,
   type ChatServices,
-} from './types';
+} from '@/services/types';
 
 export type ChatStreamRequest = (
   path: string,

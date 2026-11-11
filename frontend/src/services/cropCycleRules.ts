@@ -11,7 +11,7 @@
  * cycles on the same field are deliberately allowed.
  */
 
-import { ApiError } from './types';
+import { ApiError } from '@/services/types';
 
 /** Single source of truth for crop cycle validation messages. */
 export const CYCLE_ERRORS = {

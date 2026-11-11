@@ -1,4 +1,4 @@
-import type { AuthSession } from './types';
+import type { AuthSession } from '@/services/types';
 
 /** localStorage key under which the authenticated session is persisted. */
 export const SESSION_STORAGE_KEY = 'agrivanta.session';

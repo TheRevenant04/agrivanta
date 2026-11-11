@@ -2,7 +2,7 @@ import {
   ApiError,
   type Notification,
   type NotificationServices,
-} from './types';
+} from '@/services/types';
 
 export interface NotificationMockOptions {
   seed?: Notification[];

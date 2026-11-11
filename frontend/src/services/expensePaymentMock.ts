@@ -5,7 +5,7 @@ import {
   requireCategory,
   requirePaymentType,
 } from './expensePaymentRules';
-import { ApiError, UnauthorizedError } from './types';
+import { ApiError, UnauthorizedError } from '@/services/types';
 import type {
   Attachment,
   Expense,
@@ -17,7 +17,7 @@ import type {
   PaymentInput,
   PaymentService,
   PaymentType,
-} from './types';
+} from '@/services/types';
 
 /** Seed shape for the expense and payment domains. */
 export interface ExpensePaymentSeed {

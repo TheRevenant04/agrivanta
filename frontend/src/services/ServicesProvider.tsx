@@ -5,7 +5,7 @@ import {
   isUnauthorizedError,
   type AgrivantaServices,
   type AuthService,
-} from './types';
+} from '@/services/types';
 
 function noop() {
   // Default when no unauthorized handler is wired in (e.g. isolated tests).

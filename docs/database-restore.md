@@ -234,7 +234,7 @@ The restore procedure is validated through pytest tests that verify:
 
 Run the test:
 ```bash
-pytest backend/api/tests/test_database_backup_restore.py -v
+pytest backend/api/tests/integration/test_database_backup_restore.py -v
 ```
 
 ---

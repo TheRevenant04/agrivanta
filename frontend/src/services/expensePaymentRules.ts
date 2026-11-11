@@ -9,7 +9,7 @@
  * persisted.
  */
 
-import { ApiError, type ExpenseCategory } from './types';
+import { ApiError, type ExpenseCategory } from '@/services/types';
 
 /** The categories the backend seeds for expenses (issue #20). */
 export const EXPENSE_CATEGORIES: readonly ExpenseCategory[] = [

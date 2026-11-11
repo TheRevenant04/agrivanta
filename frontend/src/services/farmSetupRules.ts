@@ -9,7 +9,7 @@
  * rejected with a clear error before anything is persisted.
  */
 
-import { ApiError, type BaseMeasureCategory } from './types';
+import { ApiError, type BaseMeasureCategory } from '@/services/types';
 
 export const BASE_MEASURE_CATEGORIES: readonly BaseMeasureCategory[] = [
   'mass',

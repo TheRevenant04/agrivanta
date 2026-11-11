@@ -2,7 +2,7 @@ import { createHttpServices, type FetchLike } from './httpServices';
 import { createMockServices } from './mockServices';
 import { sessionStore as defaultSessionStore } from './sessionStore';
 import type { SessionStore } from './sessionStore';
-import type { AgrivantaServices } from './types';
+import type { AgrivantaServices } from '@/services/types';
 
 export type ApiClientKind = 'mock' | 'http';
 

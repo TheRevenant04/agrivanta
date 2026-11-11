@@ -10,8 +10,8 @@
  * never sell more than the harvest's remaining unsold quantity.
  */
 
-import { ApiError } from './types';
-import type { ConversionQuery, ConversionResult, Harvest } from './types';
+import { ApiError } from '@/services/types';
+import type { ConversionQuery, ConversionResult, Harvest } from '@/services/types';
 
 /** Messages shared by both record types. */
 export const RECORD_ERRORS = {

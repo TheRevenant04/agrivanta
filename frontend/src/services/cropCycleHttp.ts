@@ -4,7 +4,7 @@ import type {
   CropCycleInput,
   CropCycleServices,
   CropCycleUpdateInput,
-} from './types';
+} from '@/services/types';
 
 function body(input: unknown): RequestInit {
   return { method: 'POST', body: JSON.stringify(input) };
