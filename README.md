@@ -51,16 +51,15 @@ Node.js, PostgreSQL, or Redis installation is needed for this stack.
 docker compose up --build
 ```
 
-This builds the backend and frontend images, runs database migrations, and
-starts PostgreSQL, Redis, the Django development server, the Vite frontend
-development server, and a Celery worker. The API is available at
-`http://localhost:8000/api/` with its health endpoint at
-`http://localhost:8000/healthz`; the frontend is at `http://localhost:5173/`.
+This builds the backend image (which uses a multi-stage build to compile the
+React frontend), runs database migrations, and starts PostgreSQL, Redis, the
+Django development server, and a Celery worker. Both the frontend UI and the REST
+API are available at `http://localhost:8000/` (the API is at
+`http://localhost:8000/api/`, with health endpoints at
+`http://localhost:8000/healthz` and `http://localhost:8000/readyz`).
 Compose waits for PostgreSQL and Redis health checks before starting Django,
-for Django to become healthy before starting the worker and frontend, and
-configures the frontend to call the backend over HTTP instead of using mock
-services. Django and the frontend are published on loopback only
-(`127.0.0.1:8000` and `127.0.0.1:5173`).
+and for Django to become healthy before starting the worker. Django is
+published on loopback only (`127.0.0.1:8000`).
 
 Compose defaults `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` to
 `agrivanta`; override them in the shell or Compose environment when needed.
@@ -74,10 +73,10 @@ require the optional Playwright dependency and a Chromium-compatible browser,
 which the image does not include. PDF export requests return `503` without
 these dependencies.
 
-In another terminal, follow the application, frontend, and worker logs with:
+In another terminal, follow the application and worker logs with:
 
 ```bash
-docker compose logs -f web frontend celery-worker
+docker compose logs -f web celery-worker
 ```
 
 Stop and remove the containers and network with:
@@ -97,8 +96,8 @@ uv run pytest
 
 ## Frontend
 
-The Compose stack already runs the frontend at `http://localhost:5173/`. To run
-it outside Docker, use a separate terminal from `frontend/`:
+To run the frontend for local development outside Docker, use a separate
+terminal from `frontend/`:
 
 ```bash
 npm ci
