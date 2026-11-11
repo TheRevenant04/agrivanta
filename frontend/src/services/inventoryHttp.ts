@@ -5,7 +5,7 @@ import type {
   InventoryServices,
   StockMovement,
   StockMovementInput,
-} from './types';
+} from '@/services/types';
 
 function body(input: unknown): RequestInit {
   return { method: 'POST', body: JSON.stringify(input) };

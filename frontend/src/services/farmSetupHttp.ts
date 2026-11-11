@@ -15,7 +15,7 @@ import type {
   UnitInput,
   Variety,
   VarietyInput,
-} from './types';
+} from '@/services/types';
 
 /** The request helper `createHttpServices` exposes to domain factories. */
 export type ServiceRequest = <T>(

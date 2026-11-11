@@ -16,7 +16,7 @@ import {
   type Sale,
   type SaleCustomer,
   type SaleInput,
-} from './types';
+} from '@/services/types';
 
 /**
  * Seed shape for the harvest and sale domains. Omitted collections start

@@ -25,7 +25,7 @@ import {
   type Notification,
   type RegisterInput,
   type User,
-} from './types';
+} from '@/services/types';
 
 interface SeedUser extends User {
   password: string;

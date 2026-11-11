@@ -13,7 +13,7 @@ import {
   type StockMovement,
   type StockMovementInput,
   type Unit,
-} from './types';
+} from '@/services/types';
 
 /**
  * Seed shape for the inventory domain. Items carry no quantity: the

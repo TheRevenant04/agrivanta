@@ -4,7 +4,7 @@ import type {
   NotificationPage,
   NotificationServices,
   UnreadCountResponse,
-} from './types';
+} from '@/services/types';
 
 const PAGE_SIZE = 100;
 

@@ -11,7 +11,7 @@
  * `overdue` status the API reports.
  */
 
-import { ApiError, type ActivityCategory, type ActivityStatus } from './types';
+import { ApiError, type ActivityCategory, type ActivityStatus } from '@/services/types';
 
 export const ACTIVITY_CATEGORIES: readonly ActivityCategory[] = [
   'land preparation',

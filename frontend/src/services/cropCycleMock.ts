@@ -11,7 +11,7 @@ import {
   type CropCycleInput,
   type CropCycleServices,
   type CropCycleUpdateInput,
-} from './types';
+} from '@/services/types';
 
 export interface CropCycleMockOptions {
   /** Crop cycles the mock starts with; defaults to none. */

@@ -4,7 +4,7 @@ import type {
   ImportEntityType,
   ImportPreview,
   ImportServices,
-} from './types';
+} from '@/services/types';
 import type { ServiceRequest } from './farmSetupHttp';
 import type { UploadRequest } from './expensePaymentHttp';
 

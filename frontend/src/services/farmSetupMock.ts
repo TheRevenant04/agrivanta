@@ -25,7 +25,7 @@ import {
   type UnitInput,
   type Variety,
   type VarietyInput,
-} from './types';
+} from '@/services/types';
 
 /**
  * Seed shape for the farm setup domains. Omitted collections start empty

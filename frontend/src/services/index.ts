@@ -1,4 +1,4 @@
-export * from './types';
+export * from '@/services/types';
 export * from './sessionStore';
 export { createMockServices } from './mockServices';
 export { createHttpServices } from './httpServices';

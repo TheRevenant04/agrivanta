@@ -20,7 +20,7 @@ import {
   type LoginCredentials,
   type RegisterInput,
   type User,
-} from './types';
+} from '@/services/types';
 
 export type FetchLike = (
   input: string,

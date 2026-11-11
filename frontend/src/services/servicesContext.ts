@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { AgrivantaServices } from './types';
+import type { AgrivantaServices } from '@/services/types';
 
 export const ServicesContext = createContext<AgrivantaServices | null>(null);
 

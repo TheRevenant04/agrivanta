@@ -5,7 +5,7 @@ import type {
   ExpensePaymentServices,
   Payment,
   PaymentInput,
-} from './types';
+} from '@/services/types';
 import type { ServiceRequest } from './farmSetupHttp';
 
 /**
