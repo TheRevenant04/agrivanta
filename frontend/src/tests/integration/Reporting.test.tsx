@@ -10,11 +10,7 @@ import { App } from '@/App';
 import { createMockServices, MOCK_USERS } from '@/services/mockServices';
 import { createMemorySessionStore } from '@/services/sessionStore';
 import { ApiError } from '@/services/types';
-import type {
-  DashboardKpis,
-  ReportName,
-  ReportResult,
-} from '@/services/types';
+import type { DashboardKpis, ReportName, ReportResult } from '@/services/types';
 
 const period = {
   id: 'p1',

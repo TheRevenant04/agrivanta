@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { isLowStock } from '@/services/inventoryRules';
-import { createInventoryMock, type InventorySeed } from '@/services/inventoryMock';
+import {
+  createInventoryMock,
+  type InventorySeed,
+} from '@/services/inventoryMock';
 import { createHttpServices } from '@/services/httpServices';
 import { createMockServices } from '@/services/mockServices';
-import { createMemorySessionStore, type SessionStore } from '@/services/sessionStore';
+import {
+  createMemorySessionStore,
+  type SessionStore,
+} from '@/services/sessionStore';
 import {
   isApiError,
   type AgrivantaServices,

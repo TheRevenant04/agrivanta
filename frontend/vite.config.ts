@@ -16,5 +16,6 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/setupTests.ts',
     maxWorkers: 1,
+    exclude: ['e2e/**', 'node_modules/**'],
   },
 });
