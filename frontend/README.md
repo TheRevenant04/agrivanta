@@ -105,8 +105,9 @@ lockfile stays in sync.)
 
 ## Docker
 
-The repository [`docker-compose.yml`](../docker-compose.yml) builds and runs
-the frontend with the rest of the stack. From the repository root:
+The development Compose stack builds the frontend from
+[`Dockerfile`](Dockerfile) and runs the Vite dev server with source mounted
+from the host. From the repository root:
 
 ```bash
 docker compose up --build
@@ -116,6 +117,11 @@ The frontend is available at `http://localhost:5173/` and is configured with
 `VITE_API_CLIENT=http` pointing at `http://localhost:8000/api`. Compose mounts
 the source for hot reload and keeps installed dependencies in a named volume,
 so no local Node.js installation is needed.
+
+The production-like stack (`docker-compose.prod.yml`) does not run a separate
+frontend container: the backend image compiles the Vite app with
+`VITE_API_BASE_URL=/api` and serves the built assets through Django. See the
+[repository README](../README.md#docker-environments) for both stacks.
 
 ## Commands
 

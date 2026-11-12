@@ -1,0 +1,139 @@
+name: agrivanta-prod
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agrivanta}
+      POSTGRES_USER: ${POSTGRES_USER:-agrivanta}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD (see .env.prod.example)}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    image: agrivanta-backend:${AGRIVANTA_VERSION:-local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
+      args:
+        AGRIVANTA_VERSION: ${AGRIVANTA_VERSION:-local}
+        AGRIVANTA_REVISION: ${AGRIVANTA_REVISION:-unknown}
+        VITE_API_CLIENT: http
+        VITE_API_BASE_URL: /api
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+    restart: unless-stopped
+    command: >-
+      sh -c "python manage.py migrate --noinput && exec gunicorn
+      config.wsgi:application --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-3} --access-logfile -
+      --error-logfile -"
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY (see .env.prod.example)}"
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      POSTGRES_DB: ${POSTGRES_DB:-agrivanta}
+      POSTGRES_USER: ${POSTGRES_USER:-agrivanta}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD (see .env.prod.example)}"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    ports:
+      - "127.0.0.1:${AGRIVANTA_WEB_PORT:-8000}:8000"
+    volumes:
+      - media_data:/app/backend/media
+      - private_attachments_data:/app/backend/private_attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/healthz', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  celery-worker:
+    image: agrivanta-backend:${AGRIVANTA_VERSION:-local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
+      args:
+        AGRIVANTA_VERSION: ${AGRIVANTA_VERSION:-local}
+        AGRIVANTA_REVISION: ${AGRIVANTA_REVISION:-unknown}
+        VITE_API_CLIENT: http
+        VITE_API_BASE_URL: /api
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+    restart: unless-stopped
+    command: celery -A config.celery:app worker --loglevel=info --hostname=celery@celery-worker
+    hostname: celery-worker
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY (see .env.prod.example)}"
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      POSTGRES_DB: ${POSTGRES_DB:-agrivanta}
+      POSTGRES_USER: ${POSTGRES_USER:-agrivanta}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD (see .env.prod.example)}"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    volumes:
+      - media_data:/app/backend/media
+      - private_attachments_data:/app/backend/private_attachments
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A config.celery:app inspect ping -d celery@celery-worker --timeout=5",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  media_data:
+  private_attachments_data:

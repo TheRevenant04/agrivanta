@@ -41,54 +41,141 @@ The backend-maintained OpenAPI contract is available at
 `http://localhost:8000/healthz` is the liveness endpoint;
 `http://localhost:8000/readyz` checks database readiness.
 
-## Local development with Docker Compose
+## Docker environments
 
-Install Docker Desktop (Windows/macOS) or Docker Engine with the Docker Compose
-v2 plugin, then run these commands from the repository root. No local Python,
-Node.js, PostgreSQL, or Redis installation is needed for this stack.
+Prerequisites: Docker Desktop (Windows/macOS) or Docker Engine with the Docker
+Compose v2 plugin. No local Python, Node.js, PostgreSQL, or Redis installation
+is needed. Both stacks use the base images already used by the project:
+Python 3.13, Node.js 24, PostgreSQL 17, and Redis 7.
+
+The repository ships two Compose files that use the same services but different
+runtime behaviour:
+
+| Stack            | Compose file             | Purpose                                                                                                                                                    |
+| ---------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Development      | `docker-compose.yml`     | Fast local iteration: bind-mounted source, Django `runserver` auto-reload, Vite dev server with HMR, Celery worker.                                        |
+| Production-like  | `docker-compose.prod.yml` | Immutable images: Gunicorn, built static assets served by Django/WhiteNoise, non-root user, no source mounts, `DJANGO_DEBUG=0`, Celery worker.             |
+
+Both stacks read variables from the process environment and from an optional
+Compose env file. The checked-in templates are:
+
+- [`.env.dev.example`](.env.dev.example) — development credentials and ports.
+- [`.env.prod.example`](.env.prod.example) — production-like placeholders for
+  the Django secret key, database password, image tag, workers, and frontend
+  build.
+
+Copy a template to `.env.dev` or `.env.prod`; those files are gitignored.
+Never commit real secrets.
+
+### Development stack
+
+From the repository root:
 
 ```bash
-docker compose up --build
+docker compose --env-file .env.dev up --build
 ```
 
-This builds the backend image (which uses a multi-stage build to compile the
-React frontend), runs database migrations, and starts PostgreSQL, Redis, the
-Django development server, and a Celery worker. Both the frontend UI and the REST
-API are available at `http://localhost:8000/` (the API is at
+`--env-file` is optional: without it, Compose uses the development defaults in
+`docker-compose.yml`. Copying `.env.dev.example` is only needed when you want to
+override the defaults.
+
+The development stack runs:
+
+| Service         | Host port            | Notes                                                                                   |
+| --------------- | -------------------- | --------------------------------------------------------------------------------------- |
+| `frontend`      | `127.0.0.1:5173`     | Vite dev server with hot module replacement, configured to call the backend at `/api`. |
+| `web`           | `127.0.0.1:8000`     | Django `runserver` with auto-reload, `DJANGO_DEBUG=1`.                                  |
+| `celery-worker` | —                    | Celery worker using Redis.                                                              |
+| `postgres`      | —                    | PostgreSQL 17, not published to the host.                                               |
+| `redis`         | —                    | Redis 7, not published to the host.                                                     |
+
+Open the UI at `http://localhost:5173/`. The API is at
 `http://localhost:8000/api/`, with health endpoints at
-`http://localhost:8000/healthz` and `http://localhost:8000/readyz`).
+`http://localhost:8000/healthz` and `http://localhost:8000/readyz`. Source is
+bind-mounted from `./backend` and `./frontend`, so edits reload automatically.
 Compose waits for PostgreSQL and Redis health checks before starting Django,
-and for Django to become healthy before starting the worker. Django is
-published on loopback only (`127.0.0.1:8000`).
+and for Django to become healthy before starting the worker.
 
-Compose defaults `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` to
-`agrivanta`; override them in the shell or Compose environment when needed.
-The default credentials and debug configuration are for local development
-only. PostgreSQL and Redis are not published to the host by this Compose file.
-The stack starts a Celery worker, not a Celery beat scheduler, so configured
-periodic tasks are not automatically scheduled by Compose.
-
-PDF report exports are not available in the default Compose image: they
-require the optional Playwright dependency and a Chromium-compatible browser,
-which the image does not include. PDF export requests return `503` without
-these dependencies.
-
-In another terminal, follow the application and worker logs with:
+Follow logs with:
 
 ```bash
-docker compose logs -f web celery-worker
+docker compose logs -f web frontend celery-worker
 ```
 
-Stop and remove the containers and network with:
+Stop the stack with:
 
 ```bash
 docker compose down
 ```
 
-The PostgreSQL data volume is preserved by `down`; use `docker compose down -v`
-only when you also want to delete the local database data.
+### Production-like stack
 
-Run backend tests from the repository root:
+Build and start the production-like stack from the repository root:
+
+```bash
+cp .env.prod.example .env.prod
+# replace the secret placeholders in .env.prod
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+```
+
+Set `AGRIVANTA_VERSION` to an explicit release version or commit SHA in
+`.env.prod` (or export it in the shell) so images are tagged, for example
+`agrivanta-backend:$(git rev-parse --short HEAD)`. Add `AGRIVANTA_REVISION` with
+the same value to record it as an OCI image label. Builds use `npm ci` and
+`uv sync --frozen`, so they are reproducible from a clean clone.
+
+This stack builds one multi-stage backend image that:
+
+- compiles the Vite frontend and copies the assets into the image;
+- installs runtime dependencies only (`--no-dev`);
+- runs `collectstatic`;
+- runs Gunicorn as the non-root `app` user; and
+- serves the built UI and API from `http://127.0.0.1:8000/`.
+
+PostgreSQL and Redis are internal to the Compose network. PostgreSQL data,
+uploaded media, and private attachments use named volumes. There are no source
+bind mounts, and Compose does not start a Celery beat scheduler.
+
+Check both health endpoints after the containers are healthy:
+
+```bash
+curl --fail http://127.0.0.1:8000/healthz
+curl --fail http://127.0.0.1:8000/readyz
+```
+
+Stop the stack with:
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yml down
+```
+
+The named volumes are preserved by `down`; use `down -v` only when you also want
+to delete the database, media, and attachment data.
+
+### Differences between the stacks
+
+| Aspect          | Development (`docker-compose.yml`)        | Production-like (`docker-compose.prod.yml`)                    |
+| --------------- | ----------------------------------------- | -------------------------------------------------------------- |
+| Backend server  | `runserver` (auto-reload)                 | Gunicorn                                                       |
+| Debug           | `DJANGO_DEBUG=1`                          | `DJANGO_DEBUG=0`                                               |
+| Source code     | Bind-mounted from the host                | Copied into the immutable image                                |
+| Frontend        | Vite dev server on port 5173              | Built assets served by Django on port 8000                     |
+| Static files    | Served by the development servers         | `collectstatic` + WhiteNoise                                   |
+| Container user  | Image default (root in the dev image)     | Non-root `app` user (UID/GID 10001)                            |
+| Image tag       | Built on demand                           | `agrivanta-backend:${AGRIVANTA_VERSION}`                       |
+| Restart policy  | Default                                   | `unless-stopped`                                               |
+| Secrets         | Development placeholders                  | Required from `.env.prod`; no committed secrets                |
+
+Both stacks publish the web port on loopback and default to `8000`, so run one
+at a time or set `AGRIVANTA_WEB_PORT` to a free port. The development frontend
+port can be changed with `AGRIVANTA_FRONTEND_PORT`.
+
+PDF report exports are not available in the Compose images: they require the
+optional Playwright dependency and a Chromium-compatible browser, which the
+images do not include. PDF export requests return `503` without these
+dependencies.
+
+Run backend tests outside Docker from the repository root:
 
 ```bash
 uv run pytest
