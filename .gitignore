@@ -12,6 +12,8 @@ htmlcov/
 # Environment
 .env
 .env.*
+!.env.dev.example
+!.env.prod.example
 
 # Django
 backend/db.sqlite3
