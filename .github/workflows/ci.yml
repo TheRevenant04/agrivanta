@@ -4,9 +4,15 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  POSTGRES_DB: agrivanta
+  POSTGRES_USER: agrivanta
+  POSTGRES_PASSWORD: agrivanta
+  DJANGO_SECRET_KEY: ci-secret-key-not-for-production
+
 jobs:
   backend:
-    name: Backend tests
+    name: Backend unit tests
     runs-on: ubuntu-latest
 
     services:
@@ -25,14 +31,9 @@ jobs:
           --health-retries 5
 
     env:
-      POSTGRES_DB: agrivanta
-      POSTGRES_USER: agrivanta
-      POSTGRES_PASSWORD: agrivanta
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
-      DJANGO_SECRET_KEY: ci-secret-key-not-for-production
       DJANGO_DEBUG: "1"
-      REPORT_PDF_CHROMIUM_EXECUTABLE: /usr/bin/google-chrome
 
     steps:
       - uses: actions/checkout@v4
@@ -48,24 +49,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run migrations
-        run: uv run python backend/manage.py migrate --no-input
-
-      - name: Install PDF dependencies
-        run: uv pip install -r backend/requirements-pdf.txt
-
-      - name: Run backend tests
-        run: |
-          # Chromium's Linux singleton socket path is limited to 108 chars.
-          # Bind-mount the workspace at a short path so the PDF runtime
-          # directory under backend/.pdf-runtime stays within that limit.
-          sudo mkdir -p /r
-          sudo mount --bind "$GITHUB_WORKSPACE" /r
-          cd /r
-          uv run --no-sync pytest
+      - name: Run backend unit tests
+        run: uv run python -m pytest backend/api/tests/unit
 
   frontend:
-    name: Frontend tests
+    name: Frontend unit tests
     runs-on: ubuntu-latest
 
     defaults:
@@ -91,40 +79,21 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
-      - name: Run frontend tests
-        run: npm test
+      - name: Run frontend unit tests
+        run: npx vitest run src/tests/unit
 
-  e2e:
-    name: End-to-end success workflow
+  verify:
+    name: Integration and end-to-end tests
+    needs: [backend, frontend]
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: agrivanta
-          POSTGRES_USER: agrivanta
-          POSTGRES_PASSWORD: agrivanta
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U agrivanta"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     env:
-      POSTGRES_DB: agrivanta
-      POSTGRES_USER: agrivanta
-      POSTGRES_PASSWORD: agrivanta
-      POSTGRES_HOST: localhost
+      POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: 5432
-      DJANGO_SECRET_KEY: ci-secret-key-not-for-production
       DJANGO_DEBUG: "1"
-      AGRIVANTA_LLM_FAKE: "1"
-      VITE_API_CLIENT: http
-      VITE_API_BASE_URL: /api
-      VITE_BASE: /static/
+      REPORT_PDF_CHROMIUM_EXECUTABLE: /usr/bin/google-chrome
+      E2E_BASE_URL: http://127.0.0.1:5173
+      E2E_API_BASE: http://127.0.0.1:8000
 
     steps:
       - uses: actions/checkout@v4
@@ -141,8 +110,8 @@ jobs:
       - name: Install backend dependencies
         run: uv sync
 
-      - name: Run migrations
-        run: uv run python backend/manage.py migrate --no-input
+      - name: Install PDF dependencies
+        run: uv pip install -r backend/requirements-pdf.txt
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -155,33 +124,30 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-
-      - name: Copy frontend build to backend
-        run: |
-          mkdir -p backend/frontend_dist
-          cp -r frontend/dist/* backend/frontend_dist/
-
-      - name: Collect static files
-        run: uv run python backend/manage.py collectstatic --no-input
-
-      - name: Start Django backend server
-        run: |
-          uv run python backend/manage.py runserver 0.0.0.0:8000 &
-          # Wait for server to become ready
-          for i in $(seq 1 30); do
-            if curl -s http://127.0.0.1:8000/healthz | grep -q ok; then
-              echo "Backend is up"
-              break
-            fi
-            sleep 1
-          done
-
       - name: Install Playwright browsers
         working-directory: frontend
         run: npx playwright install --with-deps chromium
+
+      - name: Build Docker Compose stack
+        run: >-
+          docker compose
+          -f docker-compose.yml
+          -f docker-compose.ci.yml
+          up -d --build --wait --wait-timeout 180
+
+      - name: Run backend integration tests
+        run: |
+          # Chromium's Linux singleton socket path is limited to 108 chars.
+          # Bind-mount the workspace at a short path so the PDF runtime
+          # directory under backend/.pdf-runtime stays within that limit.
+          sudo mkdir -p /r
+          sudo mount --bind "$GITHUB_WORKSPACE" /r
+          cd /r
+          uv run --no-sync pytest backend/api/tests/integration
+
+      - name: Run frontend integration tests
+        working-directory: frontend
+        run: npx vitest run src/tests/integration
 
       - name: Run Playwright E2E tests
         working-directory: frontend
@@ -195,7 +161,34 @@ jobs:
           path: frontend/playwright-report/
           retention-days: 7
 
-      - name: Stop Django backend server
-        if: always()
-        run: pkill -f "manage.py runserver" || true
+      - name: Dump Docker Compose logs on failure
+        if: failure()
+        run: >-
+          docker compose
+          -f docker-compose.yml
+          -f docker-compose.ci.yml
+          logs --no-color
 
+      - name: Tear down Docker Compose stack
+        if: always()
+        run: >-
+          docker compose
+          -f docker-compose.yml
+          -f docker-compose.ci.yml
+          down -v
+
+  # Aggregated gate: make this the required status check before merging to main.
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [backend, frontend, verify]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check all required jobs passed
+        run: |
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}; then
+            echo "One or more required jobs did not pass."
+            exit 1
+          fi
+          echo "All required jobs passed."

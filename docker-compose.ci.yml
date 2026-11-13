@@ -1,0 +1,13 @@
+# CI-only overrides for docker-compose.yml.
+#
+# Expose Postgres to the runner so backend integration tests can use the
+# stack database, and make the AI chat endpoint deterministic by using the
+# fake LLM adapter instead of calling a real provider.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  web:
+    environment:
+      AGRIVANTA_LLM_FAKE: "1"
