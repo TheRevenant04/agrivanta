@@ -53,7 +53,9 @@ test.describe('success workflow', () => {
 });
 
 async function setupFarm(request: APIRequestContext): Promise<void> {
-  const authHeaders = (token: string) => ({ Authorization: `Token ${token}` });
+  const authHeaders = (token: string) => ({
+    Authorization: `Bearer ${token}`,
+  });
 
   // Register a new user (auto-creates a farm).
   const register = await request.post(`${API_BASE}/api/auth/register`, {
