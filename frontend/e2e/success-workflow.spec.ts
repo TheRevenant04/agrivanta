@@ -30,13 +30,24 @@ test.describe('success workflow', () => {
       page.locator('article:has-text("AI analyst") [role="alert"]'),
     ).not.toBeVisible();
     await expect(page.locator('[aria-label="Evidence"]')).toBeVisible();
-    await expect(page.locator('h3:has-text("Figures")')).toBeVisible();
+
+    // Evidence is collapsed by default; open it to inspect the sections.
+    await page.locator('[aria-label="Evidence"] summary').click();
+
+    const figures = page.locator('section[aria-label="Figures"]');
+    await expect(figures.locator('h3')).toHaveText('Figures');
+    await expect(figures.locator('li').first()).toBeVisible();
     await expect(
-      page.locator('h3:has-text("Reporting periods")'),
+      page.locator('section[aria-label="Reporting periods"] h3'),
     ).toBeVisible();
-    await expect(page.locator('h3:has-text("Crop cycles")')).toBeVisible();
     await expect(
-      page.locator('h3:has-text("Calculation basis")'),
+      page.locator('section[aria-label="Crop cycles"] h3'),
+    ).toBeVisible();
+    await expect(
+      page.locator('section[aria-label="Calculation basis"] h3'),
+    ).toBeVisible();
+    await expect(
+      page.locator('section[aria-label="Calculation basis"] li').first(),
     ).toBeVisible();
   });
 });

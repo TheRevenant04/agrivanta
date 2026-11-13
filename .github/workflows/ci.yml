@@ -122,6 +122,9 @@ jobs:
       DJANGO_SECRET_KEY: ci-secret-key-not-for-production
       DJANGO_DEBUG: "1"
       AGRIVANTA_LLM_FAKE: "1"
+      VITE_API_CLIENT: http
+      VITE_API_BASE_URL: /api
+      VITE_BASE: /static/
 
     steps:
       - uses: actions/checkout@v4
@@ -159,6 +162,9 @@ jobs:
         run: |
           mkdir -p backend/frontend_dist
           cp -r frontend/dist/* backend/frontend_dist/
+
+      - name: Collect static files
+        run: uv run python backend/manage.py collectstatic --no-input
 
       - name: Start Django backend server
         run: |
