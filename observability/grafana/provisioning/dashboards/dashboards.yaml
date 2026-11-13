@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Agrivanta
+    orgId: 1
+    folder: Agrivanta
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
