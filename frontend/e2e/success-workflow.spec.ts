@@ -29,10 +29,13 @@ test.describe('success workflow', () => {
     await expect(
       page.locator('article:has-text("AI analyst") [role="alert"]'),
     ).not.toBeVisible();
-    await expect(page.locator('[aria-label="Evidence"]')).toBeVisible();
+    const evidenceSummary = page.locator('summary', {
+      hasText: /^Evidence$/,
+    });
+    await expect(evidenceSummary).toBeVisible();
 
     // Evidence is collapsed by default; open it to inspect the sections.
-    await page.locator('[aria-label="Evidence"] summary').click();
+    await evidenceSummary.click();
 
     const figures = page.locator('section[aria-label="Figures"]');
     await expect(figures.locator('h3')).toHaveText('Figures');
