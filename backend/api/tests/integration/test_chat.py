@@ -459,6 +459,22 @@ def test_chat_rejects_overlong_question(client, monkeypatch):
     assert fake.completion_messages == []
 
 
+def test_chat_accepts_ndjson_accept_header(client, monkeypatch):
+    fake = _fake_client({"tool_calls": []}, "Inventory looks healthy.")
+    monkeypatch.setattr("api.chat.get_llm_client", lambda: fake)
+
+    response = client.post(
+        CHAT,
+        {"question": "What is my inventory position?"},
+        format="json",
+        HTTP_ACCEPT="application/x-ndjson",
+    )
+
+    assert response.status_code == 200
+    assert response["Content-Type"].startswith("application/x-ndjson")
+    assert _stream_events(response)[-1]["type"] == "final"
+
+
 def test_chat_returns_503_when_llm_service_is_unavailable(
     client, monkeypatch
 ):

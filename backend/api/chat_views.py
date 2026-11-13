@@ -1,5 +1,6 @@
 from django.http import StreamingHttpResponse
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -8,8 +9,14 @@ from llm import LLMError
 from .chat import prepare_chat, stream_chat
 
 
+class NdjsonRenderer(JSONRenderer):
+    media_type = "application/x-ndjson"
+    format = "ndjson"
+
+
 class ChatView(APIView):
     permission_classes = [IsAuthenticated]
+    renderer_classes = [NdjsonRenderer, JSONRenderer]
 
     def post(self, request):
         question = request.data.get("question")
