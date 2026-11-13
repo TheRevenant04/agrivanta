@@ -1,6 +1,7 @@
 """Read-only, streamed orchestration for farm question answering."""
 
 import json
+import os
 import re
 from collections.abc import Iterator
 from copy import deepcopy
@@ -15,9 +16,11 @@ from api.query_tools import (
     inventory_position,
 )
 from llm import (
+    FakeLLMClient,
     LLMClient,
     LLMError,
     LLMMessage,
+    LLMResponse,
     LLMStreamCompleted,
     LLMStreamError,
     LLMTextDelta,
@@ -146,7 +149,31 @@ class ChatExecution:
     fixed_answer: str | None = None
 
 
+_FAKE_ANSWER = (
+    "Based on your farm records, your inventory position is recorded above."
+)
+
+
 def get_llm_client() -> LLMClient:
+    if os.environ.get("AGRIVANTA_LLM_FAKE") == "1":
+        return FakeLLMClient(
+            completion_response=LLMResponse(
+                text=json.dumps(
+                    {
+                        "tool_calls": [{"name": "inventory_position", "arguments": {}}],
+                        "limitations": [],
+                    }
+                ),
+                model="fake",
+            ),
+            stream_events=[
+                LLMTextDelta(text="Based on your farm records, "),
+                LLMTextDelta(text="your inventory position is recorded above."),
+                LLMStreamCompleted(
+                    response=LLMResponse(text=_FAKE_ANSWER, model="fake")
+                ),
+            ],
+        )
     return OpenAIResponsesClient.from_settings()
 
 

@@ -10,7 +10,11 @@
  * anything is persisted.
  */
 
-import { ApiError, type InventoryItem, type StockMovementType } from '@/services/types';
+import {
+  ApiError,
+  type InventoryItem,
+  type StockMovementType,
+} from '@/services/types';
 
 /** Movement types the backend accepts. */
 export const MOVEMENT_TYPES: readonly StockMovementType[] = [

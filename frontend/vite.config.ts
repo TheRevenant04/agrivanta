@@ -5,6 +5,7 @@ import { defineConfig } from 'vitest/config';
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: process.env.VITE_BASE || '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -16,5 +17,6 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/setupTests.ts',
     maxWorkers: 1,
+    exclude: ['e2e/**', 'node_modules/**'],
   },
 });

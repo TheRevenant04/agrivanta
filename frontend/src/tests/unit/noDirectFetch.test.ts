@@ -26,7 +26,13 @@ const forbiddenPatterns: Array<{ name: string; pattern: RegExp }> = [
 describe('services layer is the only backend surface', () => {
   it('has no component, page, hook, or store outside src/services calling the backend directly', () => {
     const violations = listSourceFiles(SRC_DIR)
-      .filter((file) => !file.startsWith(SERVICES_DIR + sep) && !file.includes(`${sep}tests${sep}`) && !file.endsWith('.test.ts') && !file.endsWith('.test.tsx'))
+      .filter(
+        (file) =>
+          !file.startsWith(SERVICES_DIR + sep) &&
+          !file.includes(`${sep}tests${sep}`) &&
+          !file.endsWith('.test.ts') &&
+          !file.endsWith('.test.tsx'),
+      )
       .flatMap((file) => {
         const source = readFileSync(file, 'utf8');
 

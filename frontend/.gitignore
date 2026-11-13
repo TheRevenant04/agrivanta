@@ -4,6 +4,8 @@ coverage/
 *.local
 .vite/
 .eslintcache
+test-results/
+playwright-report/
 
 # Root .gitignore ignores .env.*; keep the documented example tracked.
 !.env.example
