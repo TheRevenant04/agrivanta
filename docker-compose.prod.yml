@@ -62,6 +62,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-agrivanta-backend}
+      OTEL_DEPLOYMENT_ENVIRONMENT: ${OTEL_DEPLOYMENT_ENVIRONMENT:-local}
+      AGRIVANTA_VERSION: ${AGRIVANTA_VERSION:-local}
+      AGRIVANTA_REVISION: ${AGRIVANTA_REVISION:-unknown}
     ports:
       - "127.0.0.1:${AGRIVANTA_WEB_PORT:-8000}:8000"
     volumes:
@@ -114,6 +119,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-agrivanta-backend}
+      OTEL_DEPLOYMENT_ENVIRONMENT: ${OTEL_DEPLOYMENT_ENVIRONMENT:-local}
+      AGRIVANTA_VERSION: ${AGRIVANTA_VERSION:-local}
+      AGRIVANTA_REVISION: ${AGRIVANTA_REVISION:-unknown}
     volumes:
       - media_data:/app/backend/media
       - private_attachments_data:/app/backend/private_attachments
