@@ -6,6 +6,8 @@ import structlog
 from celery.schedules import crontab
 from sentry_sdk.integrations.django import DjangoIntegration
 
+from api.telemetry import add_trace_context
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get(
@@ -16,6 +18,29 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",")
 LLM_OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+
+# --- OpenTelemetry ---
+# Telemetry is opt-in: without an OTLP endpoint the backend stays a no-op.
+OTEL_EXPORTER_OTLP_ENDPOINT = os.environ.get(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", ""
+).strip()
+OTEL_SERVICE_NAME = (
+    os.environ.get("OTEL_SERVICE_NAME", "").strip() or "agrivanta-backend"
+)
+_OTEL_ALLOWED_ENVIRONMENTS = {"local", "dev", "staging", "production"}
+_otel_environment = os.environ.get(
+    "OTEL_DEPLOYMENT_ENVIRONMENT", "local"
+).strip().lower()
+OTEL_DEPLOYMENT_ENVIRONMENT = (
+    _otel_environment
+    if _otel_environment in _OTEL_ALLOWED_ENVIRONMENTS
+    else "local"
+)
+AGRIVANTA_VERSION = os.environ.get("AGRIVANTA_VERSION", "").strip() or "local"
+AGRIVANTA_REVISION = os.environ.get("AGRIVANTA_REVISION", "").strip()
+OTEL_SERVICE_VERSION = (
+    AGRIVANTA_VERSION if AGRIVANTA_VERSION not in ("", "unknown") else "local"
+)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -177,6 +202,7 @@ structlog.configure(
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
+        add_trace_context,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
@@ -197,6 +223,7 @@ LOGGING = {
                 structlog.contextvars.merge_contextvars,
                 structlog.stdlib.add_log_level,
                 structlog.processors.TimeStamper(fmt="iso", utc=True),
+                add_trace_context,
             ],
         },
     },

@@ -16,6 +16,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView as RestFrameworkAPIView
 
+from . import telemetry
 from .audit import AuditedAPIViewMixin, actor_context
 from .exceptions import ApiError
 from .import_service import (
@@ -563,6 +564,7 @@ class RegisterView(APIView):
             seed_farm(farm)
             token = Token.objects.create(user=user)
 
+        telemetry.record_farm_created()
         return Response(
             {"token": token.key, "user": serialize_user(user)},
             status=status.HTTP_201_CREATED,
@@ -2066,6 +2068,7 @@ class ActivityListView(APIView):
             status=ActivityStatus.PLANNED,
             description=optional_text(request.data, "description"),
         )
+        telemetry.record_record_created("activity")
         return Response(
             serialize_activity(activity), status=status.HTTP_201_CREATED
         )
@@ -3387,6 +3390,7 @@ class ExpenseListView(APIView):
         farm = get_farm(request.user)
         values = self._validate(request.data, farm)
         expense = Expense.objects.create(farm=farm, **values)
+        telemetry.record_record_created("expense")
         return Response(
             serialize_expense(expense),
             status=status.HTTP_201_CREATED,
@@ -4356,6 +4360,7 @@ class HarvestListView(APIView):
             unit=unit,
             date=harvest_date,
         )
+        telemetry.record_record_created("harvest")
         return Response(
             serialize_harvest(harvest),
             status=status.HTTP_201_CREATED,
@@ -4604,6 +4609,7 @@ class SaleListView(APIView):
             date=sale_date,
             revenue=revenue,
         )
+        telemetry.record_record_created("sale")
         return Response(
             serialize_sale(sale), status=status.HTTP_201_CREATED
         )

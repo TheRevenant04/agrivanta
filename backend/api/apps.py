@@ -8,3 +8,6 @@ class ApiConfig(AppConfig):
     def ready(self):
         from . import attachment_signals  # noqa: F401
         from . import audit  # noqa: F401
+        from . import telemetry
+
+        telemetry.setup_telemetry()
