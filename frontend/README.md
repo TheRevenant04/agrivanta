@@ -121,7 +121,7 @@ so no local Node.js installation is needed.
 The production-like stack (`docker-compose.prod.yml`) does not run a separate
 frontend container: the backend image compiles the Vite app with
 `VITE_API_BASE_URL=/api` and serves the built assets through Django. See the
-[repository README](../README.md#docker-environments) for both stacks.
+[repository README](../README.md) and [deployment guide](../docs/deployment.md) for both stacks.
 
 ## Commands
 

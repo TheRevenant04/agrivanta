@@ -26,7 +26,7 @@ Agrivanta is a modern, cloud-native web application built with a decoupled front
 - **Vite** for build tooling and HMR
 - **Tailwind CSS v4** for styling
 - **shadcn/ui** for accessible component primitives
-- **React Router v6** for routing
+- **React Router 7** for routing
 - **TanStack Query** for server state management
 - **Vitest** + React Testing Library for testing
 

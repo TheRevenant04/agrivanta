@@ -21,24 +21,29 @@ SQLite by default, with PostgreSQL available through environment configuration.
 The development Compose stack runs PostgreSQL, Redis, Django, the Vite
 frontend development server, and a Celery worker. Celery tasks and a beat
 schedule exist, but Compose does not start Celery beat. The AI chat UI and endpoint are implemented; consult the plan and
-open issues for capabilities not yet delivered. There is currently no GitHub
-Actions CI workflow.
+open issues for capabilities not yet delivered. GitHub Actions CI is
+configured in `.github/workflows/ci.yml` for pull requests to `main`; there is
+currently no automated cloud deployment or CD workflow.
 
 ## Repository layout
 
 ```text
 _docs/                Product plan, backlog, and agent workflow rules
 .agents/              Portable agent and skill definitions
-.opencode/             OpenCode agents and the guardrails plugin
+.github/workflows/    GitHub Actions CI workflows
+.opencode/            OpenCode agents, plugins, and local runtime files
 backend/              Django project, API app, migrations, and pytest suite
 frontend/             React/Vite app, services, and Vitest suite
 custom-agent/         Headless PM/engineer/QA issue orchestrator
 mcp-server/           Read-only backlog + issues MCP server
+docs/                 Product and engineering documentation
 backend/api/openapi.yaml Backend API contract, published at /openapi.yaml
 docker-compose.yml    Local PostgreSQL, Redis, Django, frontend, and Celery stack
+docker-compose.ci.yml CI Compose overrides
+docker-compose.prod.yml Production-like Compose stack
 opencode.json         OpenCode config: permissions, MCP, instructions
 pyproject.toml        Python project metadata and dependencies
-README.md             Project overview and local setup
+README.md             Project overview and documentation index
 ```
 
 ## Required reading
@@ -75,9 +80,9 @@ Summary of the non-negotiables:
 1. Inspect before acting: `git status --short --branch`, then read the
    relevant `_docs` files and any `AGENTS.md` in subdirectories.
 2. Keep changes limited to the task's scope; stage only intended files.
-3. Run relevant backend/frontend checks before committing. No GitHub Actions
-   checks are configured; distinguish local checks from hosted CI and report
-   any checks that could not be run.
+3. Run relevant backend/frontend checks before committing. GitHub Actions CI is
+   configured for pull requests to `main` (see `docs/ci-cd.md`); distinguish
+   local checks from hosted CI and report any checks that could not be run.
 4. Report the commit hash, subject, and checks run. Do not claim success
    for work that did not complete.
 
