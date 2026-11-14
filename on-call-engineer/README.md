@@ -58,12 +58,24 @@ Invoke a headless coding agent when a firing alert is detected:
 ```powershell
 python on-call-engineer/on_call_agent.py `
   --alert-url http://localhost:9090/api/v1/alerts `
-  --agent-command "opencode run --agent software-engineer --auto \"Investigate this observability alert: {alert_json}\""
+  --agent-command 'opencode run --agent software-engineer --auto "Investigate this observability alert: {alert_json}"'
 ```
 
-`{alert_json}` is replaced with a shell-quoted JSON payload containing extracted
-alert details. If `--agent-command`/`AGENT_COMMAND` is not set, the script logs
-firing alerts and does not execute an external runner.
+Or pass the alert JSON via a temporary `.json` file:
+
+```powershell
+python on-call-engineer/on_call_agent.py `
+  --alert-url http://localhost:9090/api/v1/alerts `
+  --agent-command "my-agent-runner --alert-file {alert_file}"
+```
+
+The command template is tokenized with `shlex.split` and executed directly
+without a shell (`shell=False`). `{alert_json}` is substituted inside the
+matching argument token with the JSON alert payload, and `{alert_file}` writes
+the JSON payload to a temporary `.json` file that is removed after the runner
+completes. Literal `{...}` braces in other parts of the command template are
+preserved untouched. If `--agent-command`/`AGENT_COMMAND` is not set, the script
+logs firing alerts and does not execute an external runner.
 
 ## Configuration
 
@@ -71,10 +83,11 @@ CLI flags take precedence over environment variables.
 
 | Setting | CLI flag | Environment variable | Default | Description |
 | --- | --- | --- | --- | --- |
-| Alert endpoint | `--alert-url` | `ALERT_API_URL` | `http://localhost:9090/api/v1/alerts` | Observability alert API URL to poll |
+| Alert endpoint | `--alert-url` | `ALERT_API_URL` | `http://localhost:9090/api/v1/alerts` | Observability alert API URL (`http`/`https`) to poll |
 | Poll interval | `--interval` | `POLL_INTERVAL_SECONDS` | `60` | Seconds between polls |
-| HTTP timeout | `--timeout` | `ALERT_API_TIMEOUT_SECONDS` | `10` | Request timeout in seconds |
-| Agent command | `--agent-command` | `AGENT_COMMAND` | *(empty)* | Command template invoked per firing alert; supports `{alert_json}` |
+| HTTP timeout | `--timeout` | `ALERT_API_TIMEOUT_SECONDS` | `10` | HTTP request timeout in seconds |
+| Agent command | `--agent-command` | `AGENT_COMMAND` | *(empty)* | Command template invoked per firing alert (`shell=False`); supports `{alert_json}` and `{alert_file}` |
+| Agent timeout | `--agent-timeout` | `AGENT_TIMEOUT_SECONDS` | `300` | Subprocess timeout in seconds (`0` = disabled) |
 | Single poll | `--once` | `POLL_ONCE` | `false` | Poll once and exit |
 | Max polls | `--max-polls` | `MAX_POLLS` | `0` | Stop after N polls (`0` = unlimited) |
 | Log level | `--log-level` | `LOG_LEVEL` | `INFO` | Python logging level |
@@ -93,24 +106,31 @@ python on-call-engineer/on_call_agent.py
 The poller is tolerant of common observability API responses, including:
 
 - Prometheus alerts API: `{"status":"success","data":{"alerts":[...]}}`
+- Prometheus rules API: `{"status":"success","data":{"rules":[...]}}`
 - Alertmanager/Grafana-style collections: `{"alerts":[...]}` / `{"instances":[...]}`
 - Top-level alert arrays: `[...]`
 - Single alert objects
 
-Alerts are treated as active/firing when state/status indicates
-`firing`, `active`, or `alerting` (or equivalent boolean flags).
+Prometheus `"status": "error"` responses are logged as poll errors rather than
+treated as empty alert sets. Alerts are treated as active/firing when
+state/status indicates `firing`, `active`, or `alerting` (or equivalent boolean
+flags).
 
 ## Error handling and reliability
 
-- HTTP/network failures, timeouts, and invalid JSON are logged and do not crash
-  the polling loop.
-- Agent invocation failures are caught and logged per alert; polling continues.
-- Dedupe prevents re-invoking the same alert repeatedly during one process run.
+- HTTP/network failures, disallowed URL schemes, timeouts, API error payloads,
+  and invalid JSON are logged and do not crash the polling loop.
+- Agent invocation failures (non-zero exit codes, `OSError`, or subprocess
+  timeouts) are caught and logged per alert; failed alerts are not marked
+  handled and will be retried on the next poll, while polling continues.
+- Dedupe tracks currently active alerts so an alert is not re-invoked while
+  continuously firing, and clears resolved alerts when they leave the active
+  set so re-firing alerts trigger again.
 - `--once`/`--max-polls` allow deterministic runs in tests and scheduled jobs.
 
 ## Testing
 
-Run only the task-specific tests for this issue (do not run full project suites):
+Run the unit tests for the alert poller:
 
 ```powershell
 uv run pytest on-call-engineer/tests

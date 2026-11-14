@@ -11,9 +11,11 @@ import argparse
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any, Callable, Mapping, Sequence
 from urllib import error, parse, request
@@ -24,7 +26,6 @@ Alert = dict[str, Any]
 FetchAlerts = Callable[[str, float, Mapping[str, str]], list[Alert] | dict[str, Any]]
 InvokeAgent = Callable[[Alert, "Config"], Any]
 SleepFn = Callable[[float], None]
-NowFn = Callable[[], float]
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -82,9 +83,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--agent-command",
         default=os.getenv("AGENT_COMMAND", ""),
         help=(
-            "Command template to invoke for each firing alert. Supports {alert_json} and "
-            "{alert_file}. If omitted, alert details are logged (env: AGENT_COMMAND)."
+            "Command template to invoke for each firing alert. Parsed with shlex.split and "
+            "executed with shell=False; supports {alert_json} and {alert_file}. "
+            "If omitted, alert details are logged (env: AGENT_COMMAND)."
         ),
+    )
+    parser.add_argument(
+        "--agent-timeout",
+        type=float,
+        default=_env_float("AGENT_TIMEOUT_SECONDS", 300.0),
+        help="Agent subprocess timeout in seconds; 0 disables timeout (env: AGENT_TIMEOUT_SECONDS, default: 300).",
     )
     parser.add_argument(
         "--once",
@@ -115,6 +123,7 @@ class Config:
         agent_command: str = "",
         once: bool = False,
         max_polls: int = 0,
+        agent_timeout: float = 300.0,
     ) -> None:
         self.alert_url = alert_url
         self.interval = max(0.0, float(interval))
@@ -122,6 +131,7 @@ class Config:
         self.agent_command = agent_command
         self.once = once
         self.max_polls = int(max_polls)
+        self.agent_timeout = max(0.0, float(agent_timeout))
 
 
 def build_config(args: argparse.Namespace | None = None) -> Config:
@@ -133,19 +143,23 @@ def build_config(args: argparse.Namespace | None = None) -> Config:
         agent_command=args.agent_command,
         once=args.once,
         max_polls=args.max_polls,
+        agent_timeout=args.agent_timeout,
     )
 
 
 def fetch_alerts(url: str, timeout: float, headers: Mapping[str, str] | None = None) -> list[Alert] | dict[str, Any]:
-    """Fetch alert payload from an HTTP endpoint returning JSON.
+    """Fetch alert payload from an HTTP/HTTPS endpoint returning JSON.
 
-    Network and decode errors are raised so callers can handle them gracefully.
+    Network, validation, and decode errors are raised so callers can handle them gracefully.
     """
+    parsed = parse.urlsplit(url)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"Unsupported alert URL (expected http/https URL): {url!r}")
     req_headers = {"Accept": "application/json"}
     if headers:
         req_headers.update(headers)
     req = request.Request(url, headers=req_headers, method="GET")
-    with request.urlopen(req, timeout=timeout) as response:  # nosec - URL is operator-configured
+    with request.urlopen(req, timeout=timeout) as response:
         charset = response.headers.get_content_charset() or "utf-8"
         body = response.read().decode(charset)
     if not body.strip():
@@ -160,6 +174,10 @@ def _as_alert_list(payload: Any) -> list[Alert]:
         return [item for item in payload if isinstance(item, dict)]
     if not isinstance(payload, dict):
         return []
+    if isinstance(payload.get("status"), str) and payload["status"].lower() == "error":
+        error_type = payload.get("errorType") or "unknown"
+        error_msg = payload.get("error") or "unknown error"
+        raise ValueError(f"Alert API returned error status ({error_type}): {error_msg}")
     # Prometheus: {"status":"success","data":{"alerts":[...]}}
     data = payload.get("data")
     if isinstance(data, dict):
@@ -177,8 +195,7 @@ def _as_alert_list(payload: Any) -> list[Alert]:
                     for alert in rule.get("alerts", []) if isinstance(rule.get("alerts"), list) else []:
                         if isinstance(alert, dict):
                             alerts.append({**alert, "rule": rule.get("name", alert.get("rule"))})
-            if alerts:
-                return alerts
+            return alerts
     # Alertmanager/Grafana/common: {"alerts":[...]}, {"instances":[...]}, {"items":[...]}
     for key in ("alerts", "instances", "items"):
         if isinstance(payload.get(key), list):
@@ -247,36 +264,109 @@ def extract_active_alerts(payload: list[Alert] | dict[str, Any]) -> list[Alert]:
     return active
 
 
+def _render_command_argv(
+    tokens: Sequence[str],
+    *,
+    alert_json: str,
+    alert_file: str | None = None,
+) -> list[str]:
+    replacements = {"{alert_json}": alert_json}
+    if alert_file is not None:
+        replacements["{alert_file}"] = alert_file
+    pattern = re.compile("|".join(re.escape(key) for key in replacements))
+    return [pattern.sub(lambda match: replacements[match.group(0)], token) for token in tokens]
+
+
 def default_agent_invoker(alert: Alert, config: Config) -> subprocess.CompletedProcess[str] | None:
     """Invoke a headless coding agent runner for a firing alert.
 
-    If `config.agent_command` is set, it is executed as a shell-quoted command template
-    with `{alert_json}` substituted. Without a command, the alert is logged so the
-    polling service remains safe to run in dry environments.
+    If `config.agent_command` is set, it is split with `shlex.split` and executed with
+    `shell=False`, substituting `{alert_json}` and `{alert_file}` safely per token.
+    Without a command, the alert is logged so the polling service stays safe in dry runs.
     """
     alert_json = json.dumps(alert, sort_keys=True)
-    if not config.agent_command:
+    if not config.agent_command or not config.agent_command.strip():
         logger.warning(
             "Firing alert detected but no AGENT_COMMAND configured: %s",
             json.dumps({k: v for k, v in alert.items() if k != "raw"}, sort_keys=True),
         )
         return None
 
-    rendered = config.agent_command.format(alert_json=shlex.quote(alert_json))
+    tokens = shlex.split(config.agent_command)
+    if not tokens:
+        logger.warning(
+            "Firing alert detected but AGENT_COMMAND produced no tokens: %s",
+            json.dumps({k: v for k, v in alert.items() if k != "raw"}, sort_keys=True),
+        )
+        return None
+
+    uses_alert_file = any("{alert_file}" in token for token in tokens)
+    alert_file_path: str | None = None
+    timeout = config.agent_timeout if config.agent_timeout > 0 else None
+
     logger.info("Invoking agent for alert %s", alert.get("name"))
     try:
-        # shell=True is intentional here: operators provide the command template (env/CLI)
-        # and alert payload is shell-quoted. This enables flexible runner invocations.
-        return subprocess.run(  # noqa: S602
-            rendered,
-            shell=True,
+        if uses_alert_file:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".json",
+                encoding="utf-8",
+                delete=False,
+            ) as tmp:
+                tmp.write(alert_json)
+                alert_file_path = tmp.name
+
+        argv = _render_command_argv(tokens, alert_json=alert_json, alert_file=alert_file_path)
+        result = subprocess.run(
+            argv,
+            shell=False,
             check=False,
             capture_output=True,
             text=True,
+            timeout=timeout,
         )
+    except subprocess.TimeoutExpired as exc:
+        logger.error("Agent command timed out after %ss for alert %s", exc.timeout, alert.get("name"))
+        raise
     except OSError as exc:
         logger.exception("Failed to invoke agent command for alert %s: %s", alert.get("name"), exc)
-        return None
+        raise
+    finally:
+        if alert_file_path is not None:
+            try:
+                os.unlink(alert_file_path)
+            except FileNotFoundError:
+                pass
+
+    if result.returncode != 0:
+        logger.error(
+            "Agent command failed for alert %s with exit code %s; stdout=%r stderr=%r",
+            alert.get("name"),
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            argv,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    return result
+
+
+def _alert_dedupe_key(alert: Alert) -> str:
+    return str(
+        alert.get("fingerprint")
+        or json.dumps(
+            {
+                "name": alert.get("name"),
+                "labels": alert.get("labels", {}),
+                "starts_at": alert.get("starts_at"),
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def poll_once(
@@ -289,6 +379,7 @@ def poll_once(
     """Run one poll cycle. Returns alerts that were handled/invoked."""
     try:
         payload = fetcher(config.alert_url, config.timeout, {})
+        active_alerts = extract_active_alerts(payload)
     except (error.URLError, error.HTTPError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
         logger.error("Alert poll failed (%s): %s", config.alert_url, exc)
         return []
@@ -296,23 +387,20 @@ def poll_once(
         logger.exception("Unexpected error while polling alerts")
         return []
 
-    active_alerts = extract_active_alerts(payload)
+    if dedupe is not None:
+        active_keys = {_alert_dedupe_key(alert) for alert in active_alerts}
+        dedupe.intersection_update(active_keys)
+
     if not active_alerts:
         logger.info("No active/firing alerts")
         return []
 
     handled: list[Alert] = []
     for alert in active_alerts:
-        key = str(alert.get("fingerprint") or json.dumps({
-            "name": alert.get("name"),
-            "labels": alert.get("labels", {}),
-            "starts_at": alert.get("starts_at"),
-        }, sort_keys=True))
-        if dedupe is not None:
-            if key in dedupe:
-                logger.debug("Skipping already-handled alert %s", alert.get("name"))
-                continue
-            dedupe.add(key)
+        key = _alert_dedupe_key(alert)
+        if dedupe is not None and key in dedupe:
+            logger.debug("Skipping already-handled alert %s", alert.get("name"))
+            continue
         logger.info(
             "Active alert: name=%s severity=%s service=%s environment=%s",
             alert.get("name"),
@@ -325,6 +413,8 @@ def poll_once(
         except Exception:
             logger.exception("Agent invocation failed for alert %s", alert.get("name"))
             continue
+        if dedupe is not None:
+            dedupe.add(key)
         handled.append(alert)
     return handled
 
@@ -335,7 +425,6 @@ def run_loop(
     fetcher: FetchAlerts = fetch_alerts,
     invoker: InvokeAgent = default_agent_invoker,
     sleep_fn: SleepFn = time.sleep,
-    now_fn: NowFn = time.monotonic,
 ) -> int:
     """Poll continuously until once/max-polls/interrupt. Returns poll count."""
     dedupe: set[str] = set()
