@@ -10,17 +10,21 @@ Complete directory layout and module organization for Agrivanta.
 agrivanta/
 ├── backend/                    # Django REST API
 ├── frontend/                   # React + TypeScript SPA
-├── docs/                       # Documentation
+├── docs/                       # Product and engineering documentation
 ├── custom-agent/               # Headless PM/Engineer/QA orchestrator
 ├── mcp-server/                 # Read-only backlog + issues MCP server
-├── .agents/                    # Portable agent definitions
-├── .opencode/                  # OpenCode configuration
+├── .agents/                    # Portable agent and skill definitions
+├── .github/workflows/          # GitHub Actions CI workflows
+├── .opencode/                  # OpenCode agents, plugins, and local runtime files
+├── _docs/                      # Product plan, backlog, and agent workflow rules
 ├── docker-compose.yml          # Development stack
+├── docker-compose.ci.yml       # CI Compose overrides
 ├── docker-compose.prod.yml     # Production-like stack
 ├── .env.dev.example            # Dev environment template
 ├── .env.prod.example           # Prod environment template
+├── opencode.json               # OpenCode config: permissions, MCP, instructions
 ├── AGENTS.md                   # Agent workflow rules
-└── README.md
+└── README.md                   # Project overview and documentation index
 ```
 
 ---
@@ -290,6 +294,7 @@ docs/
 ├── getting-started.md          # Local setup, Docker, first login
 ├── architecture.md             # System design, data flows, infra
 ├── api-reference.md            # Complete REST API reference
+├── ci-cd.md                    # CI pipeline, CD guidance, cloud deployment options
 ├── deployment.md               # Production deployment guide
 ├── development.md              # Coding standards, workflow, testing
 ├── configuration.md            # Environment variables reference
@@ -306,13 +311,7 @@ docs/
 ```
 custom-agent/
 ├── agent.py                    # Headless orchestrator entry point
-├── pm.py                       # Product Manager subagent
-├── engineer.py                 # Software Engineer subagent
-├── qa.py                       # QA Engineer subagent
-├── reviewer.py                 # Code Reviewer subagent
-├── state.py                    # Issue lifecycle state machine
-├── github.py                   # GitHub API wrapper
-└── requirements.txt
+└── README.md                   # Usage, requirements, and safety notes
 ```
 
 ### MCP Server (`mcp-server/`)
@@ -320,35 +319,38 @@ custom-agent/
 ```
 mcp-server/
 ├── server.py                   # FastMCP server entry point
-├── backlog.py                  # Task.md parsing
-├── issues.py                   # GitHub issues listing
-└── requirements.txt
+└── README.md                   # Tool reference and local run instructions
 ```
 
 ### Agent Definitions (`.agents/`)
 
 ```
 .agents/
-├── skills/                     # Portable skills
-│   ├── groom-issue/
-│   ├── implement-issue/
-│   └── review-pr/
-├── subagents/                  # Subagent definitions
+├── agents/                     # Portable agent role definitions
+│   ├── code-reviewer.md
 │   ├── pm.md
-│   ├── engineer.md
-│   ├── qa.md
-│   └── reviewer.md
-└── index.json                  # Registry
+│   ├── qa-engineer.md
+│   └── software-engineer.md
+└── skills/                     # Portable skills
+    ├── groom-issue/
+    │   └── SKILL.md
+    ├── implement-issue/
+    │   └── SKILL.md
+    └── review-pr/
+        └── SKILL.md
 ```
 
 ### OpenCode Config (`.opencode/`)
 
 ```
 .opencode/
-├── opencode.json               # Main config
-├── plugins/
-│   └── guardrails.js           # Command allow/deny
-└── agents/                     # OpenCode-specific agents
+├── agent/                      # OpenCode-specific agent wrappers
+│   ├── code-reviewer.md
+│   ├── pm.md
+│   ├── qa-engineer.md
+│   └── software-engineer.md
+└── plugins/
+    └── guardrails.js           # Command allow/deny logging and enforcement
 ```
 
 ---
