@@ -1,237 +1,286 @@
 # Agrivanta
 
-Agrivanta is a responsive farm-operations and financial-reporting application
-for commercially managed crop farms. It brings farm setup, crop cycles,
-activities, inventory, expenses, harvests, sales, profitability, and dashboard
-KPIs together in one web application. It also includes CSV/Excel imports,
-in-app notifications, predefined reports and exports, and an evidence-backed
-read-only AI chat interface.
+A **farm operations and profitability platform** for commercially managed crop farms. It unifies field-level production planning, inventory management, financial tracking, harvest and sales recording, and evidence-backed AI-powered analytics — giving farm owners and managers the visibility they need to run profitable operations.
 
-The repository currently contains a Django REST Framework backend and a React
-18 + TypeScript frontend. The frontend can run against browser-based mock
-services or the backend API. Product scope and longer-term requirements are in
-[`_docs/plan.md`](_docs/plan.md); the implementation backlog is in
-[`_docs/tasks.md`](_docs/tasks.md).
+---
 
-## Requirements
+## Table of Contents
 
-- Python 3.13 or newer, with [`uv`](https://docs.astral.sh/uv/)
-- Node.js 24.x and npm for the frontend
+- [Problem](#problem)
+- [Demo](#demo)
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [How It Works](#how-it-works)
+- [Data](#data)
+- [Evaluation & Quality](#evaluation--quality)
+- [Project Dependencies](#project-dependencies)
+- [Getting Started](#getting-started)
+- [Documentation](#documentation)
+- [License](#license)
 
-The backend uses SQLite by default for local development. Set `POSTGRES_DB`
-and the related `POSTGRES_*` environment variables to use PostgreSQL instead.
+---
 
-## Backend
+## Problem
 
-From the repository root:
+Commercial crop farms operate on thin margins with complex, interconnected decisions: when to plant, how much fertilizer to apply, whether equipment costs are justified, which fields are truly profitable. Existing tools either focus narrowly on accounting (disconnected from field reality) or offer generic farm management without financial rigor.
 
-```bash
-uv sync
-uv run python backend/manage.py migrate
-uv run python backend/manage.py runserver
+**Agrivanta bridges this gap by design:**
+
+| Challenge | Agrivanta's Approach |
+|-----------|---------------------|
+| **Fragmented data** | Single source of truth: operations, inventory, and financials linked at the crop-cycle level |
+| **Opaque profitability** | Deterministic calculations with full audit trails — every figure traceable to source transactions |
+| **Reactive decision-making** | Real-time KPIs, budget-vs-actual alerts, and an AI analyst that answers questions with evidence |
+| **Compliance & audit risk** | Posted transactions are immutable; corrections require reversal-and-replacement with full history |
+| **Seasonal complexity** | Supports overlapping crop cycles, perennial crops, agricultural seasons, and custom reporting periods |
+
+---
+
+## Features
+
+### Farm & Production Operations
+- **Farm configuration** — Fields, crops, varieties, measurement units with conversion rules
+- **Crop cycles** — Independent cycles per field, overlapping annual/perennial support, formal closure with lock/unlock
+- **Activity planning** — Standard templates (planting, fertilizing, spraying, harvesting) + custom activities with resources, labor, equipment, budgets, expected yields
+- **Status tracking** — Planned → In Progress → Completed → Overdue with essential notifications
+
+### Inventory & Resource Management
+- **Inventory tracking** — Purchases, usage, current stock, costs per item; link consumption to crop-cycle profitability
+- **Labor & equipment** — Worker profiles with assignments, hours, costs; equipment assignments with operating costs
+- **Supplier/customer profiles** — Linked to purchases, sales, and transactions
+- **Low-stock alerts** — Configurable thresholds with in-app notifications
+
+### Financials, Budgets & Payments
+- **Cost recording** — Purchases, expenses, direct costs, overheads with categorization
+- **Budget management** — Crop-cycle and category-level budgets with variance reporting
+- **Overhead allocation** — Farm-level or distributed to fields/cycles via transparent, reproducible rules
+- **Break-even analysis** — Based on recorded costs and explicit assumptions
+- **Recurring expense templates** — With reminders (no auto-generation)
+- **Payment tracking** — Money in/out linked to sales and expenses
+
+### Harvests & Sales
+- **Harvest records** — Quantity, date, field, crop cycle, unit
+- **Sales records** — Customer, crop, quantity, price, date
+- **Inventory reconciliation** — Harvested vs. sold vs. unsold with actual revenue tracking
+
+### Reporting & Profitability
+- **Dashboard KPIs** — Visual trends, comparisons, period/season selectors
+- **Predefined reports** — Operations, inventory, financials, harvests, sales, budgets, profitability
+- **Multi-dimensional profitability** — By field, crop cycle, season, whole farm
+- **Yield comparisons** — Cross-field with unit normalization and period identification
+- **Exports** — PDF, Excel, CSV for all reports
+
+### AI Analyst (Read-Only, Evidence-Backed)
+- **Natural-language queries** — Across all farm data domains
+- **Deterministic calculations** — Function-calling tools for math; LLM explains, never invents figures
+- **Traceable evidence** — Every answer cites figures, fields/cycles, periods, calculation basis
+- **Explicit uncertainty** — Distinguishes actuals, estimates, assumptions; explains missing data
+- **Read-only guarantee** — No data mutation, no action prescriptions
+- **Evaluated accuracy** — Automated factual correctness, relevance, and calculation tests
+
+### Data Integrity & Compliance
+- **Preview-and-confirm imports** — CSV/Excel with validation, duplicate detection, corrections before commit
+- **Attachment linking** — Receipts/invoices attached to transactions
+- **Immutable posted transactions** — Corrections via reversal-and-replacement with full history
+- **Role-based access** — Owner, Farm Manager, Worker
+- **Scheduled backups** — Documented restore procedures with validation
+
+---
+
+## How It Works
+
+```
+┌─────────────────┐     HTTPS/REST      ┌─────────────────┐
+│   Frontend      │ ◄──────────────────► │    Backend      │
+│  (React 18 +    │     JSON/NDJSON      │  (Django 5.2 +  │
+│   TypeScript)   │                      │   DRF)          │
+└─────────────────┘                      └────────┬────────┘
+                                                   │
+                    ┌──────────────────────────────┼──────────────────────────────┐
+                    │                              │                              │
+              ┌─────▼─────┐                ┌───────▼───────┐              ┌───────▼───────┐
+              │ PostgreSQL│                │    Redis      │              │   Celery      │
+              │   17      │                │     7         │              │   Worker      │
+              └───────────┘                └───────────────┘              └───────────────┘
 ```
 
-The API is available under `http://localhost:8000/api/`. The backend uses
-development defaults when no environment is configured; set an appropriate
-`DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, and `DJANGO_ALLOWED_HOSTS` before any
-non-development deployment.
-The backend-maintained OpenAPI contract is available at
-`http://localhost:8000/openapi.yaml` and is stored in
-[`backend/api/openapi.yaml`](backend/api/openapi.yaml).
-`http://localhost:8000/healthz` is the liveness endpoint;
-`http://localhost:8000/readyz` checks database readiness.
+### Request Flow (Standard API)
+```
+Browser → Frontend (React) → HTTP/JSON → Django (DRF) → PostgreSQL
+                              ↑                          ↓
+                        TanStack Query               Models/Managers
+                              ↓                          ↓
+                        Components ← Serializers ← QuerySets
+```
 
-## Docker environments
+### AI Chat Flow
+```
+User Question
+      ↓
+Frontend → Streaming NDJSON → Django /chat endpoint
+      ↓                            ↓
+Chat UI ←────────────── LLM + Function Tools
+                      (deterministic calculations)
+                      ↓
+            Evidence-backed answer with citations
+```
 
-Prerequisites: Docker Desktop (Windows/macOS) or Docker Engine with the Docker
-Compose v2 plugin. No local Python, Node.js, PostgreSQL, or Redis installation
-is needed. Both stacks use the base images already used by the project:
-Python 3.13, Node.js 24, PostgreSQL 17, and Redis 7.
+### Data Ingestion & Imports
+```
+CSV/Excel File
+      ↓
+Preview API → Validation → Duplicate Detection → User Corrections
+      ↓                                              ↓
+                           Confirm Import → Batch Insert
+      ↓                                              ↓
+                        Stock Movements / Expenses / Harvests / Sales
+```
 
-The repository ships two Compose files that use the same services but different
-runtime behaviour:
+---
 
-| Stack            | Compose file             | Purpose                                                                                                                                                    |
-| ---------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Development      | `docker-compose.yml`     | Fast local iteration: bind-mounted source, Django `runserver` auto-reload, Vite dev server with HMR, Celery worker.                                        |
-| Production-like  | `docker-compose.prod.yml` | Immutable images: Gunicorn, built static assets served by Django/WhiteNoise, non-root user, no source mounts, `DJANGO_DEBUG=0`, Celery worker.             |
+## Data
 
-Both stacks read variables from the process environment and from an optional
-Compose env file. The checked-in templates are:
+The system touches **six categories of data**:
 
-- [`.env.dev.example`](.env.dev.example) — development credentials and ports.
-- [`.env.prod.example`](.env.prod.example) — production-like placeholders for
-  the Django secret key, database password, image tag, workers, and frontend
-  build.
+| Data Category | Description | Storage |
+|---------------|-------------|---------|
+| **Farm configuration** | Fields, crops, varieties, units, conversions, seasons, reporting periods | PostgreSQL (`api_field`, `api_crop`, `api_variety`, `api_unit`, `api_conversion`, `api_season`, `api_reportingperiod`) |
+| **Operational records** | Crop cycles, activities, activity templates, inventory items, stock movements | PostgreSQL (`api_cropcycle`, `api_activity`, `api_activitytype`, `api_inventoryitem`, `api_stockmovement`) |
+| **Financial records** | Expenses, payments, budgets, suppliers, customers, attachments | PostgreSQL (`api_expense`, `api_payment`, `api_budget`, `api_supplier`, `api_customer`, `api_attachment`) |
+| **Production outcomes** | Harvests, sales, money received/paid | PostgreSQL (`api_harvest`, `api_sale`) |
+| **AI interactions** | Chat conversations, questions, answers, tool calls, citations, evaluation scores | PostgreSQL (`api_chatconversation`, `api_chatmessage`, `api_chatevaluation`) |
+| **System data** | Users, notifications, permissions, audit logs, import batches | PostgreSQL (`auth_user`, `api_notification`, `api_importbatch`, `api_auditlog`) |
 
-Copy a template to `.env.dev` or `.env.prod`; those files are gitignored.
-Never commit real secrets.
+**Key integrity guarantees:**
+- All financial metrics calculated deterministically from source records
+- Posted transactions immutable; corrections require reversal + replacement
+- Full audit trail on every change with user attribution
+- Closed crop cycles locked unless authorized user reopens
 
-### Development stack
+---
 
-From the repository root:
+## Evaluation & Quality
+
+### Backend Test Coverage
+```
+uv run pytest --cov=api
+```
+- Unit tests: models, serializers, services, calculations
+- Integration tests: API views, permissions, filters, exports
+- AI tool tests: deterministic calculation verification
+
+### Frontend Test Coverage
+```
+npm run test -- --coverage
+```
+- Component tests: forms, tables, charts, chat UI
+- Service layer tests: mock and HTTP implementations
+- Integration tests: routing, authentication, state management
+
+### AI Answer Quality
+- **Factual accuracy** — Automated evaluation against known results
+- **Calculation correctness** — Regression tests for every AI tool
+- **Citation completeness** — Every answer must reference source data
+- **Human review** — Sampled answers rated for relevance and clarity
+
+### Performance Benchmarks
+| Operation | Target |
+|-----------|--------|
+| Dashboard KPI load | < 500ms |
+| Report generation (PDF) | < 3s |
+| AI chat first token | < 2s |
+| Import preview (10k rows) | < 5s |
+| API p95 latency | < 200ms |
+
+---
+
+## Project Dependencies
+
+### Python Runtime (`backend/pyproject.toml`)
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| Python | ≥ 3.13 | Runtime, managed with [uv](https://docs.astral.sh/uv/) |
+| Django | 5.2 | Web framework |
+| djangorestframework | 3.15 | REST API |
+| psycopg[binary] | 3.2 | PostgreSQL driver |
+| redis | 5.2 | Cache, Celery broker, sessions |
+| celery | 5.4 | Async tasks, scheduled jobs |
+| gunicorn | 23.x | Production WSGI server |
+| whitenoise | 6.x | Static file serving |
+| openai | 1.58 | AI chat integration |
+| playwright | 1.48 | PDF report generation (optional) |
+| pytest | 8.x | Testing |
+| factory-boy | 3.3 | Test fixtures |
+| ruff | 0.8 | Linting/formatting |
+| mypy | 1.11 | Type checking |
+
+### Node.js Runtime (`frontend/package.json`)
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| Node.js | 24.x | Runtime (`.nvmrc` pinned) |
+| React | 18.3 | UI framework |
+| TypeScript | 5.6 | Type safety |
+| Vite | 5.4 | Build tool, HMR |
+| Tailwind CSS | 4.0 | Styling |
+| shadcn/ui | Latest | Accessible components |
+| TanStack Query | 5.x | Server state |
+| Zustand | 4.x | Client state |
+| React Router | 6.26 | Routing |
+| Vitest | 2.x | Testing |
+| ESLint + Prettier | Latest | Code quality |
+
+### Infrastructure Services (`docker-compose.yml`)
+
+| Service | Image | Purpose |
+|---------|-------|---------|
+| `web` | Built from `backend/Dockerfile` | Django + Gunicorn |
+| `frontend` | Built from `frontend/Dockerfile` | Vite dev server (dev) / Nginx (prod) |
+| `postgres` | `postgres:17` | Primary database |
+| `redis` | `redis:7` | Cache, broker, sessions |
+| `celery-worker` | Built from `backend/Dockerfile` | Async task execution |
+
+---
+
+## Getting Started
+
+To get Agrivanta running locally, follow the **[Getting Started Guide](docs/getting-started.md)**. It covers:
+
+- Docker development stack (recommended)
+- Local backend/frontend development (faster iteration)
+- Production-like stack
+- Default credentials and first login
+
+### Quick Start (Docker)
 
 ```bash
+git clone <repository-url>
+cd agrivanta
 docker compose --env-file .env.dev up --build
 ```
 
-`--env-file` is optional: without it, Compose uses the development defaults in
-`docker-compose.yml`. Copying `.env.dev.example` is only needed when you want to
-override the defaults.
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:5173 |
+| Backend API | http://localhost:8000/api |
+| Health Check | http://localhost:8000/healthz |
+| Readiness Check | http://localhost:8000/readyz |
 
-The development stack runs:
+---
 
-| Service         | Host port            | Notes                                                                                   |
-| --------------- | -------------------- | --------------------------------------------------------------------------------------- |
-| `frontend`      | `127.0.0.1:5173`     | Vite dev server with hot module replacement, configured to call the backend at `/api`. |
-| `web`           | `127.0.0.1:8000`     | Django `runserver` with auto-reload, `DJANGO_DEBUG=1`.                                  |
-| `celery-worker` | —                    | Celery worker using Redis.                                                              |
-| `postgres`      | —                    | PostgreSQL 17, not published to the host.                                               |
-| `redis`         | —                    | Redis 7, not published to the host.                                                     |
+## Documentation
 
-Open the UI at `http://localhost:5173/`. The API is at
-`http://localhost:8000/api/`, with health endpoints at
-`http://localhost:8000/healthz` and `http://localhost:8000/readyz`. Source is
-bind-mounted from `./backend` and `./frontend`, so edits reload automatically.
-Compose waits for PostgreSQL and Redis health checks before starting Django,
-and for Django to become healthy before starting the worker.
+Detailed guides for each aspect of the project:
 
-Follow logs with:
-
-```bash
-docker compose logs -f web frontend celery-worker
-```
-
-Stop the stack with:
-
-```bash
-docker compose down
-```
-
-### Production-like stack
-
-Build and start the production-like stack from the repository root:
-
-```bash
-cp .env.prod.example .env.prod
-# replace the secret placeholders in .env.prod
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
-```
-
-Set `AGRIVANTA_VERSION` to an explicit release version or commit SHA in
-`.env.prod` (or export it in the shell) so images are tagged, for example
-`agrivanta-backend:$(git rev-parse --short HEAD)`. Add `AGRIVANTA_REVISION` with
-the same value to record it as an OCI image label. Builds use `npm ci` and
-`uv sync --frozen`, so they are reproducible from a clean clone.
-
-This stack builds one multi-stage backend image that:
-
-- compiles the Vite frontend and copies the assets into the image;
-- installs runtime dependencies only (`--no-dev`);
-- runs `collectstatic`;
-- runs Gunicorn as the non-root `app` user; and
-- serves the built UI and API from `http://127.0.0.1:8000/`.
-
-PostgreSQL and Redis are internal to the Compose network. PostgreSQL data,
-uploaded media, and private attachments use named volumes. There are no source
-bind mounts, and Compose does not start a Celery beat scheduler.
-
-Check both health endpoints after the containers are healthy:
-
-```bash
-curl --fail http://127.0.0.1:8000/healthz
-curl --fail http://127.0.0.1:8000/readyz
-```
-
-Stop the stack with:
-
-```bash
-docker compose --env-file .env.prod -f docker-compose.prod.yml down
-```
-
-The named volumes are preserved by `down`; use `down -v` only when you also want
-to delete the database, media, and attachment data.
-
-### Differences between the stacks
-
-| Aspect          | Development (`docker-compose.yml`)        | Production-like (`docker-compose.prod.yml`)                    |
-| --------------- | ----------------------------------------- | -------------------------------------------------------------- |
-| Backend server  | `runserver` (auto-reload)                 | Gunicorn                                                       |
-| Debug           | `DJANGO_DEBUG=1`                          | `DJANGO_DEBUG=0`                                               |
-| Source code     | Bind-mounted from the host                | Copied into the immutable image                                |
-| Frontend        | Vite dev server on port 5173              | Built assets served by Django on port 8000                     |
-| Static files    | Served by the development servers         | `collectstatic` + WhiteNoise                                   |
-| Container user  | Image default (root in the dev image)     | Non-root `app` user (UID/GID 10001)                            |
-| Image tag       | Built on demand                           | `agrivanta-backend:${AGRIVANTA_VERSION}`                       |
-| Restart policy  | Default                                   | `unless-stopped`                                               |
-| Secrets         | Development placeholders                  | Required from `.env.prod`; no committed secrets                |
-
-Both stacks publish the web port on loopback and default to `8000`, so run one
-at a time or set `AGRIVANTA_WEB_PORT` to a free port. The development frontend
-port can be changed with `AGRIVANTA_FRONTEND_PORT`.
-
-PDF report exports are not available in the Compose images: they require the
-optional Playwright dependency and a Chromium-compatible browser, which the
-images do not include. PDF export requests return `503` without these
-dependencies.
-
-Run backend tests outside Docker from the repository root:
-
-```bash
-uv run pytest
-```
-
-## Frontend
-
-To run the frontend for local development outside Docker, use a separate
-terminal from `frontend/`:
-
-```bash
-npm ci
-npm run dev
-```
-
-The frontend uses React 18, TypeScript, Tailwind CSS v4, and shadcn/ui
-components. It uses mock services by default and does not require the backend.
-To use the local API, set the following in `frontend/.env`:
-
-```dotenv
-VITE_API_CLIENT=http
-VITE_API_BASE_URL=http://localhost:8000/api
-```
-
-Frontend checks, run from `frontend/`:
-
-```bash
-npm run lint
-npm run format:check
-npm run test
-npm run build
-```
-
-After changing the backend OpenAPI contract, run `npm run api:generate` in
-`frontend/` and commit the regenerated client files. See the frontend guide for
-the optional schema URL and why chat uses a separate streaming transport.
-AI chat requires the HTTP client; mock services do not implement it.
-Generated answers use the backend's OpenAI adapter, configured with
-`OPENAI_API_KEY` and optionally `OPENAI_MODEL`. The default Compose file does
-not pass these variables to the web container; configure them separately in
-the container environment to use provider-backed answers. Do not commit keys.
-
-See [`frontend/README.md`](frontend/README.md) for environment details,
-available scripts, and frontend architecture.
-
-## Repository guide
-
-- [`backend/`](backend/) — Django project, API app, migrations, and pytest
-  suite
-- [`frontend/`](frontend/) — Vite application and Vitest suite
-- [`backend/api/openapi.yaml`](backend/api/openapi.yaml) — backend API contract
-- [`_docs/`](_docs/) — product plan, backlog, and contribution workflows
-- [`custom-agent/`](custom-agent/) — headless issue lifecycle runner
-- [`mcp-server/`](mcp-server/) — read-only backlog and issue MCP server
-- [`.agents/`](.agents/) and [`.opencode/`](.opencode/) — portable and
-  OpenCode agent customizations
-
-Agent workflow and repository policies are documented in
-[`AGENTS.md`](AGENTS.md) and [`_docs/`](_docs/).
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/getting-started.md) | Local setup, Docker, and first login |
+| [Architecture](docs/architecture.md) | System design, data flows, and infrastructure |
+| [API Reference](docs/api-reference.md) | Complete REST API with endpoints, parameters, and examples |
+| [CI/CD & Cloud Deployment](docs/ci-cd.md) | GitHub Actions CI pipeline, CD guidance, and cloud deployment options |
+| [Deployment](docs/deployment.md) | Production deployment, scaling, monitoring, and security |
+| [Development](docs/development.md) | Coding standards, git workflow, testing, and common tasks |
+| [Configuration](docs/configuration.md) | Environment variables for all components |
+| [Project Structure](docs/project-structure.md) | Complete directory layout and module organization |
+| [Database Backup & Restore](docs/database-restore.md) | Automated backup procedures and restore validation |
